@@ -139,7 +139,11 @@ export function BloodTable({ view }: { view: BloodView }) {
   const isHost = view.hostId === net.playerId;
 
   const offsetRef = useRef(0);
-  offsetRef.current = view.serverTime - Date.now();
+  // 只在收到新视图（携带新的服务器时间）时校准时钟偏移。
+  // 不能在每次渲染时计算：点击界面等重渲染会用“过期视图时间”污染偏移，导致倒计时跳变。
+  useEffect(() => {
+    offsetRef.current = view.serverTime - Date.now();
+  }, [view]);
 
   const [selSetup, setSelSetup] = useState<string[]>([]);
   const [selSwap, setSelSwap] = useState<string[]>([]);
