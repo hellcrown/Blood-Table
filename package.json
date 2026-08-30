@@ -1,0 +1,19 @@
+{
+  "name": "blood-table",
+  "private": true,
+  "version": "0.1.0",
+  "description": "血色牌局 · 2-4 人联机德州扑克（第一期：德扑骨架）",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev -w server\" \"npm:dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "test": "npm run test -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
