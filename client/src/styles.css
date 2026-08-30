@@ -1330,39 +1330,6 @@ select:focus {
 
 /* ---------- 血色模式 v2：左记录列 + 竖屏牌桌 ---------- */
 
-@media (max-width: 900px) {
-  /* 记录列改为左侧抽屉：默认滑出屏幕，点箭头滑入（覆盖层，不挤压牌桌） */
-  .blood-side,
-  .blood-side:not(.open) {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 55;
-    width: min(80vw, 300px);
-    padding: 12px;
-    border-right: 1px solid var(--line);
-    transform: translateX(-102%);
-    transition: transform 0.25s ease;
-    box-shadow: 14px 0 34px rgba(0, 0, 0, 0.55);
-    background: #17110d;
-  }
-
-  .blood-side.open {
-    transform: none;
-  }
-
-  .blood-side-toggle.open {
-    left: min(80vw, 300px);
-  }
-}
-
-.blood-shell {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-
 .blood-side {
   width: 300px;
   flex-shrink: 0;
@@ -3003,3 +2970,38 @@ select:focus {
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+/* ===== 记录抽屉移动端样式（置于文件末尾，确保覆盖基础规则） ===== */
+@media (max-width: 900px) {
+  /* 记录列改为左侧抽屉：默认滑出屏幕，点箭头滑入（覆盖层，不挤压牌桌） */
+  .blood-side,
+  .blood-side:not(.open) {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 55;
+    width: min(80vw, 300px);
+    padding: 12px;
+    border-right: 1px solid var(--line);
+    transform: translateX(-102%);
+    transition: transform 0.25s ease;
+    box-shadow: 14px 0 34px rgba(0, 0, 0, 0.55);
+    background: #1a130e; /* 不透明背景：保证记录文字清晰 */
+  }
+
+  .blood-side.open {
+    transform: none;
+  }
+
+  .blood-side-toggle.open {
+    left: min(80vw, 300px);
+  }
+}
+
+.blood-shell {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
