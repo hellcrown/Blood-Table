@@ -2843,3 +2843,93 @@ select:focus {
   accent-color: #d8a94e;
   cursor: pointer;
 }
+
+/* ---------- 管理员入口 / 面板 ---------- */
+
+.admin-link {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.admin-link:hover {
+  color: rgba(255, 224, 160, 0.8);
+}
+
+.admin-panel {
+  width: min(560px, 92vw);
+}
+
+.admin-login-row {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.admin-login-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+}
+
+.admin-error {
+  color: #ff9a8a;
+  font-size: 13px;
+  margin: 6px 0;
+}
+
+.admin-rooms {
+  max-height: 300px;
+  overflow: auto;
+  margin: 8px 0;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.admin-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.btn.danger {
+  background: linear-gradient(180deg, #8a2f24, #6b2019);
+  border-color: rgba(255, 130, 110, 0.5);
+  color: #ffd9d0;
+}
+
+.btn.danger:hover {
+  filter: brightness(1.15);
+}
+
+.admin-close {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

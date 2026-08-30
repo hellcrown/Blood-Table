@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { net } from '../net/socket';
+import { AdminPanel } from '../components/AdminPanel';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [mode, setMode] = useState<'blood' | 'classic'>('blood');
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const nameOk = name.trim().length > 0;
 
@@ -90,6 +92,10 @@ export function Lobby({ connected }: { connected: boolean }) {
           </ul>
         </div>
       </div>
+      <button className="admin-link" onClick={() => setAdminOpen(true)}>
+        管理员
+      </button>
+      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
   );
 }

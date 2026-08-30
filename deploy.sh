@@ -19,14 +19,23 @@ fi
 echo "安装依赖..."
 npm install --no-audit --no-fund
 
-# 3. 启动 / 重启（进程名 blood-table）
+# 3. 管理密码（网站「管理员」入口用）：保存在 .admin-secret，可自行修改
+SECRET_FILE=".admin-secret"
+if [ ! -f "$SECRET_FILE" ] || [ ! -s "$SECRET_FILE" ]; then
+  openssl rand -hex 12 > "$SECRET_FILE" 2>/dev/null || node -e "console.log(require('crypto').randomBytes(12).toString('hex'))" > "$SECRET_FILE"
+fi
+ADMIN_KEY_VALUE=$(cat "$SECRET_FILE")
+
+# 4. 启动 / 重启（进程名 blood-table）
 PORT="${PORT:-3000}"
 pm2 delete blood-table >/dev/null 2>&1 || true
-PORT="$PORT" pm2 start npm --name blood-table -- start
+PORT="$PORT" ADMIN_KEY="$ADMIN_KEY_VALUE" pm2 start npm --name blood-table -- start
 pm2 save
 
 echo ""
 echo "✅ 部署完成：http://<服务器IP>:$PORT"
 echo "   - 别忘了在云控制台「安全组」放行 TCP $PORT"
+echo "   - 网站左下角「管理员」入口的管理密码：$ADMIN_KEY_VALUE"
+echo "     （保存在服务器仓库目录的 .admin-secret 文件中，可自行修改后重新执行本脚本）"
 echo "   - 常用命令：pm2 logs blood-table ｜ pm2 restart blood-table ｜ pm2 stop blood-table"
 echo "   - 更新代码后重新执行 bash deploy.sh 即可"

@@ -571,6 +571,16 @@ export class RoomManager {
     }
   }
 
+  /** 管理接口：列出所有房间概要 */
+  listRooms(): { code: string; mode: GameMode; phase: string; players: number; host: string }[] {
+    return [...this.rooms.values()].map((room) => {
+      const g = room.game;
+      const phase = g && 'phase' in g ? String(g.phase) : 'waiting';
+      const host = [...room.sessions.values()].find((s) => s.id === room.hostId)?.name ?? '';
+      return { code: room.code, mode: room.mode, phase, players: room.sessions.size, host };
+    });
+  }
+
   roomCount(): number {
     return this.rooms.size;
   }
