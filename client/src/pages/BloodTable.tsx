@@ -158,6 +158,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [charDetail, setCharDetail] = useState<string | null>(null);
   const [detail, setDetail] = useState<BloodCardView | null>(null);
   const [ladderOpen, setLadderOpen] = useState(false);
+  /** 牌局记录侧栏：宽屏默认展开，手机端默认收起（左缘小箭头切换） */
+  const [logOpen, setLogOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900);
   const [annHiddenAt, setAnnHiddenAt] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('none');
   const lockRef = useRef(0);
@@ -330,8 +332,8 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   return (
     <div className="blood-shell">
-      {/* 左侧：牌局记录列 */}
-      <aside className="blood-side">
+      {/* 左侧：牌局记录列（小箭头可收起/展开；手机端为左侧抽屉） */}
+      <aside className={`blood-side ${logOpen ? 'open' : ''}`}>
         <div className="box-title">牌局记录</div>
         <div className="blood-loglist" ref={logRef}>
           {view.log.map((l) => (
@@ -341,6 +343,13 @@ export function BloodTable({ view }: { view: BloodView }) {
           ))}
         </div>
       </aside>
+      <button
+        className={`blood-side-toggle ${logOpen ? 'open' : ''}`}
+        title={logOpen ? '收起牌局记录' : '展开牌局记录'}
+        onClick={() => setLogOpen((v) => !v)}
+      >
+        {logOpen ? '‹' : '›'}
+      </button>
 
       {/* 右侧：竖屏牌桌 */}
       <div className="blood-main">

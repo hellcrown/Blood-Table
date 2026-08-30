@@ -964,13 +964,24 @@ select:focus {
   overflow: auto;
 }
 
+.page-bar {
+  flex-wrap: wrap;
+}
+
 .phase-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  row-gap: 6px;
   padding: 8px 16px 0;
   font-size: 13px;
   color: var(--text-dim);
+}
+
+.phase-bar .countdown-row {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .ph-step {
@@ -1319,6 +1330,33 @@ select:focus {
 
 /* ---------- 血色模式 v2：左记录列 + 竖屏牌桌 ---------- */
 
+@media (max-width: 900px) {
+  /* 记录列改为左侧抽屉：默认滑出屏幕，点箭头滑入（覆盖层，不挤压牌桌） */
+  .blood-side,
+  .blood-side:not(.open) {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 55;
+    width: min(80vw, 300px);
+    padding: 12px;
+    border-right: 1px solid var(--line);
+    transform: translateX(-102%);
+    transition: transform 0.25s ease;
+    box-shadow: 14px 0 34px rgba(0, 0, 0, 0.55);
+    background: #17110d;
+  }
+
+  .blood-side.open {
+    transform: none;
+  }
+
+  .blood-side-toggle.open {
+    left: min(80vw, 300px);
+  }
+}
+
 .blood-shell {
   flex: 1;
   display: flex;
@@ -1334,6 +1372,44 @@ select:focus {
   flex-direction: column;
   padding: 12px;
   min-height: 0;
+  overflow: hidden;
+  transition: width 0.22s ease, padding 0.22s ease;
+}
+
+/* 收起状态：宽度归零（内容保持固定宽度，仅被裁剪，避免文字回流） */
+.blood-side:not(.open) {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-width: 0;
+}
+
+.blood-side > .box-title,
+.blood-side > .blood-loglist {
+  min-width: 276px;
+}
+
+/* 左缘小箭头：收起/展开记录侧栏（手机端为抽屉把手） */
+.blood-side-toggle {
+  position: fixed;
+  left: 0;
+  top: 45%;
+  z-index: 56;
+  width: 22px;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  background: rgba(24, 17, 12, 0.92);
+  color: var(--gold);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: left 0.22s ease;
+}
+
+.blood-side-toggle.open {
+  left: 301px;
 }
 
 .blood-loglist {
@@ -1418,12 +1494,6 @@ select:focus {
 
 .timer-bar span {
   transition: width 0.25s linear;
-}
-
-@media (max-width: 900px) {
-  .blood-side {
-    display: none;
-  }
 }
 
 /* ---------- 详情查看 / JOKER 白底 ---------- */
