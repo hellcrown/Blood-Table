@@ -98,3 +98,17 @@ cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 - 对局状态在内存中，服务器进程重启后进行中的对局会丢失
 - 浏览器后台标签页可能被系统挂起导致连接中断，回到前台刷新页面即可恢复
 - 血色模式的角色技能、事件牌尚未实现（数据结构已预留）；观战/AI 补位未做
+
+## 云服务器部署
+
+1. 购买任意云服务器（2核1G 起步即可），系统镜像选 **Ubuntu 22.04**，安全组放行 TCP 22 与 3000；
+2. SSH 登录后安装 Node 20+ 与 git，然后：
+   ```bash
+   git clone https://github.com/hellcrown/Blood-Table.git
+   cd Blood-Table
+   bash deploy.sh
+   ```
+3. 访问 `http://服务器IP:3000` 即可游玩；代码更新后 `git pull && bash deploy.sh` 一键重启。
+
+说明：前端构建产物 `client/dist` 已随仓库提交，服务器上无需构建（1G 内存小机也跑得动）；
+`deploy.sh` 使用 pm2 守护进程并开机自启（`pm2 save` 后执行一次 `pm2 startup` 按提示操作）。

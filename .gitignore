@@ -1,4 +1,4 @@
 node_modules/
-dist/
+# dist/ 已随仓库提交：服务器上无需构建，直接运行
 *.log
 .DS_Store
