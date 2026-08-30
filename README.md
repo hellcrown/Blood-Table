@@ -1,6 +1,6 @@
 # 血色牌局 · 联机版（2-4 人）
 
-还原桌游《血色牌局》的联机实现 + 经典德州扑克模式，Web 网页版，局域网/Tailscale 开服即玩。
+还原桌游《血色牌局》的联机实现 + 经典德州扑克模式，Web 网页版，云服务器/局域网开服即玩。
 
 - **血色牌局模式**（主模式，按 `rulebook/RULES.md` 严格还原）：
   每人一副 54 张牌，8 阶段回合制（抽牌→换牌→出牌→对决→结算→购买→删牌→重整），
@@ -22,24 +22,24 @@ npm run build      # 构建前端到 client/dist
 npm start          # 生产模式：单端口 :3000 同时提供网页和 WebSocket（联机用这个）
 ```
 
-`npm start` 会打印本机地址（含 Tailscale 地址）。建房时选择模式与人数上限（2/3/4），
-把房间码告诉朋友即可。所有阶段 60 秒超时托管，断线重连自动恢复座位与手牌。
+本地试玩时浏览器打开 `http://localhost:3000`。建房时选择模式、人数上限、选将模式与拓展黑市开关，
+把网址和房间码发给朋友即可。所有阶段 60 秒超时托管，断线重连自动恢复座位与手牌。
 
-## 外网联机（Tailscale）
+## 云服务器部署
 
-和不在同一局域网的朋友玩，用 [Tailscale](https://tailscale.com) 组虚拟局域网（免费，3 用户 100 设备）：
+推荐直接部署在云服务器上（2核1G 起步，Ubuntu 22.04/24.04），所有玩家直连、无需任何组网工具：
 
-1. **你和朋友各自**下载安装 Tailscale（Windows/macOS/手机都有），登录各自账号；
-2. 你在 https://login.tailscale.com 管理页 → Users → **邀请朋友**（或 Machines → 你的电脑 → Share）；
-3. 你的电脑保持 Tailscale 在线并 `npm start`，建房后房间页「邀请好友」区会显示你的 **`100.x.x.x` Tailscale 地址**（点击即复制），朋友浏览器打开它 + 输房间码即玩。
-
-Windows 防火墙需放行 Tailscale 网段（管理员 PowerShell/CMD 执行一次即可）：
-
-```
-netsh advfirewall firewall add rule name="血色牌局3000(Tailscale)" dir=in action=allow protocol=TCP localport=3000 remoteip=100.64.0.0/10
+```bash
+# 服务器上（安全组放行 TCP 22 与 3000）
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs git && sudo npm i -g pm2
+git clone https://github.com/hellcrown/Blood-Table.git
+cd Blood-Table && bash deploy.sh
 ```
 
-注意：服务端跑在你的电脑上，你关机/掉线朋友就进不来；想 24 小时在线可改走云服务器部署。
+访问 `http://服务器IP:3000` 即玩；更新版本：`git pull && bash deploy.sh`。
+前端构建产物 `client/dist` 已随仓库提交，服务器无需构建（1G 内存小机可跑）。
+建仓后执行一次 `pm2 save && pm2 startup` 可开机自启。
 
 ## 血色牌局模式速览
 

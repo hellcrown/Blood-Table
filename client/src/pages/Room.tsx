@@ -29,35 +29,18 @@ export function Room({ view }: { view: TableView }) {
   const isHost = view.hostId === net.playerId;
   const [settings, setSettings] = useState<RoomSettings>(view.settings);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
-  const [tsUrls, setTsUrls] = useState<string[]>([]);
-  const [lanUrls, setLanUrls] = useState<string[]>([]);
 
   useEffect(() => {
     setSettings(view.settings);
   }, [view.settings]);
 
-  // 从服务器取本机地址，生成邀请链接（Tailscale = 异地朋友可达）
-  useEffect(() => {
-    let alive = true;
-    fetch('/api/info')
-      .then((r) => r.json())
-      .then((info: { port?: number; lan?: string[]; tailscale?: string[] }) => {
-        if (!alive) return;
-        const port = info.port ?? (Number(location.port) || 3000);
-        setTsUrls((info.tailscale ?? []).map((ip) => `http://${ip}:${port}/`));
-        setLanUrls((info.lan ?? []).map((ip) => `http://${ip}:${port}/`));
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const inviteText = `${tsUrls[0] ?? lanUrls[0] ?? location.origin + '/'} — 血色牌局房间码：${view.code}`;
+  // 邀请链接 = 当前访问地址（部署在云服务器上，朋友直接打开同网址进大厅）
+  const inviteUrl = `${location.origin}/`;
+  const inviteText = `${inviteUrl} — 血色牌局房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
     let ok = false;
-    // 现代剪贴板 API 仅在安全上下文（https / localhost）可用；http 局域网走兜底
+    // 现代剪贴板 API 仅在安全上下文（https / localhost）可用；http 环境走兜底
     if (navigator.clipboard && window.isSecureContext) {
       try {
         await navigator.clipboard.writeText(text);
@@ -116,30 +99,16 @@ export function Room({ view }: { view: TableView }) {
               {copyMsg ?? '复制邀请'}
             </button>
           </div>
-          {tsUrls.length > 0 && (
-            <div className="invite-urls">
-              <div className="invite-group-label">Tailscale（异地朋友用这个，需双方都装 Tailscale）</div>
-              {tsUrls.map((u) => (
-                <button key={u} className="invite-url ts" title="点击复制该地址" onClick={() => copyInvite(`${u} — 血色牌局房间码：${view.code}`)}>
-                  {u}
-                </button>
-              ))}
-            </div>
-          )}
-          {lanUrls.length > 0 && (
-            <div className="invite-urls">
-              <div className="invite-group-label">同一 WiFi 局域网</div>
-              {lanUrls.map((u) => (
-                <button key={u} className="invite-url" title="点击复制该地址" onClick={() => copyInvite(`${u} — 血色牌局房间码：${view.code}`)}>
-                  {u}
-                </button>
-              ))}
-              <p className="hint">异地朋友选 Tailscale 地址；同网朋友任选局域网地址，多个地址时逐个试试（通常是 192.168.0.x / 192.168.1.x 这种）</p>
-            </div>
-          )}
-          {tsUrls.length === 0 && lanUrls.length === 0 && (
-            <p className="hint">把房间码告诉朋友即可加入</p>
-          )}
+          <div className="invite-urls">
+            <div className="invite-group-label">游戏地址（朋友打开后输入房间码加入）</div>
+            <button
+              className="invite-url"
+              title="点击复制地址+房间码"
+              onClick={() => copyInvite(`${inviteUrl} — 血色牌局房间码：${view.code}`)}
+            >
+              {inviteUrl}
+            </button>
+          </div>
         </div>
 
         <div className="seat-grid" style={{ gridTemplateColumns: `repeat(${Math.ceil(view.maxPlayers / 2)}, 1fr)` }}>
