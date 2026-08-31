@@ -3082,3 +3082,7 @@ body {
 .announce-float:has(.fx-img) .announce-tip {
   padding-right: 126px;
 }
+
+.act-row.wrap {
+  flex-wrap: wrap;
+}

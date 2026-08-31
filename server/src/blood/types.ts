@@ -13,6 +13,8 @@ export interface ChipInst {
   id: string;
   def: string; // BloodMarketDef.id
   on: string; // 挂载的 BCard.id
+  /** 消磁枪/屏蔽器：本次对决失效 */
+  off?: boolean;
 }
 
 export interface ItemInst {
@@ -56,6 +58,15 @@ export interface BPlayer {
   skipBuyRemove: boolean;
   /** 闭店礼：跳过本回合购买阶段 */
   skipBuy: boolean;
+  /** 餐车投毒：下回合换牌次数 -N */
+  swapMalus: number;
+  /** 暂时失忆：下回合角色技能失效 */
+  charOff: boolean;
+  charOffNextRound: boolean;
+  /** 冻结车厢 / 广播喇叭（失败）：跳过本回合重整 */
+  skipReorg: boolean;
+  /** 广播喇叭：本回合已宣称夺魁 */
+  claimedWin: boolean;
   /** 双重人格公主：true=常时人格（黑），false=躁狂人格（红） */
   princessDark: boolean;
   /** 对决展示确认（settle 阶段全员确认后统一进入购买） */
@@ -121,11 +132,23 @@ export interface BloodState {
   stealPending: { seat: string; blood: number } | null;
   secretPending: {
     seat: string;
-    kind: 'deleteUpTo' | 'violentTarget' | 'insertChip' | 'refreshPick';
+    kind: 'deleteUpTo' | 'violentTarget' | 'insertChip' | 'refreshPick'
+      | 'poisonTarget' | 'freezeTarget' | 'amnesiaTarget' | 'boxRobTarget'
+      | 'pinpointClaim' | 'pullChip' | 'preciseDel' | 'signalTarget' | 'demagTarget'
+      | 'irisGuess' | 'sharedInfo' | 'sharedInfoOpp' | 'eraserClaim';
     max?: number;
     chipId?: string;
     defId?: string;
+    /** preciseDel: 抽到的 3 张牌 */
+    cards?: BCard[];
+    /** 共享信息等待顺序的对手队列 */
+    oppQueue?: string[];
+    buyerId?: string;
   } | null;
+  /** 魔术橡皮：本回合被降为高牌的牌型 */
+  eraserType: number | null;
+  /** 赌徒虹膜：本回合的竞猜 */
+  irisGuess: { by: string; seat: number; cat: number } | null;
   comparePipsFirst: boolean;
   /** 黑市牌宣告（购买/使用时向所有人公示），由客户端展示数秒 */
   announce: { defId: string; buyerSeat: number; at: number; extra?: string } | null;

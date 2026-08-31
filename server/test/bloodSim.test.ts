@@ -204,6 +204,9 @@ function simGame(seed: number): void {
   let now = 1000;
   let guard = 0;
   while (gs.phase !== 'gameover') {
+    if (guard > 190_000 && guard % 2000 === 0) {
+      console.log(`SLOW seed=${seed} g=${guard} phase=${gs.phase} turn=${gs.turnSeat} steal=${JSON.stringify(gs.stealPending)} pend=${JSON.stringify(gs.secretPending)} LOG=[${gs.log.slice(-10).map((l) => l.text).join(' | ')}]`);
+    }
     if (guard++ > 200_000) throw new Error(`seed ${seed} 模拟未收敛（phase=${gs.phase}, round=${gs.round}）`);
     checkInvariants(gs);
     for (const p of gs.players) randomAction(gs, p, rng, now);

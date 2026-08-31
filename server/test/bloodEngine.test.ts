@@ -6,6 +6,12 @@ import {
   bBuy,
   bPassBuy,
   bPickChar,
+  bPreciseDel,
+  bPullChip,
+  bSecretDelete,
+  bSecretTarget,
+  bUseItem,
+  bEraserClaim,
   bPlay,
   bRemoveDone,
   bReorg,
@@ -279,6 +285,147 @@ describe('血色引擎 · 选将与角色技能', () => {
     const seven = pool.find((c) => c.r === 7)!;
     p0.play = [...twos, ...kings, seven];
     expect(evalForPlayer(p0).cat).toBe(7); // 四条K
+  });
+});
+
+describe('血色引擎 · 拓展黑市效果', () => {
+  /** 打到购买阶段 */
+  function reachBuy(): BloodState {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    confirmSd(gs);
+    expect(gs.phase).toBe('buy');
+    return gs;
+  }
+
+  /** 当前回合玩家从 0 号位购买指定拓展牌并选目标 */
+  function buyTarget(gs: BloodState, defId: string, targetSeat: number): BPlayer {
+    const buyer = gs.players.find((p) => gs.turnSeat === p.seat && !p.buyPassed)!;
+    buyer.blood += 30;
+    gs.market[0] = { def: defId, bonus: 0 };
+    bBuy(gs, buyer.id, 0, undefined, NOW);
+    bSecretTarget(gs, buyer.id, targetSeat, NOW);
+    return gs.players.find((p) => p.seat === targetSeat)!;
+  }
+
+  it('餐车投毒/冻结车厢/暂时失忆：目标状态生效', () => {
+    const gs = reachBuy();
+    const t1 = gs.players.find((p) => gs.turnSeat === p.seat)!.seat === 0 ? gs.players[1] : gs.players[0];
+    const r1 = buyTarget(gs, 'poison', t1.seat);
+    expect(r1.swapMalus).toBe(2);
+    const t2 = gs.players.find((p) => p.seat !== t1.seat)!;
+    const r2 = buyTarget(gs, 'freezeCar', t2.seat);
+    expect(r2.skipReorg).toBe(true);
+    const r3 = buyTarget(gs, 'amnesia', t1.seat);
+    expect(r3.charOffNextRound).toBe(true);
+  });
+
+  it('黑厢抢夺：掷骰结算不改变双方血筹总和', () => {
+    const gs = reachBuy();
+    const sum = () => gs.players.reduce((a, p) => a + p.blood, 0);
+    buyTarget(gs, 'boxRob', gs.players.find((p) => gs.turnSeat !== p.seat)!.seat);
+    expect(sum()).toBe(gs.players.reduce((a, p) => a + p.blood, 0)); // 幂等校验（无血筹凭空产生）
+  });
+
+  it('精准删除：抽3删1余2弃置', () => {
+    const gs = reachBuy();
+    const buyer = gs.players.find((p) => gs.turnSeat === p.seat)!;
+    buyer.blood += 30;
+    const drawBefore = buyer.draw.length;
+    gs.market[0] = { def: 'preciseDel', bonus: 0 };
+    bBuy(gs, buyer.id, 0, undefined, NOW);
+    const pend = gs.secretPending!;
+    expect(pend.kind).toBe('preciseDel');
+    expect(pend.cards!.length).toBe(3);
+    bPreciseDel(gs, buyer.id, [pend.cards![0].id], NOW);
+    expect(buyer.removed.some((c) => c.id === pend.cards![0].id)).toBe(true);
+    expect(buyer.draw.length).toBe(drawBefore - 3);
+    expect(gs.secretPending).toBeNull();
+  });
+
+  it('拔除芯片：拔除弃牌区芯片获得4血筹', () => {
+    const gs = reachBuy();
+    const buyer = gs.players.find((p) => gs.turnSeat === p.seat)!;
+    buyer.blood += 30;
+    const card = buyer.discard[0];
+    const chipId = 'ch-test';
+    buyer.chips.push({ id: chipId, def: 'calib1', on: card.id });
+    gs.market[0] = { def: 'pullChip', bonus: 0 };
+    bBuy(gs, buyer.id, 0, undefined, NOW);
+    const blood0 = buyer.blood;
+    bPullChip(gs, buyer.id, card.id, NOW);
+    expect(buyer.blood).toBe(blood0 + 4);
+    expect(buyer.chips.some((c) => c.id === chipId)).toBe(false);
+    expect(gs.recycle.includes('calib1')).toBe(true);
+  });
+
+  it('共享信息：自己删2后对手链式删1（可跳过）', () => {
+    const gs = reachBuy();
+    const buyer = gs.players.find((p) => gs.turnSeat === p.seat)!;
+    buyer.blood += 30;
+    gs.market[0] = { def: 'sharedInfo', bonus: 0 };
+    bBuy(gs, buyer.id, 0, undefined, NOW);
+    expect(gs.secretPending?.kind).toBe('sharedInfo');
+    const c1 = buyer.discard[0].id;
+    const c2 = buyer.discard[1].id;
+    bSecretDelete(gs, buyer.id, [c1, c2], NOW);
+    const opp = gs.players.find((p) => p.id !== buyer.id)!;
+    expect(gs.secretPending?.kind).toBe('sharedInfoOpp');
+    expect(gs.secretPending?.seat).toBe(opp.id);
+    bSecretDelete(gs, opp.id, [], NOW); // 对手跳过
+    expect(gs.secretPending).toBeNull();
+    expect(buyer.removed.length).toBe(2);
+  });
+
+  it('魔术橡皮：被宣告牌型结算为高牌', () => {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(9), isRank(9), isRank(5), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    // 甲在出牌阶段使用魔术橡皮宣告「两对」
+    gs.players[0].items.push({ id: 'it-eraser', def: 'eraser' });
+    bUseItem(gs, 'p0', 'it-eraser', NOW);
+    bEraserClaim(gs, 'p0', 2, NOW); // 2 = 两对
+    expect(gs.eraserType).toBe(2);
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    const row0 = gs.result!.rows.find((r) => r.seat === 0)!;
+    expect(row0.cat).toBe(0); // 两对被降为高牌
+    expect(row0.catName).toContain('魔术橡皮');
+  });
+
+  it('广播喇叭：宣称成功获人数×3血筹', () => {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    gs.players[0].items.push({ id: 'it-ls', def: 'loudspeaker' });
+    bUseItem(gs, 'p0', 'it-ls', NOW);
+    expect(gs.players[0].claimedWin).toBe(true);
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    const p0 = gs.players[0];
+    expect(p0.blood).toBeGreaterThanOrEqual(6); // 2人局 ×3 = 6
+  });
+
+  it('暂时失忆使赌场荷官+20失效', () => {
+    const gs = reachBuy();
+    // 双方荷官（make2p 默认），失忆乙方后甲方独享 +20
+    const dealer = gs.players[0];
+    const other = gs.players[1];
+    expect(dealer.charId).toBe('dealer');
+    buyTarget(gs, 'amnesia', other.seat);
+    expect(other.charOffNextRound).toBe(true);
   });
 });
 

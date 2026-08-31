@@ -14,6 +14,44 @@ function cardView(c: BCard, p: BPlayer): BloodCardView {
 }
 
 function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
+  // 挂起中的拓展牌交互优先（跨阶段）
+  const pend = gs.secretPending;
+  if (pend && pend.seat === p.id) {
+    switch (pend.kind) {
+      case 'poisonTarget':
+        return { k: 'poisonTarget' };
+      case 'freezeTarget':
+        return { k: 'freezeTarget' };
+      case 'amnesiaTarget':
+        return { k: 'amnesiaTarget' };
+      case 'boxRobTarget':
+        return { k: 'boxRobTarget' };
+      case 'signalTarget':
+        return { k: 'signalTarget' };
+      case 'demagTarget':
+        return { k: 'demagTarget' };
+      case 'pinpointClaim':
+        return { k: 'pinpointClaim' };
+      case 'irisGuess':
+        return { k: 'irisGuess' };
+      case 'eraserClaim':
+        return { k: 'eraserClaim' };
+      case 'pullChip':
+        return { k: 'pullChip' };
+      case 'preciseDel':
+        return {
+          k: 'preciseDel',
+          max: 2,
+          cards: (pend.cards ?? []).map((c) => ({ id: c.id, r: c.r, s: c.s })),
+        };
+      case 'sharedInfo':
+        return { k: 'secretDelete', max: pend.max ?? 2 };
+      case 'sharedInfoOpp':
+        return { k: 'secretDelete', max: 1 };
+      default:
+        break;
+    }
+  }
   switch (gs.phase) {
     case 'pick':
       return p.charId ? { k: 'wait' } : { k: 'pick' };
@@ -26,6 +64,9 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
     case 'reveal': {
       if (gs.turnSeat !== p.seat) return { k: 'wait' };
       if (gs.stealPending && gs.stealPending.seat === p.id) return { k: 'steal' };
+      if (p.items.some((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify')) {
+        return { k: 'revealItem' };
+      }
       return { k: 'wait' };
     }
     case 'settle':

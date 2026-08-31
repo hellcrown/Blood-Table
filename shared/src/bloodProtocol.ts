@@ -84,11 +84,25 @@ export interface BloodMyPrompt {
     | 'refreshPick'
     | 'remove'
     | 'reorg'
-    | 'wait';
+    | 'wait'
+    /** 拓展牌交互 */
+    | 'poisonTarget'
+    | 'freezeTarget'
+    | 'amnesiaTarget'
+    | 'boxRobTarget'
+    | 'pinpointClaim'
+    | 'pullChip'
+    | 'preciseDel'
+    | 'signalTarget'
+    | 'demagTarget'
+    | 'irisGuess'
+    | 'eraserClaim';
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
   defId?: string; // insertChip: 待插入芯片
+  /** preciseDel: 抽到的 3 张牌 */
+  cards?: { id: string; r: number; s: string | null }[];
 }
 
 export interface BloodAnnounceView {
@@ -156,6 +170,12 @@ export type BloodAction =
   | { t: 'bSteal'; seat: number }
   | { t: 'bShowdownDone' }
   | { t: 'bResign' }
+  | { t: 'bSecretTarget'; seat: number }
+  | { t: 'bPinpoint'; seat: number; rank: number }
+  | { t: 'bIrisGuess'; seat: number; cat: number }
+  | { t: 'bPreciseDel'; cardIds: string[] }
+  | { t: 'bPullChip'; cardId: string }
+  | { t: 'bEraserClaim'; cat: number }
   | { t: 'bBuy'; slot: number; insertInto?: string }
   | { t: 'bInsertChip'; cardId: string }
   | { t: 'bInsertSkip' }

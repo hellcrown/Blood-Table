@@ -59,6 +59,16 @@ Object.assign(
 const fxUrlOf = (defId: string): string | undefined =>
   FX_MODULES[`../assets/fx/${defId}.webp`] ?? FX_MODULES[`../assets/fx/${defId}.gif`];
 
+/** 拓展牌目标选择提示（点击对方面板执行） */
+const TARGET_LABELS: Record<string, string> = {
+  poisonTarget: '投毒（下回合换牌-2）',
+  freezeTarget: '冻结（跳过本回合重整）',
+  amnesiaTarget: '失忆（下回合技能失效）',
+  boxRobTarget: '黑厢抢夺（掷骰）',
+  signalTarget: '随机弃1抽1',
+  demagTarget: '消磁其一张芯片',
+};
+
 /** 已有专属特效的宣告效果类型 */
 const ANNOUNCE_FX_KINDS = new Set([
   'rollDice',
@@ -196,6 +206,9 @@ export function BloodTable({ view }: { view: BloodView }) {
     setSelRemove([]);
     setDelPick([]);
     setRefreshPick([]);
+    setPinSeat(-1);
+    setIrisSeat(-1);
+    setPrecisePick([]);
   }, [view.round, view.phase]);
 
   const offsetRef = useRef(0);
@@ -209,6 +222,11 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [selSwap, setSelSwap] = useState<string[]>([]);
   const [selPlay, setSelPlay] = useState<string[]>([]);
   const [selRemove, setSelRemove] = useState<string[]>([]);
+  const [pinSeat, setPinSeat] = useState(-1);
+  const [irisSeat, setIrisSeat] = useState(-1);
+  const [irisCat, setIrisCat] = useState(1);
+  const [eraserCat, setEraserCat] = useState(1);
+  const [precisePick, setPrecisePick] = useState<string[]>([]);
   const [delPick, setDelPick] = useState<string[]>([]);
   const [refreshPick, setRefreshPick] = useState<number[]>([]);
   /** 芯片购买：{defId, slot} —— 点购买后立即弹出弃牌区选牌 */
@@ -284,6 +302,11 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [view.logSeq]);
 
+  // 拔除芯片：自动打开弃牌区选择带芯片的牌
+  useEffect(() => {
+    if (view.prompt.k === 'pullChip') setZoneModal({ kind: 'discard' });
+  }, [view.prompt.k]);
+
   const send = (msg: Parameters<typeof net.send>[0]) => {
     const t = Date.now();
     if (t - lockRef.current < 250) return; // 防连点重复发送
@@ -339,6 +362,28 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '删牌：第 1 张免费，之后每张 2 血筹（点开弃牌区选择）';
       case 'reorg':
         return '重整：二选一';
+      case 'poisonTarget':
+        return '餐车投毒：点击对方面板选择目标';
+      case 'freezeTarget':
+        return '冻结车厢：点击对方面板选择目标';
+      case 'amnesiaTarget':
+        return '暂时失忆：点击对方面板选择目标';
+      case 'boxRobTarget':
+        return '黑厢抢夺：点击对方面板进行掷骰对决';
+      case 'signalTarget':
+        return '信号干扰器：点击对方面板，其随机弃1抽1';
+      case 'demagTarget':
+        return '消磁枪：点击对方面板，使其一张强化芯片失效';
+      case 'pinpointClaim':
+        return '定点爆破：点击对方面板选目标，再选点数确认';
+      case 'irisGuess':
+        return '赌徒虹膜：选择竞猜目标与牌型后确认';
+      case 'eraserClaim':
+        return '魔术橡皮：选择一种牌型，本回合其视为高牌';
+      case 'pullChip':
+        return '拔除芯片：点击弃牌区中带芯片的牌（+4🩸）';
+      case 'preciseDel':
+        return '精准删除：从抽到的 3 张中选择 0-2 张删除';
       default:
         return '等待对方操作…';
     }
@@ -372,6 +417,11 @@ export function BloodTable({ view }: { view: BloodView }) {
       toggle(delPick, setDelPick, c.id, view.prompt.max ?? 2);
       return;
     }
+    if (view.prompt.k === 'pullChip') {
+      send({ t: 'bPullChip', cardId: c.id });
+      setZoneModal(null);
+      return;
+    }
     if (view.prompt.k === 'remove') {
       toggle(selRemove, setSelRemove, c.id, 99);
     }
@@ -383,7 +433,9 @@ export function BloodTable({ view }: { view: BloodView }) {
         ? `弃牌区（${view.me.discard.length}）· 点击一张牌插入芯片`
         : view.prompt.k === 'secretDelete'
           ? `弃牌区（${view.me.discard.length}）· 点击选择要删除的牌`
-          : `弃牌区（${view.me.discard.length}）`
+          : view.prompt.k === 'pullChip'
+            ? `弃牌区（${view.me.discard.length}）· 点击带芯片的牌拔除（+4🩸）`
+            : `弃牌区（${view.me.discard.length}）`
       : zoneModal?.kind === 'removed'
         ? `删牌区（${view.me.removed.length}）`
         : '道具区';
@@ -501,6 +553,30 @@ export function BloodTable({ view }: { view: BloodView }) {
                   {view.prompt.k === 'steal' && (
                     <button className="btn small danger" onClick={() => send({ t: 'bSteal', seat: opp.seat })}>
                       掠夺 1 血筹
+                    </button>
+                  )}
+                  {TARGET_LABELS[view.prompt.k] && (
+                    <button
+                      className="btn small danger"
+                      onClick={() => send({ t: 'bSecretTarget', seat: opp.seat })}
+                    >
+                      {TARGET_LABELS[view.prompt.k]}
+                    </button>
+                  )}
+                  {view.prompt.k === 'pinpointClaim' && (
+                    <button
+                      className={`btn small ${pinSeat === opp.seat ? 'primary' : 'danger'}`}
+                      onClick={() => setPinSeat(opp.seat)}
+                    >
+                      {pinSeat === opp.seat ? '✓ 爆破目标' : '选为爆破目标'}
+                    </button>
+                  )}
+                  {view.prompt.k === 'irisGuess' && (
+                    <button
+                      className={`btn small ${irisSeat === opp.seat ? 'primary' : 'danger'}`}
+                      onClick={() => setIrisSeat(opp.seat)}
+                    >
+                      {irisSeat === opp.seat ? '✓ 竞猜目标' : '选为竞猜目标'}
                     </button>
                   )}
                 </div>
@@ -691,8 +767,38 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button className="btn" onClick={() => send({ t: 'bSwapStop' })}>
                       停止换牌（剩余 {view.me.swapLeft} 次兑 {view.me.swapLeft}🩸）
                     </button>
+                    {view.me.items.some((it) => it.name === '皮下密信') && (
+                      <button
+                        className="btn"
+                        disabled={view.me.blood < 2}
+                        onClick={() =>
+                          send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '皮下密信')!.id })
+                        }
+                      >
+                        📜 皮下密信（2🩸抽3张）
+                      </button>
+                    )}
+                    {view.me.items.some((it) => it.name === '信号干扰器') && (
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '信号干扰器')!.id })
+                        }
+                      >
+                        📡 信号干扰器（选一名玩家弃1抽1）
+                      </button>
+                    )}
                   </>
                 )}
+                {view.prompt.k === 'play' &&
+                  ['魔术橡皮', '广播喇叭', '赌徒虹膜'].map((nm) => {
+                    const it = view.me.items.find((i) => i.name === nm);
+                    return it ? (
+                      <button key={it.id} className="btn" onClick={() => send({ t: 'bUseItem', itemId: it.id })}>
+                        使用【{nm}】
+                      </button>
+                    ) : null;
+                  })}
                 {view.prompt.k === 'play' && view.me.items.some((it) => it.name === '荷官证') && (
                   <button
                     className="btn"
@@ -797,6 +903,116 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button className="btn" onClick={() => send({ t: 'bRemoveDone' })}>
                       结束（不删牌）
                     </button>
+                  </>
+                )}
+                {view.prompt.k === 'pinpointClaim' && (
+                  <div className="act-row wrap">
+                    <span className="hint">
+                      爆破目标：{pinSeat >= 0 ? view.players.find((p) => p.seat === pinSeat)?.name : '先点击对方面板选择'}
+                    </span>
+                    {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map((r) => (
+                      <button
+                        key={r}
+                        className="btn tiny"
+                        disabled={pinSeat < 0}
+                        onClick={() => {
+                          send({ t: 'bPinpoint', seat: pinSeat, rank: r });
+                          setPinSeat(-1);
+                        }}
+                      >
+                        {r === 14 ? 'A' : r === 13 ? 'K' : r === 12 ? 'Q' : r === 11 ? 'J' : r}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {view.prompt.k === 'eraserClaim' && (
+                  <div className="act-row wrap">
+                    <span className="hint">宣告视为高牌的牌型：</span>
+                    <select value={eraserCat} onChange={(e) => setEraserCat(Number(e.target.value))}>
+                      {HAND_LADDER.filter((h) => !h.chipOnly).map((h, i) => (
+                        <option key={h.name} value={14 - i}>
+                          {h.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn primary" onClick={() => send({ t: 'bEraserClaim', cat: eraserCat })}>
+                      宣告
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'irisGuess' && (
+                  <>
+                    <div className="act-row wrap">
+                      <span className="hint">竞猜目标：</span>
+                      {view.players
+                        .filter((p) => p.seat !== view.me.seat)
+                        .map((p) => (
+                          <button
+                            key={p.seat}
+                            className={`btn tiny ${irisSeat === p.seat ? 'primary' : ''}`}
+                            onClick={() => setIrisSeat(p.seat)}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      <button
+                        className={`btn tiny ${irisSeat === view.me.seat ? 'primary' : ''}`}
+                        onClick={() => setIrisSeat(view.me.seat)}
+                      >
+                        自己
+                      </button>
+                    </div>
+                    <div className="act-row wrap">
+                      <span className="hint">猜测牌型：</span>
+                      <select value={irisCat} onChange={(e) => setIrisCat(Number(e.target.value))}>
+                        {HAND_LADDER.map((h, i) => (
+                          <option key={h.name} value={14 - i}>
+                            {h.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn primary"
+                        disabled={irisSeat < 0}
+                        onClick={() => {
+                          send({ t: 'bIrisGuess', seat: irisSeat, cat: irisCat });
+                          setIrisSeat(-1);
+                        }}
+                      >
+                        确认竞猜（猜中+3🩸，其车票-4）
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'preciseDel' && (
+                  <>
+                    <div className="my-hand">
+                      {(view.prompt.cards ?? []).map((c) => (
+                        <div key={c.id} className="hand-cell">
+                          <BCard
+                            c={{ ...c, s: c.s as BloodCardView['s'], chipIds: [] }}
+                            size="lg"
+                            selected={precisePick.includes(c.id)}
+                            onClick={() =>
+                              setPrecisePick((s2) =>
+                                s2.includes(c.id) ? s2.filter((x) => x !== c.id) : s2.length < 2 ? [...s2, c.id] : s2,
+                              )
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          send({ t: 'bPreciseDel', cardIds: precisePick });
+                          setPrecisePick([]);
+                        }}
+                      >
+                        删除选中的 {precisePick.length} 张（其余弃置）
+                      </button>
+                    </div>
                   </>
                 )}
                 {view.prompt.k === 'reorg' && (

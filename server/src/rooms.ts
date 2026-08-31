@@ -202,6 +202,24 @@ export class RoomManager {
       case 'bResign':
         blood.bResign(bs, pid, now);
         break;
+      case 'bSecretTarget':
+        blood.bSecretTarget(bs, pid, msg.seat, now);
+        break;
+      case 'bPinpoint':
+        blood.bPinpoint(bs, pid, msg.seat, msg.rank, now);
+        break;
+      case 'bIrisGuess':
+        blood.bIrisGuess(bs, pid, msg.seat, msg.cat, now);
+        break;
+      case 'bEraserClaim':
+        blood.bEraserClaim(bs, pid, msg.cat, now);
+        break;
+      case 'bPreciseDel':
+        blood.bPreciseDel(bs, pid, msg.cardIds ?? [], now);
+        break;
+      case 'bPullChip':
+        blood.bPullChip(bs, pid, msg.cardId, now);
+        break;
       case 'bBuy':
         blood.bBuy(bs, pid, msg.slot, msg.insertInto, now);
         break;

@@ -31,6 +31,20 @@ export type BloodEffect =
   | { k: 'closingGift'; blood: number } // 闭店礼：获得N血筹并跳过本回合购买阶段
   | { k: 'bloodShare'; blood: number; oppBlood: number } // 血袭分享：自己获得N，其他每位对手获得M
   | { k: 'stealPrivilege' } // 鬼手探囊：获得临时特权证
+  | { k: 'poisonMalus'; n: number } // 餐车投毒：一位对手下回合换牌次数-N
+  | { k: 'freezeReorg' } // 冻结车厢：一位对手跳过本回合重整
+  | { k: 'amnesiaOff' } // 暂时失忆：一位玩家的技能下回合失效
+  | { k: 'boxRob' } // 黑厢抢夺：轮流掷骰，点数大者抢至多4血筹
+  | { k: 'pinpointBlast' } // 定点爆破：宣点数，对手弃牌堆删一张该点数
+  | { k: 'preciseDelDraw' } // 精准删除：抽3删0-2弃其余
+  | { k: 'pullChipGain'; blood: number } // 拔除芯片：拔弃牌堆1芯片获得N血筹
+  | { k: 'sharedInfoFx' } // 共享信息：自己删≤2，每位对手可删1
+  | { k: 'signalJamFx' } // 信号干扰器：换牌阶段令一位玩家随机弃1抽1
+  | { k: 'secretNoteFx' } // 皮下密信：换牌阶段花2血筹抽3张
+  | { k: 'eraserFx' } // 魔术橡皮：出牌阶段前宣牌型，本回合该牌型视为高牌
+  | { k: 'loudspeakerFx' } // 广播喇叭：对决前宣称夺魁
+  | { k: 'irisGambleFx' } // 赌徒虹膜：对决前猜牌型
+  | { k: 'demagNullify' } // 消磁枪：对决阶段令一位玩家的一张强化芯片失效
   | { k: 'todo' } // 拓展牌占位：暂未自动结算（购买后公示弃置）
   | { k: 'dealerLicense' }; // 【对决】前：本次对决改为先比总点数再比牌型
 
@@ -97,27 +111,27 @@ export const BLOOD_MARKET_EXPANSION_DEFS: BloodMarketDef[] = [
   { id: 'selfDestruct', no: 'NO.025', name: '自毁芯片', kind: 'chip', cost: 2, count: 2, text: '【结算】结束时，删除本回合打出的所有牌（包括此牌）。', effect: { k: 'selfDestruct' }, expansion: true },
   { id: 'spring', no: 'NO.031', name: '弹簧夹层', kind: 'chip', cost: 4, count: 2, text: '【对决】可花费X🩸，令此牌的点数临时增加/减少X点。', effect: { k: 'todo' }, noJoker: true, expansion: true },
   // ── 秘密交易 ──
-  { id: 'sharedInfo', no: 'NO.026', name: '共享信息', kind: 'secret', cost: 2, count: 2, text: '可删除至多2张牌，每位对手可删除1张牌。', effect: { k: 'todo' }, expansion: true },
+  { id: 'sharedInfo', no: 'NO.026', name: '共享信息', kind: 'secret', cost: 2, count: 2, text: '可删除至多2张牌，每位对手可删除1张牌。', effect: { k: 'sharedInfoFx' }, expansion: true },
   { id: 'closingS', no: 'NO.028', name: '闭店礼·小', kind: 'secret', cost: 3, count: 1, text: '获得4🩸，跳过本回合的【购买】。', effect: { k: 'closingGift', blood: 4 }, expansion: true },
   { id: 'closingM', no: 'NO.029', name: '闭店礼·中', kind: 'secret', cost: 5, count: 1, text: '获得7🩸，跳过本回合的【购买】。', effect: { k: 'closingGift', blood: 7 }, expansion: true },
   { id: 'closingL', no: 'NO.030', name: '闭店礼·大', kind: 'secret', cost: 8, count: 1, text: '获得11🩸，跳过本回合的【购买】。', effect: { k: 'closingGift', blood: 11 }, expansion: true },
-  { id: 'pinpoint', no: 'NO.033', name: '定点爆破', kind: 'secret', cost: 3, count: 2, text: '选择一位对手并宣称一个点数，该对手必须从弃牌堆中删除一张该点数的牌。', effect: { k: 'todo' }, expansion: true },
-  { id: 'boxRob', no: 'NO.035', name: '黑厢抢夺', kind: 'secret', cost: 2, count: 2, text: '选择一位对手轮流掷骰，若你的点数比对手大，则抢夺其至多4🩸。否则无事发生。', effect: { k: 'todo' }, expansion: true },
-  { id: 'freezeCar', no: 'NO.036', name: '冻结车厢', kind: 'secret', cost: 2, count: 2, text: '令一位对手跳过本回合的【重整】。', effect: { k: 'todo' }, expansion: true },
-  { id: 'preciseDel', no: 'NO.037', name: '精准删除', kind: 'secret', cost: 2, count: 2, text: '抽3张牌，删除其中0-2张，弃置剩余的牌（抽牌堆至少有3张牌）。', effect: { k: 'todo' }, expansion: true },
+  { id: 'pinpoint', no: 'NO.033', name: '定点爆破', kind: 'secret', cost: 3, count: 2, text: '选择一位对手并宣称一个点数，该对手必须从弃牌堆中删除一张该点数的牌。', effect: { k: 'pinpointBlast' }, expansion: true },
+  { id: 'boxRob', no: 'NO.035', name: '黑厢抢夺', kind: 'secret', cost: 2, count: 2, text: '选择一位对手轮流掷骰，若你的点数比对手大，则抢夺其至多4🩸。否则无事发生。', effect: { k: 'boxRob' }, expansion: true },
+  { id: 'freezeCar', no: 'NO.036', name: '冻结车厢', kind: 'secret', cost: 2, count: 2, text: '令一位对手跳过本回合的【重整】。', effect: { k: 'freezeReorg' }, expansion: true },
+  { id: 'preciseDel', no: 'NO.037', name: '精准删除', kind: 'secret', cost: 2, count: 2, text: '抽3张牌，删除其中0-2张，弃置剩余的牌（抽牌堆至少有3张牌）。', effect: { k: 'preciseDelDraw' }, expansion: true },
   { id: 'ghostHand', no: 'NO.039', name: '鬼手探囊', kind: 'secret', cost: 2, count: 2, text: '获得👑。', effect: { k: 'stealPrivilege' }, expansion: true },
-  { id: 'poison', no: 'NO.040', name: '餐车投毒', kind: 'secret', cost: 3, count: 2, text: '令一位对手下回合【换牌】可换牌次数-2。', effect: { k: 'todo' }, expansion: true },
+  { id: 'poison', no: 'NO.040', name: '餐车投毒', kind: 'secret', cost: 3, count: 2, text: '令一位对手下回合【换牌】可换牌次数-2。', effect: { k: 'poisonMalus', n: 2 }, expansion: true },
   { id: 'bloodShare', no: 'NO.041', name: '血袭分享', kind: 'secret', cost: 3, count: 2, text: '获得5🩸，其他每位对手获得1🩸。', effect: { k: 'bloodShare', blood: 5, oppBlood: 1 }, expansion: true },
-  { id: 'pullChip', no: 'NO.042', name: '拔除芯片', kind: 'secret', cost: 1, count: 2, text: '拔除自己弃牌堆中的1张强化芯片，获得4🩸。', effect: { k: 'todo' }, expansion: true },
-  { id: 'amnesia', no: 'NO.044', name: '暂时失忆', kind: 'secret', cost: 2, count: 2, text: '令一位玩家的技能在下回合失效。', effect: { k: 'todo' }, expansion: true },
+  { id: 'pullChip', no: 'NO.042', name: '拔除芯片', kind: 'secret', cost: 1, count: 2, text: '拔除自己弃牌堆中的1张强化芯片，获得4🩸。', effect: { k: 'pullChipGain', blood: 4 }, expansion: true },
+  { id: 'amnesia', no: 'NO.044', name: '暂时失忆', kind: 'secret', cost: 2, count: 2, text: '令一位玩家的技能在下回合失效。', effect: { k: 'amnesiaOff' }, expansion: true },
   // ── 备用道具 ──
-  { id: 'signalJam', no: 'NO.045', name: '信号干扰器', kind: 'item', cost: 3, count: 4, text: '【换牌】结束时，可令一位玩家随机弃1张牌，并抽1张牌。', effect: { k: 'todo' }, expansion: true },
-  { id: 'loudspeaker', no: 'NO.046', name: '广播喇叭', kind: 'item', cost: 3, count: 2, text: '【对决】前，可宣称自己将👑。【结算】若成功👑，则获得玩家人数×3🩸，否则跳过本回合的【购买】【删牌】【重整】。', effect: { k: 'todo' }, expansion: true },
-  { id: 'irisGamble', no: 'NO.047', name: '赌徒虹膜', kind: 'item', cost: 3, count: 2, text: '【对决】前，猜测一位玩家的牌型。【结算】若猜测正确，获得3🩸，该玩家本回合获得的🎫-4（最低为0）。', effect: { k: 'todo' }, expansion: true },
-  { id: 'secretNote', no: 'NO.048', name: '皮下密信', kind: 'item', cost: 2, count: 2, text: '【换牌】结束时，可花费2🩸，抽3张牌。', effect: { k: 'todo' }, expansion: true },
+  { id: 'signalJam', no: 'NO.045', name: '信号干扰器', kind: 'item', cost: 3, count: 4, text: '【换牌】结束时，可令一位玩家随机弃1张牌，并抽1张牌。', effect: { k: 'signalJamFx' }, expansion: true },
+  { id: 'loudspeaker', no: 'NO.046', name: '广播喇叭', kind: 'item', cost: 3, count: 2, text: '【对决】前，可宣称自己将👑。【结算】若成功👑，则获得玩家人数×3🩸，否则跳过本回合的【购买】【删牌】【重整】。', effect: { k: 'loudspeakerFx' }, expansion: true },
+  { id: 'irisGamble', no: 'NO.047', name: '赌徒虹膜', kind: 'item', cost: 3, count: 2, text: '【对决】前，猜测一位玩家的牌型。【结算】若猜测正确，获得3🩸，该玩家本回合获得的🎫-4（最低为0）。', effect: { k: 'irisGambleFx' }, expansion: true },
+  { id: 'secretNote', no: 'NO.048', name: '皮下密信', kind: 'item', cost: 2, count: 2, text: '【换牌】结束时，可花费2🩸，抽3张牌。', effect: { k: 'secretNoteFx' }, expansion: true },
   { id: 'barrier', no: 'NO.049', name: '防护屏障', kind: 'item', cost: 3, count: 4, text: '取消玩家即将单独对你使用的[秘密交易]或[备用道具]效果（不可对[防护屏障]使用）。', effect: { k: 'todo' }, expansion: true },
-  { id: 'eraser', no: 'NO.050', name: '魔术橡皮', kind: 'item', cost: 3, count: 2, text: '【出牌】前，宣称一种牌型，本回合【对决】此牌型视为「高牌」。', effect: { k: 'todo' }, expansion: true },
-  { id: 'demag', no: 'NO.051', name: '消磁枪', kind: 'item', cost: 4, count: 2, text: '【对决】令一位玩家的1张强化芯片失效。', effect: { k: 'todo' }, expansion: true },
+  { id: 'eraser', no: 'NO.050', name: '魔术橡皮', kind: 'item', cost: 3, count: 2, text: '【出牌】前，宣称一种牌型，本回合【对决】此牌型视为「高牌」。', effect: { k: 'eraserFx' }, expansion: true },
+  { id: 'demag', no: 'NO.051', name: '消磁枪', kind: 'item', cost: 4, count: 2, text: '【对决】令一位玩家的1张强化芯片失效。', effect: { k: 'demagNullify' }, expansion: true },
 ];
 
 /** 全量牌表（含拓展）：视图/购买解析用 */
