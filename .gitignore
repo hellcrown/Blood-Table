@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 .admin-secret
 .admin-secret
+server/simdbg.tmp.ts
