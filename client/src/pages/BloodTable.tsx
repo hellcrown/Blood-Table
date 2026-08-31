@@ -43,6 +43,22 @@ const PHASES: { key: BloodView['phase']; label: string }[] = [
 /** 骰子点数面（对赌协议特效） */
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
+/** 黑市牌动画资源（client/src/assets/fx/<defId>.webp|gif，存在则替代 emoji 水印） */
+const FX_MODULES = import.meta.glob('../assets/fx/*.webp', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>;
+Object.assign(
+  FX_MODULES,
+  import.meta.glob('../assets/fx/*.gif', { eager: true, query: '?url', import: 'default' }) as Record<
+    string,
+    string
+  >,
+);
+const fxUrlOf = (defId: string): string | undefined =>
+  FX_MODULES[`../assets/fx/${defId}.webp`] ?? FX_MODULES[`../assets/fx/${defId}.gif`];
+
 /** 已有专属特效的宣告效果类型 */
 const ANNOUNCE_FX_KINDS = new Set([
   'rollDice',
@@ -974,7 +990,12 @@ export function BloodTable({ view }: { view: BloodView }) {
           {view.announce.extra && <div className="announce-extra">{view.announce.extra}</div>}
           <div className="announce-tip">已向所有人宣告 · 点击关闭</div>
 
-          {/* 效果特效层 */}
+          {/* 自定义动画（assets/fx/<defId>）：全亮度显示在右侧，文字自动让位 */}
+          {view.announce && fxUrlOf(view.announce.defId) && (
+            <img className="fx-img" src={fxUrlOf(view.announce.defId)} alt="" />
+          )}
+
+          {/* 效果特效层（emoji 水印，仅无自定义动画的牌显示） */}
           <div className="announce-fx">
             {annFx === 'rollDice' && (
               <div className="fx-dice">
@@ -1020,11 +1041,13 @@ export function BloodTable({ view }: { view: BloodView }) {
                 <span className="scale-emoji">⚖️</span>
               </div>
             )}
-            {annFx != null && !ANNOUNCE_FX_KINDS.has(annFx) && (
-              <div className="fx-generic">
-                <span>{ANNOUNCE_FX_EMOJI[annFx] ?? '✨'}</span>
-              </div>
-            )}
+            {annFx != null &&
+              !ANNOUNCE_FX_KINDS.has(annFx) &&
+              !(view.announce && fxUrlOf(view.announce.defId)) && (
+                <div className="fx-generic">
+                  <span>{ANNOUNCE_FX_EMOJI[annFx] ?? '✨'}</span>
+                </div>
+              )}
           </div>
         </div>
       )}
