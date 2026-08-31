@@ -155,6 +155,7 @@ export type BloodAction =
   | { t: 'bUseItem'; itemId: string | null }
   | { t: 'bSteal'; seat: number }
   | { t: 'bShowdownDone' }
+  | { t: 'bResign' }
   | { t: 'bBuy'; slot: number; insertInto?: string }
   | { t: 'bInsertChip'; cardId: string }
   | { t: 'bInsertSkip' }

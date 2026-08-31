@@ -11,6 +11,8 @@ import {
   bReorg,
   bSetup,
   bShowdownDone,
+  bResign,
+  bUseItem,
   bSwap,
   bSwapStop,
   bRefreshPick,
@@ -194,6 +196,12 @@ describe('血色引擎 · 选将与角色技能', () => {
     expect(gs.players.every((p) => p.charOptions.length === 2 && p.charOptions[0] !== p.charOptions[1])).toBe(true);
     // 选项外的角色不能选
     expect(() => bPickChar(gs, 'p0', 'liu', NOW)).toThrow();
+    // 避开飞车党（跳过初始构筑，手牌为 0 张，属于角色特性而非发牌错误）
+    for (const p of gs.players) {
+      if (p.charOptions.includes('biker')) {
+        p.charOptions = p.charOptions.map((c) => (c === 'biker' ? 'dealer' : c));
+      }
+    }
     bPickChar(gs, 'p0', gs.players[0].charOptions[0], NOW);
     expect(gs.players[0].charId).not.toBeNull();
     expect(gs.phase).toBe('pick'); // 等另一名玩家
@@ -456,5 +464,43 @@ describe('血色引擎 · 拓展黑市', () => {
     bBuy(gs, first.id, 2, undefined, NOW);
     expect(first.blood).toBe(b0 + 5 - 3); // +5 得，-3 买
     expect(second.blood).toBe(b1 + 1);
+  });
+});
+
+describe('血色引擎 · 荷官证时点与投降', () => {
+  function reachPlay(): BloodState {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    return gs;
+  }
+
+  it('荷官证：出牌阶段宣告生效；亮牌阶段不可用', () => {
+    const gs = reachPlay();
+    gs.players[0].items.push({ id: 'it1', def: 'dealerLic' });
+    bUseItem(gs, 'p0', 'it1', NOW);
+    expect(gs.comparePipsFirst).toBe(true);
+    expect(gs.players[0].items.length).toBe(0);
+    // 双方出牌后进入对决，昭告已不可再用道具
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    gs.players[1].items.push({ id: 'it2', def: 'dealerLic' });
+    expect(() => bUseItem(gs, 'p1', 'it2', NOW)).toThrow();
+    confirmSd(gs);
+  });
+
+  it('投降：本局判负，对方直接获胜', () => {
+    const gs = reachPlay();
+    gs.players[0].tickets = 10;
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    bResign(gs, 'p1', NOW);
+    expect(gs.phase).toBe('gameover');
+    expect(gs.final!.winnerSeat).toBe(gs.players[0].seat);
+    // 投降者排名垫底
+    expect(gs.final!.ranking[gs.final!.ranking.length - 1].name).toBe('乙');
   });
 });

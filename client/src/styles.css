@@ -1399,6 +1399,22 @@ select:focus {
   flex: none;
 }
 
+html,
+body {
+  touch-action: manipulation; /* 移动端禁用双击缩放，避免快速点选卡牌被吞 */
+
+}
+
+.bcard-wrap,
+.btn,
+.pcard,
+.seat-cell,
+.market-card {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .zone-buttons {
   display: flex;
   gap: 8px;
@@ -2336,7 +2352,33 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 0;
+  opacity: 0.32; /* 特效作为背景水印，不遮挡宣告文字 */
+}
+
+.announce-head,
+.announce-text,
+.announce-extra,
+.announce-tip {
+  position: relative;
   z-index: 1;
+}
+
+/* 未定制特效的宣告：通用浮动动画 */
+.fx-generic span {
+  font-size: 48px;
+  line-height: 1;
+  display: inline-block;
+  animation: fx-generic-float 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes fx-generic-float {
+  from {
+    transform: translateY(10px) scale(0.94);
+  }
+  to {
+    transform: translateY(-10px) scale(1.06);
+  }
 }
 
 /* 对赌协议：骰子旋转落地 */
@@ -3005,3 +3047,19 @@ select:focus {
   min-height: 0;
 }
 
+/* 卡牌下方芯片名（弃牌区/手牌） */
+.zone-cell,
+.hand-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.zone-chips {
+  font-size: 10px;
+  color: #9fd8b6;
+  text-align: center;
+  line-height: 1.35;
+  max-width: 120px;
+}

@@ -90,6 +90,8 @@ export function Showdown({
   myConfirmed,
   deadline,
   timeOffset,
+  final,
+  onClose,
   onConfirm,
 }: {
   rows: ShowdownRow[];
@@ -104,6 +106,10 @@ export function Showdown({
   deadline: number | null;
   /** 客户端与服务端时钟偏移（serverTime - Date.now()） */
   timeOffset: number;
+  /** 终局模式：本回合拿到目标车票，展示完由用户点「继续」关闭 */
+  final?: boolean;
+  /** 关闭展示（终局模式 / 已确认后） */
+  onClose?: () => void;
   onConfirm: () => void;
 }) {
   // 0 等待 → 1 翻牌 → 2 牌型点数（关键牌高亮）→ 3 判定（停留展示）；ready = 演示完整播完，开始倒计时
@@ -164,8 +170,15 @@ export function Showdown({
     ready && deadline != null ? Math.max(0, Math.ceil((deadline - (Date.now() + timeOffset)) / 1000)) : 0;
 
   const advance = () => {
-    if (phase < 3) setPhase(phase + 1);
-    else if (!myConfirmed) onConfirm();
+    if (phase < 3) {
+      setPhase(phase + 1);
+      return;
+    }
+    if (final) {
+      onClose?.();
+      return;
+    }
+    if (!myConfirmed) onConfirm();
   };
 
   const cardDelay = (seatIdx: number, cardIdx: number) => seatIdx * SD_TIMING.seatGap + cardIdx * SD_TIMING.cardGap;
@@ -180,7 +193,9 @@ export function Showdown({
 
         {/* 演示播完后：倒计时 + 确认状态 */}
         <div className={`sd-status ${phase >= 3 ? 'on' : ''}`}>
-          {!ready ? (
+          {final ? (
+            <span>🏆 终局对决 · 决定车票归属的一战</span>
+          ) : !ready ? (
             phase < 3 ? (
               <span>⚔️ 双方依次亮牌…</span>
             ) : (
@@ -256,21 +271,46 @@ export function Showdown({
 
         <div className="sd-controls">
           <span className="sd-hint">
-            {myConfirmed
-              ? '等待对方确认，或倒计时结束后自动关闭'
-              : phase < 3
-                ? '点击画面可加速演示 · 按钮可提前确认'
-                : '点击画面或按钮立即确认 · 倒计时结束自动关闭'}
+            {final
+              ? phase < 3
+                ? '点击画面可加速演示'
+                : '点击画面或按钮继续'
+              : myConfirmed
+                ? '等待对方确认，或倒计时结束后自动关闭'
+                : phase < 3
+                  ? '点击画面可加速演示 · 按钮可提前确认'
+                  : '点击画面或按钮立即确认 · 倒计时结束自动关闭'}
           </span>
           <button
             className="btn small"
-            disabled={myConfirmed}
+            disabled={myConfirmed && !final}
             onClick={(e) => {
               e.stopPropagation();
+              if (final) {
+                if (phase < 3) setPhase(3);
+                else onClose?.();
+                return;
+              }
+              if (phase < 3) {
+                setPhase(3);
+                return;
+              }
+              if (myConfirmed) {
+                onClose?.();
+                return;
+              }
               onConfirm();
             }}
           >
-            {myConfirmed ? '已确认' : phase < 3 ? '提前确认' : '确认'}
+            {final
+              ? phase < 3
+                ? '跳过动画'
+                : '继续'
+              : myConfirmed
+                ? '已确认'
+                : phase < 3
+                  ? '提前确认'
+                  : '确认'}
           </button>
         </div>
       </div>

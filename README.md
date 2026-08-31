@@ -112,3 +112,10 @@ cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 
 说明：前端构建产物 `client/dist` 已随仓库提交，服务器上无需构建（1G 内存小机也跑得动）；
 `deploy.sh` 使用 pm2 守护进程并开机自启（`pm2 save` 后执行一次 `pm2 startup` 按提示操作）。
+
+| 命令                        | 作用                       |
+| --------------------------- | -------------------------- |
+| bloodtable update           | 拉最新代码并重启（最常用） |
+| bloodtable restart / reboot | 重启游戏服务               |
+| bloodtable clear            | 一键清空所有房间           |
+| bloodtable status / logs    | 看运行状态 / 看日志        |

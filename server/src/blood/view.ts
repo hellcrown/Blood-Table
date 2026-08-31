@@ -13,11 +13,6 @@ function cardView(c: BCard, p: BPlayer): BloodCardView {
   };
 }
 
-function usableItemCount(p: BPlayer): number {
-  // 当前仅有荷官证可在对决阶段使用
-  return p.items.filter((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'dealerLicense').length;
-}
-
 function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
   switch (gs.phase) {
     case 'pick':
@@ -31,7 +26,6 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
     case 'reveal': {
       if (gs.turnSeat !== p.seat) return { k: 'wait' };
       if (gs.stealPending && gs.stealPending.seat === p.id) return { k: 'steal' };
-      if (usableItemCount(p) > 0) return { k: 'revealItem', max: usableItemCount(p) };
       return { k: 'wait' };
     }
     case 'settle':

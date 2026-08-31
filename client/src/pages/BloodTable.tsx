@@ -43,6 +43,40 @@ const PHASES: { key: BloodView['phase']; label: string }[] = [
 /** 骰子点数面（对赌协议特效） */
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
+/** 已有专属特效的宣告效果类型 */
+const ANNOUNCE_FX_KINDS = new Set([
+  'rollDice',
+  'deleteUpTo',
+  'violentDelete',
+  'topOfMarket',
+  'privilegeBonus',
+  'refreshMarket',
+  'dealerLicense',
+]);
+
+/** 其它效果的通用宣告动画 emoji */
+const ANNOUNCE_FX_EMOJI: Record<string, string> = {
+  closingGift: '🩸',
+  bloodShare: '🩸',
+  stealPrivilege: '👑',
+  settleWinTicket: '🎫',
+  selfDestruct: '💥',
+  magCoil: '🧲',
+  imitate: '🔖',
+  copyChip: '🧬',
+  settleWin: '👑',
+  settleLose: '🩸',
+  revealGain: '🩸',
+  revealSteal: '🏴‍☠️',
+  rankMod: '🔧',
+  suit: '♦️',
+  suitWild: '🎨',
+  rankWild: '🎯',
+  wild: '🃏',
+  dupe: '🪞',
+  todo: '✨',
+};
+
 type SortMode = 'none' | 'suit' | 'rank';
 
 /** 手牌排序：花色 = 同花色数量多者在前、王牌恒最左，组内按点数从小到大；点数 = 从小到大 */
@@ -138,6 +172,16 @@ export function BloodTable({ view }: { view: BloodView }) {
   const opp = view.players.find((p) => p.seat !== view.me.seat);
   const isHost = view.hostId === net.playerId;
 
+  // 阶段/回合切换时清空各阶段的选择状态（防止上一阶段的残留占用选择上限）
+  useEffect(() => {
+    setSelSetup([]);
+    setSelSwap([]);
+    setSelPlay([]);
+    setSelRemove([]);
+    setDelPick([]);
+    setRefreshPick([]);
+  }, [view.round, view.phase]);
+
   const offsetRef = useRef(0);
   // 只在收到新视图（携带新的服务器时间）时校准时钟偏移。
   // 不能在每次渲染时计算：点击界面等重渲染会用“过期视图时间”污染偏移，导致倒计时跳变。
@@ -179,7 +223,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const lastShowdownRound = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!view.result || view.phase === 'gameover') return;
+    if (!view.result) return;
     if (lastShowdownRound.current === view.round) return;
     lastShowdownRound.current = view.round;
     const rows: ShowdownRow[] = view.result.rows.map((r) => {
@@ -213,10 +257,10 @@ export function BloodTable({ view }: { view: BloodView }) {
     });
   }, [view.result, view.round, view.phase]);
 
-  // 对决展示结束（全员确认 / 演示播完后 30s 超时推进）→ 弹窗自动关闭
+  // 对决展示结束（全员确认 / 演示播完后 30s 超时推进）→ 弹窗自动关闭；终局模式由用户手动关闭
   useEffect(() => {
-    if (showdown && !view.showdownWait) setShowdown(null);
-  }, [view.showdownWait, showdown]);
+    if (showdown && !view.showdownWait && view.phase !== 'gameover') setShowdown(null);
+  }, [view.showdownWait, view.phase, showdown]);
 
   // 日志自动滚到底部
   useEffect(() => {
@@ -359,6 +403,16 @@ export function BloodTable({ view }: { view: BloodView }) {
             房间 <b>{view.code}</b> · 第 {view.round + 1} 回合 · 目标 {view.target} 车票
           </span>
           <span className="spacer" />
+          {view.phase !== 'gameover' && (
+            <button
+              className="btn small danger"
+              onClick={() => {
+                if (window.confirm('确定投降？本局判负并立即结束对局。')) send({ t: 'bResign' });
+              }}
+            >
+              投降
+            </button>
+          )}
           <button
             className="btn small ghost"
             onClick={() => {
@@ -568,13 +622,21 @@ export function BloodTable({ view }: { view: BloodView }) {
             </div>
             <div className="my-hand">
               {handList.map((c) => (
-                <BCard
-                  key={c.id}
-                  c={c}
-                  size="lg"
-                  selected={handClickable && handSel.includes(c.id)}
-                  onClick={handClickable ? () => toggle(handSel, handSetSel, c.id, handMax) : undefined}
-                />
+                <div key={c.id} className="hand-cell">
+                  <BCard
+                    c={c}
+                    size="lg"
+                    selected={handClickable && handSel.includes(c.id)}
+                    onClick={handClickable ? () => toggle(handSel, handSetSel, c.id, handMax) : undefined}
+                  />
+                  {c.chipIds.length > 0 && (
+                    <div className="zone-chips">
+                      {c.chipIds.map((id) => (
+                        <span key={id}>【{BLOOD_MARKET_BY_ID.get(id)?.name}】</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
               {handList.length === 0 && <span className="hint">…</span>}
             </div>
@@ -614,6 +676,16 @@ export function BloodTable({ view }: { view: BloodView }) {
                       停止换牌（剩余 {view.me.swapLeft} 次兑 {view.me.swapLeft}🩸）
                     </button>
                   </>
+                )}
+                {view.prompt.k === 'play' && view.me.items.some((it) => it.name === '荷官证') && (
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '荷官证')!.id })
+                    }
+                  >
+                    ⚖️ 使用荷官证（宣告先比总点数）
+                  </button>
                 )}
                 {view.prompt.k === 'play' && (
                   <button
@@ -817,14 +889,22 @@ export function BloodTable({ view }: { view: BloodView }) {
                   const list = view.prompt.k === 'secretDelete' ? delPick : selRemove;
                   const selected = pickMode && !chipBuying && list.includes(c.id);
                   return (
-                    <BCard
-                      key={c.id}
-                      c={c}
-                      size="md"
-                      selected={selected}
-                      dim={chipBuying != null && c.chipIds.length > 0}
-                      onClick={() => (pickMode ? onDiscardClick(c) : setDetail(c))}
-                    />
+                    <div key={c.id} className="zone-cell">
+                      <BCard
+                        c={c}
+                        size="md"
+                        selected={selected}
+                        dim={chipBuying != null && c.chipIds.length > 0}
+                        onClick={() => (pickMode ? onDiscardClick(c) : setDetail(c))}
+                      />
+                      {c.chipIds.length > 0 && (
+                        <div className="zone-chips">
+                          {c.chipIds.map((id) => (
+                            <span key={id}>【{BLOOD_MARKET_BY_ID.get(id)?.name}】</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
                 {zoneCards.length === 0 && <span className="hint">空</span>}
@@ -940,6 +1020,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                 <span className="scale-emoji">⚖️</span>
               </div>
             )}
+            {annFx != null && !ANNOUNCE_FX_KINDS.has(annFx) && (
+              <div className="fx-generic">
+                <span>{ANNOUNCE_FX_EMOJI[annFx] ?? '✨'}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1002,13 +1087,15 @@ export function BloodTable({ view }: { view: BloodView }) {
           myConfirmed={view.players.find((p) => p.seat === view.me.seat)?.sdSeen ?? false}
           deadline={view.deadline}
           timeOffset={offsetRef.current}
+          final={view.phase === 'gameover'}
+          onClose={() => setShowdown(null)}
           onConfirm={() => net.send({ t: 'bShowdownDone' })}
         />
       )}
 
       {/* 结算：右上角浮动卡片，每回合只弹一次，不遮挡操作 */}
       {/* 终局 */}
-      {view.final && (
+      {view.final && !showdown && (
         <div className="overlay">
           <div className="panel">
             <h3>🏆 整场结束</h3>

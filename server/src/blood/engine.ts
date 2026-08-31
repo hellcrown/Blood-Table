@@ -672,25 +672,34 @@ export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now
 }
 
 export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
+  const p = gs.players.find((x) => x.id === playerId);
+  if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
+
+  // 荷官证时点（官方FAQ 052）：出牌阶段（暗扣确认前）宣告——此时还看不到对手的牌
+  if (gs.phase === 'play') {
+    if (itemId == null) return;
+    if (p.locked) throw new BloodError('ALREADY_DONE', '你已确认出牌，无法再宣告');
+    const item = p.items.find((i) => i.id === itemId);
+    if (!item) throw new BloodError('BAD_ITEM', '道具不存在');
+    const def = BLOOD_MARKET_BY_ID.get(item.def);
+    if (!def || def.effect.k !== 'dealerLicense') throw new BloodError('BAD_TIMING', '该道具当前无法使用');
+    p.items = p.items.filter((i) => i.id !== itemId);
+    gs.recycle.push(item.def);
+    gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
+    gs.comparePipsFirst = true;
+    pushLog(gs, 'action', `${p.name} 使用【荷官证】：本次对决先比总点数，平局再比牌型（出牌阶段宣告）`);
+    return;
+  }
+
   if (gs.phase !== 'reveal') throw new BloodError('BAD_PHASE', '不在对决阶段');
   if (gs.stealPending) throw new BloodError('PENDING', '先选择掠夺目标');
   if (gs.turnSeat !== seatOf(gs, playerId)) throw new BloodError('NOT_YOUR_TURN', '还没轮到你宣告');
-  const p = gs.players.find((x) => x.id === playerId)!;
   if (itemId == null) {
     pushLog(gs, 'action', `${p.name} 宣告完毕`);
     nextRevealOrSettle(gs, now);
     return;
   }
-  const item = p.items.find((i) => i.id === itemId);
-  if (!item) throw new BloodError('BAD_ITEM', '道具不存在');
-  const def = BLOOD_MARKET_BY_ID.get(item.def);
-  if (!def || def.effect.k !== 'dealerLicense') throw new BloodError('BAD_TIMING', '该道具当前无法使用');
-  p.items = p.items.filter((i) => i.id !== itemId);
-  gs.recycle.push(item.def);
-  gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
-  gs.comparePipsFirst = true;
-  pushLog(gs, 'action', `${p.name} 使用【荷官证】：本次对决先比总点数，平局再比牌型`);
-  nextRevealOrSettle(gs, now);
+  throw new BloodError('BAD_TIMING', '该道具当前无法使用（荷官证需在出牌阶段宣告）');
 }
 
 function seatOf(gs: BloodState, playerId: string): number {
@@ -1589,6 +1598,35 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       gs.deadline = now + BLOOD_TURN_MS;
       return;
   }
+}
+
+/** 投降：本局判负并立即结束，其余玩家按车票/血筹码座排序结算名次 */
+export function bResign(gs: BloodState, playerId: string, now: number): void {
+  void now;
+  if (gs.phase === 'gameover') return;
+  if (gs.phase === 'pick' || gs.phase === 'setup') throw new BloodError('BAD_PHASE', '当前阶段无法投降');
+  const p = gs.players.find((x) => x.id === playerId);
+  if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
+  const others = gs.players.filter((x) => x.id !== playerId);
+  if (others.length === 0) return;
+  const winner = others.slice().sort((a, b) => b.tickets - a.tickets || b.blood - a.blood)[0];
+  for (const o of gs.players) o.privilege = false;
+  winner.privilege = true;
+  gs.privilegeSeat = winner.seat;
+  gs.phase = 'gameover';
+  gs.deadline = null;
+  gs.final = {
+    winnerSeat: winner.seat,
+    ranking: gs.players
+      .slice()
+      .sort((a, b) => {
+        if (a.id === playerId) return 1;
+        if (b.id === playerId) return -1;
+        return b.tickets - a.tickets || b.blood - a.blood;
+      })
+      .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood })),
+  };
+  pushLog(gs, 'sys', `🏳️ ${p.name} 投降，本局判负 · ${winner.name} 获胜`);
 }
 
 /* ---------------- 再来一场 ---------------- */

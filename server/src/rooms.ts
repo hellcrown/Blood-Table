@@ -199,6 +199,9 @@ export class RoomManager {
       case 'bShowdownDone':
         blood.bShowdownDone(bs, pid, now);
         break;
+      case 'bResign':
+        blood.bResign(bs, pid, now);
+        break;
       case 'bBuy':
         blood.bBuy(bs, pid, msg.slot, msg.insertInto, now);
         break;
