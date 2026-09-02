@@ -27,6 +27,8 @@ import {
   bRevealChipTarget,
   bSkipDecision,
   bBarrierDecide,
+  bDemagPick,
+  bPinpointVictimPick,
   bloodTick,
   bloodRematch,
   createBloodGame,
@@ -484,7 +486,6 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     p1.chips.push({ id: 'ch-cw', def: 'coatWin', on: p1.hand[0].id });
     bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, 'p1', p1.hand.slice(0, 5).map((c) => c.id), NOW);
-    console.log('DIAG phase=' + gs.phase + ' p0play=' + p0.play.length + ' p1play=' + p1.play.length + ' pend=' + JSON.stringify(gs.secretPending));
     const blood0 = p0.blood;
     // 甲四条K必胜，复制乙的镀层（胜）
     bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'coatWin', NOW);
@@ -525,7 +526,7 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     bBarrierDecide(gs, defender.id, true, NOW);
     expect(defender.discard.length).toBe(discardCount); // 被抵消，牌没删
     expect(gs.recycle.includes('barrier')).toBe(true);
-    // 第二次：无屏障（轮转后的当前回合玩家购买），生效结算
+    // 第二次：无屏障（轮转后的当前回合玩家购买），受害者自选被删的牌
     const buyer2 = gs.players.find((p) => gs.turnSeat === p.seat && !p.buyPassed)!;
     buyer2.blood += 10;
     const target2 = gs.players.find((p) => p.id !== buyer2.id)!;
@@ -533,8 +534,41 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     gs.market[1] = { def: 'pinpoint', bonus: 0 };
     bBuy(gs, buyer2.id, 1, undefined, NOW);
     bPinpoint(gs, buyer2.id, target2.seat, 9, NOW);
+    expect(gs.secretPending?.kind).toBe('pinpointVictim');
+    expect(gs.secretPending?.seat).toBe(target2.id);
+    bPinpointVictimPick(gs, target2.id, 'd9b', NOW);
     expect(gs.secretPending).toBeNull();
     expect(target2.discard.some((c) => c.r === 9)).toBe(false);
+    expect(target2.removed.some((c) => c.id === 'd9b')).toBe(true);
+  });
+});
+
+describe('血色引擎 · 拓展牌自选交互', () => {
+  it('消磁枪：使用者自选目标玩家的芯片', () => {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    const p0 = gs.players[0];
+    const p1 = gs.players[1];
+    p1.chips.push({ id: 'ch-cal', def: 'calib1', on: p1.hand[0].id });
+    p0.items.push({ id: 'it-dm', def: 'demag' });
+    bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', p1.hand.slice(0, 5).map((c) => c.id), NOW);
+    expect(gs.phase).toBe('reveal');
+    const pips1 = evalForPlayer(p1).pips;
+    bUseItem(gs, 'p0', 'it-dm', NOW);
+    expect(gs.secretPending?.kind).toBe('demagTarget');
+    bSecretTarget(gs, 'p0', 1, NOW);
+    expect(gs.secretPending?.kind).toBe('demagPick');
+    expect(gs.secretPending?.targetSeat).toBe(p1.id);
+    bDemagPick(gs, 'p0', p1.play[0].id, 'calib1', NOW);
+    expect(p1.chips.find((c) => c.id === 'ch-cal')!.off).toBe(true);
+    expect(gs.phase).toBe('settle'); // 决策完成，窗口推进到结算
+    const row1 = gs.result!.rows.find((r) => r.seat === 1)!;
+    expect(row1.pips).toBe(pips1 - 1); // +1 被失效，按失效后点数结算
   });
 });
 

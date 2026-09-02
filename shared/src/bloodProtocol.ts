@@ -98,7 +98,9 @@ export interface BloodMyPrompt {
     | 'irisGuess'
     | 'eraserClaim'
     | 'revealDecide'
-    | 'barrierAsk';
+    | 'barrierAsk'
+    | 'demagPick'
+    | 'pinpointVictim';
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
@@ -110,6 +112,10 @@ export interface BloodMyPrompt {
   chipId?: string;
   /** barrierAsk：待反制效果描述 */
   eff?: string;
+  /** demagPick / pinpointVictim：目标或受害者座位号 */
+  targetSeat?: number;
+  /** pinpointVictim：被宣称的点数 */
+  rank?: number;
 }
 
 export interface BloodAnnounceView {
@@ -187,6 +193,8 @@ export type BloodAction =
   | { t: 'bRevealChipTarget'; seat: number; cardId: string; defId: string }
   | { t: 'bSkipDecision' }
   | { t: 'bBarrierDecide'; use: boolean }
+  | { t: 'bDemagPick'; cardId: string; defId: string }
+  | { t: 'bPinpointVictimPick'; cardId: string }
   | { t: 'bBuy'; slot: number; insertInto?: string }
   | { t: 'bInsertChip'; cardId: string }
   | { t: 'bInsertSkip' }

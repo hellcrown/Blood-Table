@@ -929,6 +929,44 @@ export function bSkipDecision(gs: BloodState, playerId: string, now: number): vo
   advanceRevealDecision(gs, now);
 }
 
+/** 消磁枪：使用者选定要失效的目标芯片 */
+export function bDemagPick(gs: BloodState, playerId: string, cardId: string, defId: string, now: number): void {
+  void now;
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'demagPick' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待选择的消磁目标');
+  }
+  const t = gs.players.find((x) => x.id === pend.targetSeat)!;
+  const chip = t.chips.find((ch) => ch.on === cardId && ch.def === defId && !ch.off);
+  if (!chip) throw new BloodError('BAD_TARGET', '目标芯片不存在或已失效');
+  chip.off = true;
+  const def = BLOOD_MARKET_BY_ID.get(defId)!;
+  gs.recycle.push(pend.defId ?? 'demag');
+  gs.secretPending = null;
+  pushLog(gs, 'action', `【消磁枪】${t.name} 出牌区的【${def.name}】本次对决失效`);
+  nextRevealOrSettle(gs, now);
+}
+
+/** 定点爆破：受害者选定要删除的牌 */
+export function bPinpointVictimPick(gs: BloodState, playerId: string, cardId: string, now: number): void {
+  void now;
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'pinpointVictim' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待处理的定点爆破');
+  }
+  const t = gs.players.find((x) => x.id === playerId)!;
+  const rank = pend.rank ?? 0;
+  const card = t.discard.find((c) => c.id === cardId);
+  if (!card) throw new BloodError('BAD_CARD', '目标牌不在你的弃牌区');
+  if (finalRank(t, card) !== rank) throw new BloodError('BAD_CARD', `须选择 ${rank} 点的牌`);
+  t.discard = t.discard.filter((c) => c.id !== cardId);
+  t.removed.push(card);
+  const buyer = gs.players.find((x) => x.id === pend.buyerId)!;
+  gs.secretPending = null;
+  pushLog(gs, 'action', `【定点爆破】${t.name} 删除弃牌堆中的 ${bloodCardText(card)}（${rank} 点）`);
+  afterMarketResolved(gs, buyer, false);
+}
+
 /** 防护屏障决策：use=true 抵消；false 允许生效 */
 export function bBarrierDecide(gs: BloodState, playerId: string, use: boolean, now: number): void {
   const pend = gs.secretPending;
@@ -2214,17 +2252,15 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
       if (tryBarrierAsk(gs, t.id, p.id, eff)) return;
       const chips = t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off);
       if (chips.length === 0) {
+        gs.recycle.push(pend.defId ?? 'demag');
+        gs.secretPending = null;
         pushLog(gs, 'action', `【消磁枪】${t.name} 的出牌区没有强化芯片，效果落空`);
-      } else {
-        const best = chips
-          .map((ch) => ({ ch, def: BLOOD_MARKET_BY_ID.get(ch.def)! }))
-          .sort((a, b) => b.def.cost - a.def.cost)[0];
-        best.ch.off = true;
-        pushLog(gs, 'action', `【消磁枪】${t.name} 出牌区的【${best.def.name}】本次对决失效`);
+        nextRevealOrSettle(gs, now);
+        return;
       }
-      gs.recycle.push(pend.defId ?? 'demag');
-      gs.secretPending = null;
-      nextRevealOrSettle(gs, now);
+      // 使用者自选目标玩家的具体芯片
+      gs.secretPending = { seat: p.id, kind: 'demagPick', defId: pend.defId ?? 'demag', targetSeat: t.id };
+      pushLog(gs, 'action', `【消磁枪】${p.name} 请选择 ${t.name} 出牌区要失效的芯片`);
       return;
     }
     default:
@@ -2281,14 +2317,14 @@ export function bPinpoint(gs: BloodState, playerId: string, seat: number, rank: 
   const matches = t.discard.filter((c) => finalRank(t, c) === rank);
   if (matches.length === 0) {
     pushLog(gs, 'action', `【定点爆破】${t.name} 公示弃牌堆：没有 ${rank} 点的牌，效果落空`);
-  } else {
-    const pick = matches[randomInt(0, matches.length)];
-    t.discard = t.discard.filter((c) => c.id !== pick.id);
-    t.removed.push(pick);
-    pushLog(gs, 'action', `【定点爆破】${t.name} 删除弃牌堆中的 ${bloodCardText(pick)}（${rank} 点）`);
+    gs.secretPending = null;
+    afterMarketResolved(gs, p, false);
+    return;
   }
-  gs.secretPending = null;
-  afterMarketResolved(gs, p, false);
+  // 受害者自选要删除的那张（转交选择权）
+  gs.secretPending = { seat: t.id, kind: 'pinpointVictim', rank, buyerId: p.id, targetSeat: t.id };
+  pushLog(gs, 'action', `【定点爆破】${t.name} 须从弃牌堆选择一张 ${rank} 点的牌删除`);
+  gs.deadline = now + BLOOD_TURN_MS;
 }
 
 /** 精准删除：抽到的 3 张牌中删除 0-2 张，其余弃置 */
@@ -2381,6 +2417,40 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       if (pend.defId) gs.recycle.push(pend.defId);
       pushLog(gs, 'action', '宣告超时，效果落空弃置');
       gs.secretPending = null;
+      return;
+    }
+    case 'demagPick': {
+      // 托管：随机失效目标出牌区的一张芯片；无芯片则落空
+      const t = gs.players.find((x) => x.id === pend.targetSeat);
+      const chips = t ? t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off) : [];
+      gs.recycle.push(pend.defId ?? 'demag');
+      gs.secretPending = null;
+      if (chips.length > 0) {
+        const pickChip = chips[randomInt(0, chips.length)];
+        pickChip.off = true;
+        const tName = t?.name ?? '?';
+        pushLog(gs, 'action', `【消磁枪】托管：${tName} 出牌区的【${BLOOD_MARKET_BY_ID.get(pickChip.def)?.name}】失效`);
+      } else {
+        pushLog(gs, 'action', '【消磁枪】托管：无有效目标，落空');
+      }
+      nextRevealOrSettle(gs, now);
+      return;
+    }
+    case 'pinpointVictim': {
+      // 托管：随机删除一张匹配点数的牌；无匹配则落空
+      const rank = pend.rank ?? 0;
+      const matches = p.discard.filter((c) => finalRank(p, c) === rank);
+      gs.secretPending = null;
+      if (matches.length === 0) {
+        pushLog(gs, 'action', `【定点爆破】${p.name} 弃牌堆没有 ${rank} 点的牌，落空`);
+      } else {
+        const pickCard = matches[randomInt(0, matches.length)];
+        p.discard = p.discard.filter((c) => c.id !== pickCard.id);
+        p.removed.push(pickCard);
+        pushLog(gs, 'action', `【定点爆破】托管：${p.name} 删除弃牌堆中的 ${bloodCardText(pickCard)}`);
+      }
+      const buyer = gs.players.find((x) => x.id === pend.buyerId)!;
+      afterMarketResolved(gs, buyer, false);
       return;
     }
   }

@@ -232,6 +232,12 @@ export class RoomManager {
       case 'bBarrierDecide':
         blood.bBarrierDecide(bs, pid, msg.use, now);
         break;
+      case 'bDemagPick':
+        blood.bDemagPick(bs, pid, msg.cardId, msg.defId, now);
+        break;
+      case 'bPinpointVictimPick':
+        blood.bPinpointVictimPick(bs, pid, msg.cardId, now);
+        break;
       case 'bBuy':
         blood.bBuy(bs, pid, msg.slot, msg.insertInto, now);
         break;

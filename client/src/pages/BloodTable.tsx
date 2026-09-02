@@ -302,9 +302,9 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [view.logSeq]);
 
-  // 拔除芯片：自动打开弃牌区选择带芯片的牌
+  // 拔除芯片：自动打开弃牌区选择带芯片的牌；定点爆破受害者：自动打开弃牌区选牌
   useEffect(() => {
-    if (view.prompt.k === 'pullChip') setZoneModal({ kind: 'discard' });
+    if (view.prompt.k === 'pullChip' || view.prompt.k === 'pinpointVictim') setZoneModal({ kind: 'discard' });
   }, [view.prompt.k]);
 
   const send = (msg: Parameters<typeof net.send>[0]) => {
@@ -428,6 +428,12 @@ export function BloodTable({ view }: { view: BloodView }) {
       setZoneModal(null);
       return;
     }
+    if (view.prompt.k === 'pinpointVictim') {
+      if (effRankOf(c).r !== (view.prompt.rank ?? 0)) return; // 点数不符不可选
+      send({ t: 'bPinpointVictimPick', cardId: c.id });
+      setZoneModal(null);
+      return;
+    }
     if (view.prompt.k === 'remove') {
       toggle(selRemove, setSelRemove, c.id, 99);
     }
@@ -441,7 +447,9 @@ export function BloodTable({ view }: { view: BloodView }) {
           ? `弃牌区（${view.me.discard.length}）· 点击选择要删除的牌`
           : view.prompt.k === 'pullChip'
             ? `弃牌区（${view.me.discard.length}）· 点击带芯片的牌拔除（+4🩸）`
-            : `弃牌区（${view.me.discard.length}）`
+            : view.prompt.k === 'pinpointVictim'
+              ? `弃牌区（${view.me.discard.length}）· 定点爆破：点击一张 ${view.prompt.rank} 点的牌删除`
+              : `弃牌区（${view.me.discard.length}）`
       : zoneModal?.kind === 'removed'
         ? `删牌区（${view.me.removed.length}）`
         : '道具区';
@@ -1024,7 +1032,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                 {view.prompt.k === 'revealDecide' && view.prompt.decision?.t === 'spring' && (
                   <div className="act-row wrap">
                     <span className="hint">弹簧夹层 · 该牌临时 ±X（X=血筹）：</span>
-                    {[-5, -4, -3, -2, -1, 1, 2, 3, 4, 5].map((m) => {
+                    {[-10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((m) => {
                       const springCard = view.players
                         .find((p) => p.seat === view.me.seat)
                         ?.played?.find((c) => c.id === view.prompt.decision?.cardId);
@@ -1080,6 +1088,34 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button className="btn" onClick={() => send({ t: 'bBarrierDecide', use: false })}>
                       允许生效
                     </button>
+                  </div>
+                )}
+                {view.prompt.k === 'demagPick' && (() => {
+                  const tp = view.players.find((p) => p.seat === view.prompt.targetSeat);
+                  const chips = (tp?.played ?? []).flatMap((c) => c.chipIds.map((defId) => ({ cardId: c.id, defId })));
+                  return (
+                    <div className="act-row wrap">
+                      <span className="hint">消磁枪 · 选择 {tp?.name ?? '目标'} 出牌区要失效的芯片：</span>
+                      {chips.length === 0 && <span className="hint">无芯片</span>}
+                      {chips.map(({ cardId, defId }) => (
+                        <button
+                          key={`${cardId}-${defId}`}
+                          className="btn tiny"
+                          onClick={() => send({ t: 'bDemagPick', cardId, defId })}
+                        >
+                          {tp?.name}·{BLOOD_MARKET_BY_ID.get(defId)?.name}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {view.prompt.k === 'pinpointVictim' && (
+                  <div className="act-row wrap">
+                    <span className="hint">
+                      定点爆破：你的弃牌区将打开，点击一张{' '}
+                      <b>{view.prompt.rank === 14 ? 'A' : view.prompt.rank === 13 ? 'K' : view.prompt.rank === 12 ? 'Q' : view.prompt.rank === 11 ? 'J' : view.prompt.rank}</b>{' '}
+                      点的牌删除
+                    </span>
                   </div>
                 )}
                 {view.prompt.k === 'reorg' && (
@@ -1184,16 +1220,22 @@ export function BloodTable({ view }: { view: BloodView }) {
                     (zoneModal.kind === 'discard' && !!chipBuying) ||
                     (zoneModal.kind === 'discard' && view.prompt.k === 'secretDelete') ||
                     (zoneModal.kind === 'discard' && view.prompt.k === 'remove') ||
-                    (zoneModal.kind === 'discard' && view.prompt.k === 'insertChip');
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'insertChip') ||
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'pullChip') ||
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'pinpointVictim');
                   const list = view.prompt.k === 'secretDelete' ? delPick : selRemove;
                   const selected = pickMode && !chipBuying && list.includes(c.id);
+                  const dimmed =
+                    (chipBuying != null && c.chipIds.length > 0) ||
+                    (view.prompt.k === 'pullChip' && c.chipIds.length === 0) ||
+                    (view.prompt.k === 'pinpointVictim' && effRankOf(c).r !== (view.prompt.rank ?? 0));
                   return (
                     <div key={c.id} className="zone-cell">
                       <BCard
                         c={c}
                         size="md"
                         selected={selected}
-                        dim={chipBuying != null && c.chipIds.length > 0}
+                        dim={dimmed}
                         onClick={() => (pickMode ? onDiscardClick(c) : setDetail(c))}
                       />
                       {c.chipIds.length > 0 && (

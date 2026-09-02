@@ -160,7 +160,7 @@ export interface BloodState {
       | 'poisonTarget' | 'freezeTarget' | 'amnesiaTarget' | 'boxRobTarget'
       | 'pinpointClaim' | 'pullChip' | 'preciseDel' | 'signalTarget' | 'demagTarget'
       | 'irisGuess' | 'sharedInfo' | 'sharedInfoOpp' | 'eraserClaim'
-      | 'revealDecide' | 'barrierAsk';
+      | 'revealDecide' | 'barrierAsk' | 'demagPick' | 'pinpointVictim';
     max?: number;
     chipId?: string;
     defId?: string;
@@ -175,6 +175,10 @@ export interface BloodState {
     /** barrierAsk：待反制效果与描述 */
     barrier?: BarrierEffect;
     eff?: string;
+    /** demagPick：消磁目标座位；pinpointVictim：受害者座位 */
+    targetSeat?: string;
+    /** pinpointVictim：被宣称的点数 */
+    rank?: number;
   } | null;
   /** 魔术橡皮：本回合被降为高牌的牌型 */
   eraserType: number | null;

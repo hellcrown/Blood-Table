@@ -36,6 +36,18 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
         return { k: 'irisGuess' };
       case 'eraserClaim':
         return { k: 'eraserClaim' };
+      case 'demagPick': {
+        const tp = gs.players.find((x) => x.id === pend.targetSeat);
+        return { k: 'demagPick', targetSeat: tp?.seat ?? -1 };
+      }
+      case 'pinpointVictim':
+        return { k: 'pinpointVictim', rank: pend.rank ?? 0 };
+      case 'demagPick': {
+        const tp = gs.players.find((x) => x.id === pend.targetSeat);
+        return { k: 'demagPick', targetSeat: tp?.seat ?? -1 };
+      }
+      case 'pinpointVictim':
+        return { k: 'pinpointVictim', rank: pend.rank ?? 0 };
       case 'pullChip':
         return { k: 'pullChip' };
       case 'preciseDel':
