@@ -154,7 +154,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
   const myItems = me
     ? me.items.map((i) => {
         const def = BLOOD_MARKET_BY_ID.get(i.def);
-        return { id: i.id, name: def?.name ?? '?', text: def?.text ?? '' };
+        return { id: i.id, defId: i.def, name: def?.name ?? '?', text: def?.text ?? '' };
       })
     : [];
 

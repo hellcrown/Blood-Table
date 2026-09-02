@@ -165,7 +165,7 @@ export interface BloodView {
     removed: BloodCardView[];
     drawCount: number;
     setupHand: BloodCardView[];
-    items: { id: string; name: string; text: string }[];
+    items: { id: string; defId: string; name: string; text: string }[];
     swapLeft: number;
   };
   prompt: BloodMyPrompt;

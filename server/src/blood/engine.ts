@@ -833,14 +833,15 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
   }
 }
 
-/** 决策确认/跳过后：弹出下一条或结束决策推进窗口 */
+/** 决策确认/跳过后：弹出下一条或结束决策推进窗口（复制「镀层夺」产生的掠夺未结清时保持等待） */
 function advanceRevealDecision(gs: BloodState, now: number): void {
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'revealDecide') return;
   const rest = (pend.queue ?? []).slice();
   if (rest.length === 0) {
     gs.secretPending = null;
-    nextRevealOrSettle(gs, now);
+    const needSteal = gs.stealPending != null && gs.stealPending.seat === pend.seat;
+    if (!needSteal) nextRevealOrSettle(gs, now);
     return;
   }
   gs.secretPending = { ...pend, kind: 'revealDecide', queue: rest.slice(1), decision: rest[0] };
@@ -1006,6 +1007,9 @@ export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now
 export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
   const p = gs.players.find((x) => x.id === playerId);
   if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
+  if (itemId != null && gs.secretPending && gs.secretPending.seat !== p.id) {
+    throw new BloodError('PENDING', '其他玩家的结算尚未完成，请稍候');
+  }
 
   // 换牌阶段：皮下密信（直接抽牌）与信号干扰器（选择目标）
   if (gs.phase === 'swap') {
@@ -1464,6 +1468,9 @@ export function bBuy(
   if (gs.phase !== 'buy') throw new BloodError('BAD_PHASE', '不在购买阶段');
   const p = gs.players.find((x) => x.id === playerId)!;
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成上一张牌的结算');
+  if (gs.secretPending && gs.secretPending.seat !== p.id) {
+    throw new BloodError('PENDING', '其他玩家的结算尚未完成，请稍候');
+  }
   if (gs.turnSeat !== p.seat || p.buyPassed) throw new BloodError('NOT_YOUR_TURN', '还没轮到你购买');
   const ms = gs.market[slot];
   if (!ms || ms.def == null) throw new BloodError('BAD_SLOT', '该栏位没有黑市牌');

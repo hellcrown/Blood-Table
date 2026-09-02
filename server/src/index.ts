@@ -12,6 +12,30 @@ const CLIENT_DIST = path.resolve(process.cwd(), '../client/dist');
 const ADMIN_KEY = process.env.ADMIN_KEY ?? '';
 /** 管理员会话 token → 过期时间（24h） */
 const adminTokens = new Map<string, number>();
+/** 管理登录失败限速：IP → 失败次数与锁定截止时间 */
+const loginFails = new Map<string, { count: number; until: number }>();
+
+function loginBlocked(req: http.IncomingMessage): number {
+  const ip = req.socket.remoteAddress ?? '?';
+  const rec = loginFails.get(ip);
+  if (!rec) return 0;
+  if (rec.until > 0 && Date.now() >= rec.until) {
+    loginFails.delete(ip);
+    return 0;
+  }
+  return rec.until > 0 ? Math.ceil((rec.until - Date.now()) / 1000) : 0;
+}
+
+function recordLoginFail(req: http.IncomingMessage): void {
+  const ip = req.socket.remoteAddress ?? '?';
+  const rec = loginFails.get(ip) ?? { count: 0, until: 0 };
+  rec.count += 1;
+  if (rec.count >= 5) {
+    rec.until = Date.now() + 60_000;
+    rec.count = 0;
+  }
+  loginFails.set(ip, rec);
+}
 
 function issueAdminToken(): string {
   const now = Date.now();
@@ -30,6 +54,9 @@ function isAdmin(req: http.IncomingMessage): boolean {
 }
 
 function isLoopback(req: http.IncomingMessage): boolean {
+  // 经反向代理（Caddy/Nginx 会注入 X-Forwarded-*）转发的请求视为外部来源，
+  // 防止外网用户通过本机代理绕过 loopback 限制
+  if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-proto']) return false;
   const ip = req.socket.remoteAddress ?? '';
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
@@ -126,6 +153,11 @@ const server = http.createServer((req, res) => {
         send(503, { ok: false, msg: '服务器未设置 ADMIN_KEY，管理员功能未启用' });
         return;
       }
+      const blocked = loginBlocked(req);
+      if (blocked > 0) {
+        send(429, { ok: false, msg: `失败次数过多，请 ${blocked} 秒后再试` });
+        return;
+      }
       let key = '';
       try {
         key = String((JSON.parse(body) as { key?: unknown }).key ?? '');
@@ -133,9 +165,11 @@ const server = http.createServer((req, res) => {
         /* 忽略解析失败 */
       }
       if (key !== ADMIN_KEY) {
+        recordLoginFail(req);
         send(401, { ok: false, msg: '管理密码错误' });
         return;
       }
+      loginFails.delete(req.socket.remoteAddress ?? '?');
       send(200, { ok: true, token: issueAdminToken() });
     });
     return;

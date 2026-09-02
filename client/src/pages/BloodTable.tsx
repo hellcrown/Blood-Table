@@ -841,11 +841,13 @@ export function BloodTable({ view }: { view: BloodView }) {
                 )}
                 {view.prompt.k === 'revealItem' && (
                   <>
-                    {view.me.items.map((it) => (
-                      <button key={it.id} className="btn primary" onClick={() => send({ t: 'bUseItem', itemId: it.id })}>
-                        使用【{it.name}】
-                      </button>
-                    ))}
+                    {view.me.items
+                      .filter((it) => BLOOD_MARKET_BY_ID.get(it.defId)?.effect.k === 'demagNullify')
+                      .map((it) => (
+                        <button key={it.id} className="btn primary" onClick={() => send({ t: 'bUseItem', itemId: it.id })}>
+                          使用【{it.name}】
+                        </button>
+                      ))}
                     <button className="btn" onClick={() => send({ t: 'bUseItem', itemId: null })}>
                       跳过宣告
                     </button>
