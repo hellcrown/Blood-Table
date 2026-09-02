@@ -14,7 +14,7 @@ export type BloodEffect =
   | { k: 'wild' } // 百变影像
   | { k: 'dupe' } // 双生镜片：此牌视为2张
   | { k: 'imitate' } // 仿制印章：视为出牌区另一张牌（引擎评估特判）
-  | { k: 'copyChip' } // 复制芯片：复制一张芯片效果（暂未自动结算）
+  | { k: 'copyChip' } // 复制芯片：对决阶段复制一张芯片效果
   | { k: 'magCoil' } // 磁力线圈：重洗牌库时此牌回到抽牌堆顶
   | { k: 'revealGain'; blood: number } // 【对决】获得N血筹
   | { k: 'revealSteal'; blood: number } // 【对决】掠夺一位对手N血筹
@@ -45,6 +45,9 @@ export type BloodEffect =
   | { k: 'loudspeakerFx' } // 广播喇叭：对决前宣称夺魁
   | { k: 'irisGambleFx' } // 赌徒虹膜：对决前猜牌型
   | { k: 'demagNullify' } // 消磁枪：对决阶段令一位玩家的一张强化芯片失效
+  | { k: 'springFx' } // 弹簧夹层：对决阶段付费临时±X
+  | { k: 'shieldFx' } // 屏蔽器：对决阶段令一张强化芯片失效
+  | { k: 'barrierFx' } // 防护屏障：反制询问窗口
   | { k: 'todo' } // 拓展牌占位：暂未自动结算（购买后公示弃置）
   | { k: 'dealerLicense' }; // 【对决】前：本次对决改为先比总点数再比牌型
 
@@ -106,10 +109,10 @@ export const BLOOD_MARKET_EXPANSION_DEFS: BloodMarketDef[] = [
   { id: 'stamp', no: 'NO.014', name: '仿制印章', kind: 'chip', cost: 6, count: 2, text: '【对决】可视为自己出牌区的另一张牌（无视其强化芯片，不可视为JOKER）。', effect: { k: 'imitate' }, noJoker: true, expansion: true },
   { id: 'encrypt', no: 'NO.015', name: '加密线路', kind: 'chip', cost: 5, count: 2, text: '【结算】若👑，获得2🎫（不可插入JOKER中）。', effect: { k: 'settleWinTicket', tickets: 2 }, noJoker: true, expansion: true },
   { id: 'magCoil', no: 'NO.016', name: '磁力线圈', kind: 'chip', cost: 6, count: 2, text: '重洗牌库前，可将在弃牌区的此牌挑出，并在重洗牌库后放在抽牌堆顶。', effect: { k: 'magCoil' }, expansion: true },
-  { id: 'copyChip', no: 'NO.019', name: '复制芯片', kind: 'chip', cost: 4, count: 2, text: '【对决】可复制任意一位玩家的强化芯片效果（双生镜片除外）。不可插入JOKER中。', effect: { k: 'todo' }, noJoker: true, expansion: true },
-  { id: 'shield', no: 'NO.023', name: '屏蔽器', kind: 'chip', cost: 4, count: 2, text: '【对决】可令一位玩家的1张强化芯片失效（不可插入JOKER中）。', effect: { k: 'todo' }, noJoker: true, expansion: true },
+  { id: 'copyChip', no: 'NO.019', name: '复制芯片', kind: 'chip', cost: 4, count: 2, text: '【对决】可复制任意一位玩家的强化芯片效果（双生镜片除外）。不可插入JOKER中。', effect: { k: 'copyChip' }, noJoker: true, expansion: true },
+  { id: 'shield', no: 'NO.023', name: '屏蔽器', kind: 'chip', cost: 4, count: 2, text: '【对决】可令一位玩家的1张强化芯片失效（不可插入JOKER中）。', effect: { k: 'shieldFx' }, noJoker: true, expansion: true },
   { id: 'selfDestruct', no: 'NO.025', name: '自毁芯片', kind: 'chip', cost: 2, count: 2, text: '【结算】结束时，删除本回合打出的所有牌（包括此牌）。', effect: { k: 'selfDestruct' }, expansion: true },
-  { id: 'spring', no: 'NO.031', name: '弹簧夹层', kind: 'chip', cost: 4, count: 2, text: '【对决】可花费X🩸，令此牌的点数临时增加/减少X点。', effect: { k: 'todo' }, noJoker: true, expansion: true },
+  { id: 'spring', no: 'NO.031', name: '弹簧夹层', kind: 'chip', cost: 4, count: 2, text: '【对决】可花费X🩸，令此牌的点数临时增加/减少X点。', effect: { k: 'springFx' }, noJoker: true, expansion: true },
   // ── 秘密交易 ──
   { id: 'sharedInfo', no: 'NO.026', name: '共享信息', kind: 'secret', cost: 2, count: 2, text: '可删除至多2张牌，每位对手可删除1张牌。', effect: { k: 'sharedInfoFx' }, expansion: true },
   { id: 'closingS', no: 'NO.028', name: '闭店礼·小', kind: 'secret', cost: 3, count: 1, text: '获得4🩸，跳过本回合的【购买】。', effect: { k: 'closingGift', blood: 4 }, expansion: true },
@@ -129,7 +132,7 @@ export const BLOOD_MARKET_EXPANSION_DEFS: BloodMarketDef[] = [
   { id: 'loudspeaker', no: 'NO.046', name: '广播喇叭', kind: 'item', cost: 3, count: 2, text: '【对决】前，可宣称自己将👑。【结算】若成功👑，则获得玩家人数×3🩸，否则跳过本回合的【购买】【删牌】【重整】。', effect: { k: 'loudspeakerFx' }, expansion: true },
   { id: 'irisGamble', no: 'NO.047', name: '赌徒虹膜', kind: 'item', cost: 3, count: 2, text: '【对决】前，猜测一位玩家的牌型。【结算】若猜测正确，获得3🩸，该玩家本回合获得的🎫-4（最低为0）。', effect: { k: 'irisGambleFx' }, expansion: true },
   { id: 'secretNote', no: 'NO.048', name: '皮下密信', kind: 'item', cost: 2, count: 2, text: '【换牌】结束时，可花费2🩸，抽3张牌。', effect: { k: 'secretNoteFx' }, expansion: true },
-  { id: 'barrier', no: 'NO.049', name: '防护屏障', kind: 'item', cost: 3, count: 4, text: '取消玩家即将单独对你使用的[秘密交易]或[备用道具]效果（不可对[防护屏障]使用）。', effect: { k: 'todo' }, expansion: true },
+  { id: 'barrier', no: 'NO.049', name: '防护屏障', kind: 'item', cost: 3, count: 4, text: '取消玩家即将单独对你使用的[秘密交易]或[备用道具]效果（不可对[防护屏障]使用）。', effect: { k: 'barrierFx' }, expansion: true },
   { id: 'eraser', no: 'NO.050', name: '魔术橡皮', kind: 'item', cost: 3, count: 2, text: '【出牌】前，宣称一种牌型，本回合【对决】此牌型视为「高牌」。', effect: { k: 'eraserFx' }, expansion: true },
   { id: 'demag', no: 'NO.051', name: '消磁枪', kind: 'item', cost: 4, count: 2, text: '【对决】令一位玩家的1张强化芯片失效。', effect: { k: 'demagNullify' }, expansion: true },
 ];

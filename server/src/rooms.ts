@@ -220,6 +220,18 @@ export class RoomManager {
       case 'bPullChip':
         blood.bPullChip(bs, pid, msg.cardId, now);
         break;
+      case 'bSpringUse':
+        blood.bSpringUse(bs, pid, msg.chipId, msg.mod, now);
+        break;
+      case 'bRevealChipTarget':
+        blood.bRevealChipTarget(bs, pid, msg.seat, msg.cardId, msg.defId, now);
+        break;
+      case 'bSkipDecision':
+        blood.bSkipDecision(bs, pid, now);
+        break;
+      case 'bBarrierDecide':
+        blood.bBarrierDecide(bs, pid, msg.use, now);
+        break;
       case 'bBuy':
         blood.bBuy(bs, pid, msg.slot, msg.insertInto, now);
         break;

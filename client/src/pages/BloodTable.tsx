@@ -384,6 +384,12 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '拔除芯片：点击弃牌区中带芯片的牌（+4🩸）';
       case 'preciseDel':
         return '精准删除：从抽到的 3 张中选择 0-2 张删除';
+      case 'revealDecide':
+        if (view.prompt.decision?.t === 'spring') return '弹簧夹层：选择花费 X 血筹令该牌临时 ±X 点';
+        if (view.prompt.decision?.t === 'copy') return '复制芯片：点击一名玩家的芯片复制其效果（双生镜片除外）';
+        return '屏蔽器：点击一名玩家的芯片令其本次对决失效';
+      case 'barrierAsk':
+        return `防护屏障：${view.prompt.eff ?? '有效果即将对你生效'} —— 是否抵消？`;
       default:
         return '等待对方操作…';
     }
@@ -1014,6 +1020,67 @@ export function BloodTable({ view }: { view: BloodView }) {
                       </button>
                     </div>
                   </>
+                )}
+                {view.prompt.k === 'revealDecide' && view.prompt.decision?.t === 'spring' && (
+                  <div className="act-row wrap">
+                    <span className="hint">弹簧夹层 · 该牌临时 ±X（X=血筹）：</span>
+                    {[-5, -4, -3, -2, -1, 1, 2, 3, 4, 5].map((m) => {
+                      const springCard = view.players
+                        .find((p) => p.seat === view.me.seat)
+                        ?.played?.find((c) => c.id === view.prompt.decision?.cardId);
+                      const base = springCard ? effRankOf(springCard).r : 0;
+                      const out = base + m < 2 || base + m > 14;
+                      return (
+                        <button
+                          key={m}
+                          className="btn tiny"
+                          disabled={view.me.blood < Math.abs(m) || out}
+                          title={out ? `超出 2-14（当前有效点数 ${base}）` : undefined}
+                          onClick={() => send({ t: 'bSpringUse', chipId: view.prompt.chipId ?? '', mod: m })}
+                        >
+                          {m > 0 ? `+${m}` : m}
+                        </button>
+                      );
+                    })}
+                    <button className="btn" onClick={() => send({ t: 'bSkipDecision' })}>
+                      跳过
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'revealDecide' && (view.prompt.decision?.t === 'copy' || view.prompt.decision?.t === 'shield') && (
+                  <div className="act-row wrap">
+                    <span className="hint">
+                      {view.prompt.decision?.t === 'copy' ? '复制目标（点击复制其效果）：' : '屏蔽目标（点击令其失效）：'}
+                    </span>
+                    {view.players.flatMap((pl) =>
+                      (pl.played ?? []).flatMap((c) =>
+                        c.chipIds.map((defId) => (
+                          <button
+                            key={`${pl.seat}-${c.id}-${defId}`}
+                            className="btn tiny"
+                            disabled={view.prompt.decision?.t === 'copy' && defId === 'twinLens'}
+                            onClick={() => send({ t: 'bRevealChipTarget', seat: pl.seat, cardId: c.id, defId })}
+                          >
+                            {pl.seat === view.me.seat ? '自己' : pl.name}·{BLOOD_MARKET_BY_ID.get(defId)?.name}
+                          </button>
+                        )),
+                      ),
+                    )}
+                    <button className="btn" onClick={() => send({ t: 'bSkipDecision' })}>
+                      跳过
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'barrierAsk' && (
+                  <div className="act-row">
+                    <span className="hint">{view.prompt.eff}</span>
+                    <button className="btn primary" onClick={() => send({ t: 'bBarrierDecide', use: true })}>
+                      🛡️ 使用防护屏障抵消
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bBarrierDecide', use: false })}>
+                      允许生效
+                    </button>
+                  </div>
                 )}
                 {view.prompt.k === 'reorg' && (
                   <>

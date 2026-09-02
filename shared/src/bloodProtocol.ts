@@ -96,13 +96,20 @@ export interface BloodMyPrompt {
     | 'signalTarget'
     | 'demagTarget'
     | 'irisGuess'
-    | 'eraserClaim';
+    | 'eraserClaim'
+    | 'revealDecide'
+    | 'barrierAsk';
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
   defId?: string; // insertChip: 待插入芯片
   /** preciseDel: 抽到的 3 张牌 */
   cards?: { id: string; r: number; s: string | null }[];
+  /** revealDecide：当前决策类型与决策牌 */
+  decision?: { t: 'spring' | 'copy' | 'shield'; cardId: string };
+  chipId?: string;
+  /** barrierAsk：待反制效果描述 */
+  eff?: string;
 }
 
 export interface BloodAnnounceView {
@@ -176,6 +183,10 @@ export type BloodAction =
   | { t: 'bPreciseDel'; cardIds: string[] }
   | { t: 'bPullChip'; cardId: string }
   | { t: 'bEraserClaim'; cat: number }
+  | { t: 'bSpringUse'; chipId: string; mod: number }
+  | { t: 'bRevealChipTarget'; seat: number; cardId: string; defId: string }
+  | { t: 'bSkipDecision' }
+  | { t: 'bBarrierDecide'; use: boolean }
   | { t: 'bBuy'; slot: number; insertInto?: string }
   | { t: 'bInsertChip'; cardId: string }
   | { t: 'bInsertSkip' }

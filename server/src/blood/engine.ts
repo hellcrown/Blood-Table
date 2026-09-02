@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BLOOD_MARKET_BY_ID, buildBloodMarketDeck } from '@shared/bloodCards';
+import { BLOOD_MARKET_BY_ID, buildBloodMarketDeck, type BloodEffect } from '@shared/bloodCards';
 import { catName, evalBloodHand, toEvalCard, applyImitate, type EvalCard } from '@shared/bloodEval';
 import { BLOOD_CHARS, BLOOD_CHAR_BY_ID, applyCharEval, charHandCap, charSwapMax } from '@shared/bloodChars';
 import { coreOrder, showdownReadyMs } from '@shared/bloodShowdown';
@@ -11,6 +11,9 @@ import {
   BLOOD_SETUP_KEEP,
   BLOOD_TURN_MS,
   type BCard,
+  type BarrierEffect,
+  type ChipInst,
+  type RevealDecision,
   type BloodFinal,
   type BloodPhase,
   type BloodResultView,
@@ -548,11 +551,14 @@ function evalCardsFor(p: BPlayer): EvalCard[] {
       c.id,
       c.r,
       c.s,
-      p.chips.filter((ch) => ch.on === c.id && !ch.off).map((ch) => BLOOD_MARKET_BY_ID.get(ch.def)!.effect),
+      p.chips.filter((ch) => ch.on === c.id).flatMap((ch) => chipEffectsFor(p, ch)),
     );
   const evals = p.play.map(toEval);
   const imitate = p.play.map((c) =>
-    p.chips.some((ch) => ch.on === c.id && !ch.off && BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'imitate'),
+    p.chips
+      .filter((ch) => ch.on === c.id)
+      .flatMap((ch) => chipEffectsFor(p, ch))
+      .some((eff) => eff.k === 'imitate'),
   );
   // 顺序：仿制印章（视为其它基础牌面）→ 角色技能（特型演员可链式视为JOKER等）
   return applyCharEval(applyImitate(evals, p.play, imitate), effChar(p));
@@ -572,7 +578,7 @@ export function bestFive(p: BPlayer): string[] {
           c.id,
           c.r,
           c.s,
-          p.chips.filter((ch) => ch.on === c.id && !ch.off).map((ch) => BLOOD_MARKET_BY_ID.get(ch.def)!.effect),
+          p.chips.filter((ch) => ch.on === c.id).flatMap((ch) => chipEffectsFor(p, ch)),
         ),
       ],
       effChar(p),
@@ -637,12 +643,158 @@ function startReveal(gs: BloodState, now: number): void {
 }
 
 function usableItemCount(p: BPlayer): number {
-  return p.items.filter((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'dealerLicense').length;
+  // 荷官证已改为出牌阶段宣告；亮牌窗口仅等待消磁枪
+  return p.items.filter((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify').length;
+}
+
+/** 芯片的生效效果列表（自身 + 复制快照 + 弹簧修正），失效芯片为空 */
+function chipEffectsFor(p: BPlayer, ch: ChipInst): BloodEffect[] {
+  const out: BloodEffect[] = [];
+  if (!ch.off) {
+    const def = BLOOD_MARKET_BY_ID.get(ch.def);
+    if (def) out.push(def.effect);
+    if (ch.copiedFx) out.push(ch.copiedFx);
+  }
+  if (ch.springMod && !ch.off) out.push({ k: 'rankMod', mod: ch.springMod });
+  return out;
+}
+
+/** 亮牌决策队列：弹出当前决策并挂起下一条；队列空则推进窗口 */
+function nextRevealDecision(gs: BloodState, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'revealDecide') return;
+  const queue = (pend.queue ?? []).slice();
+  if (queue.length === 0) {
+    gs.secretPending = null;
+    nextRevealOrSettle(gs, now);
+    return;
+  }
+  gs.secretPending = { ...pend, kind: 'revealDecide', queue: queue.slice(1), decision: queue[0] };
+}
+
+/** 防护屏障：受害者持有屏障则消耗并进入询问窗口，返回 true 表示已拦截 */
+function tryBarrierAsk(gs: BloodState, defenderId: string, attackerId: string, eff: BarrierEffect): boolean {
+  const d = gs.players.find((x) => x.id === defenderId)!;
+  const barrier = d.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'barrierFx');
+  if (!barrier) return false;
+  d.items = d.items.filter((i) => i.id !== barrier.id);
+  gs.recycle.push(barrier.def);
+  gs.secretPending = { seat: defenderId, kind: 'barrierAsk', barrier: eff, eff: barrierText(gs, eff) };
+  pushLog(gs, 'action', `【防护屏障】${d.name} 可以抵消该效果`);
+  return true;
+}
+
+function barrierText(gs: BloodState, eff: BarrierEffect): string {
+  const by = gs.players.find((x) => x.id === eff.by)?.name ?? '?';
+  const t = gs.players.find((x) => x.id === eff.seat)?.name ?? '?';
+  const map: Record<BarrierEffect['t'], string> = {
+    violent: '暴力删除', pinpoint: '定点爆破', boxRob: '黑厢抢夺', poison: '餐车投毒',
+    freeze: '冻结车厢', amnesia: '暂时失忆', signal: '信号干扰器', demag: '消磁枪',
+  };
+  return `${by} 对 ${t} 使用【${map[eff.t]}】${eff.t === 'pinpoint' ? `（宣称 ${eff.rank} 点）` : ''}`;
+}
+
+/** 反制窗口结束：按选择结算（use=true 抵消；false 生效），并按来源推进 */
+function resolveBarrier(gs: BloodState, use: boolean, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'barrierAsk' || !pend.barrier) return;
+  const eff = pend.barrier;
+  const attacker = gs.players.find((x) => x.id === eff.by)!;
+  gs.secretPending = null;
+  if (use) {
+    pushLog(gs, 'action', `【防护屏障】${attacker.name} 的效果被抵消（费用不退）`);
+  } else {
+    pushLog(gs, 'action', `【防护屏障】未发动，效果生效`);
+    applyBarrierEffect(gs, eff, now);
+  }
+  if (eff.after === 'market') afterMarketResolved(gs, attacker, false);
+  else if (eff.after === 'reveal') nextRevealOrSettle(gs, now);
+}
+
+/** 序列化效果的真正结算 */
+function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): void {
+  const by = gs.players.find((x) => x.id === eff.by)!;
+  const t = gs.players.find((x) => x.id === eff.seat)!;
+  switch (eff.t) {
+    case 'violent': {
+      const n = Math.min(3, t.draw.length);
+      const top = t.draw.splice(-n, n);
+      t.removed.push(...top);
+      pushLog(gs, 'action', `【暴力删除】生效：${t.name} 抽牌堆顶 ${top.map(bloodCardText).join(' ')} 被删除`);
+      break;
+    }
+    case 'pinpoint': {
+      const rank = eff.rank ?? 0;
+      const matches = t.discard.filter((c) => finalRank(t, c) === rank);
+      if (matches.length === 0) {
+        pushLog(gs, 'action', `【定点爆破】${t.name} 弃牌堆没有 ${rank} 点的牌，落空`);
+      } else {
+        const pick = matches[randomInt(0, matches.length)];
+        t.discard = t.discard.filter((c) => c.id !== pick.id);
+        t.removed.push(pick);
+        pushLog(gs, 'action', `【定点爆破】生效：${t.name} 删除弃牌堆中的 ${bloodCardText(pick)}`);
+      }
+      break;
+    }
+    case 'boxRob': {
+      const myRoll = randomInt(1, 7);
+      const tRoll = randomInt(1, 7);
+      if (myRoll > tRoll) {
+        const gain = Math.min(4, Math.max(0, t.blood));
+        t.blood -= gain;
+        by.blood += gain;
+        pushLog(gs, 'action', `【黑厢抢夺】生效：${by.name} ${myRoll} 对 ${t.name} ${tRoll}，抢夺 ${gain} 血筹`);
+      } else {
+        pushLog(gs, 'action', `【黑厢抢夺】生效：${by.name} ${myRoll} 对 ${t.name} ${tRoll}，抢夺失败`);
+      }
+      break;
+    }
+    case 'poison': {
+      t.swapMalus += 2;
+      pushLog(gs, 'action', `【餐车投毒】生效：${t.name} 下回合换牌次数 -2`);
+      break;
+    }
+    case 'freeze': {
+      t.skipReorg = true;
+      pushLog(gs, 'action', `【冻结车厢】生效：${t.name} 跳过本回合重整`);
+      break;
+    }
+    case 'amnesia': {
+      t.charOffNextRound = true;
+      pushLog(gs, 'action', `【暂时失忆】生效：${t.name} 下回合技能失效`);
+      break;
+    }
+    case 'signal': {
+      if (t.hand.length === 0) {
+        pushLog(gs, 'action', `【信号干扰器】生效：${t.name} 没有手牌，落空`);
+      } else {
+        const idx = randomInt(0, t.hand.length);
+        const [c] = t.hand.splice(idx, 1);
+        t.discard.push(c);
+        drawToCap(gs, t);
+        pushLog(gs, 'action', `【信号干扰器】生效：${t.name} 随机弃置 ${bloodCardText(c)}，抽 1 张牌`);
+      }
+      break;
+    }
+    case 'demag': {
+      const chips = t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off);
+      if (chips.length === 0) {
+        pushLog(gs, 'action', `【消磁枪】${t.name} 出牌区没有强化芯片，落空`);
+      } else {
+        const best = chips
+          .map((ch) => ({ ch, def: BLOOD_MARKET_BY_ID.get(ch.def)! }))
+          .sort((a, b) => b.def.cost - a.def.cost)[0];
+        best.ch.off = true;
+        pushLog(gs, 'action', `【消磁枪】生效：${t.name} 出牌区的【${best.def.name}】本次对决失效`);
+      }
+      break;
+    }
+  }
 }
 
 /** 当前宣告窗口的自动触发（镀层出/夺）；若该玩家无任何可决定事项则立即推进 */
 function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
-  for (const ch of p.chips.filter((c) => p.play.some((card) => card.id === c.on))) {
+  for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
     const def = BLOOD_MARKET_BY_ID.get(ch.def);
     if (!def) continue;
     const eff = def.effect;
@@ -662,11 +814,128 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
       pushLog(gs, 'action', `${p.name} 的掠夺效果无合法目标，落空`);
     }
   }
+  // 拓展芯片决策队列：弹簧夹层（±X）/ 复制芯片（选目标效果）/ 屏蔽器（选失效目标）
+  const queue: RevealDecision[] = [];
+  for (const cc of p.chips.filter((c2) => p.play.some((card) => card.id === c2.on) && !c2.off)) {
+    const k = BLOOD_MARKET_BY_ID.get(cc.def)?.effect.k;
+    if (k === 'springFx') queue.push({ t: 'spring', chipId: cc.id, cardId: cc.on, defId: cc.def });
+    else if (k === 'copyChip') queue.push({ t: 'copy', chipId: cc.id, cardId: cc.on, defId: cc.def });
+    else if (k === 'shieldFx') queue.push({ t: 'shield', chipId: cc.id, cardId: cc.on, defId: cc.def });
+  }
+  if (queue.length > 0) {
+    gs.secretPending = { seat: p.id, kind: 'revealDecide', queue, decision: queue[0] };
+    return; // 窗口停留等待决策
+  }
   const needStealNow = gs.stealPending != null && gs.stealPending.seat === p.id;
   const hasItem = usableItemCount(p) > 0;
   if (!needStealNow && !hasItem) {
     nextRevealOrSettle(gs, now);
   }
+}
+
+/** 决策确认/跳过后：弹出下一条或结束决策推进窗口 */
+function advanceRevealDecision(gs: BloodState, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'revealDecide') return;
+  const rest = (pend.queue ?? []).slice();
+  if (rest.length === 0) {
+    gs.secretPending = null;
+    nextRevealOrSettle(gs, now);
+    return;
+  }
+  gs.secretPending = { ...pend, kind: 'revealDecide', queue: rest.slice(1), decision: rest[0] };
+}
+
+/** 弹簧夹层：花费 X 血筹令该牌临时 ±X（2-14 钳制） */
+export function bSpringUse(gs: BloodState, playerId: string, chipId: string, mod: number, now: number): void {
+  void now;
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'revealDecide' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待决策的芯片');
+  }
+  const d = pend.decision;
+  if (!d || d.t !== 'spring' || d.chipId !== chipId) throw new BloodError('BAD_TARGET', '决策目标不匹配');
+  const p = gs.players.find((x) => x.id === playerId)!;
+  const ch = p.chips.find((c) => c.id === chipId);
+  if (!ch || ch.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
+  if (!Number.isInteger(mod) || mod === 0) throw new BloodError('BAD_TARGET', '修正量无效');
+  if (p.blood < Math.abs(mod)) throw new BloodError('NO_BLOOD', `血筹不足（需 ${Math.abs(mod)}）`);
+  const card = p.play.find((c) => c.id === ch.on)!;
+  const base = finalRank(p, card);
+  const final = base + mod;
+  if (final < 2 || final > 14) throw new BloodError('OUT_OF_RANGE', `点数超出 2-14（${base}${mod > 0 ? '+' : ''}${mod} = ${final}）`);
+  p.blood -= Math.abs(mod);
+  ch.springMod = mod;
+  pushLog(gs, 'action', `【弹簧夹层】${p.name} 花费 ${Math.abs(mod)} 血筹：${bloodCardText(card)} 临时${mod > 0 ? '+' : ''}${mod} 点（${base} → ${final}）`);
+  advanceRevealDecision(gs, now);
+}
+
+/** 复制芯片 / 屏蔽器：选择目标芯片（按 座位+牌+def 定位实例） */
+export function bRevealChipTarget(
+  gs: BloodState,
+  playerId: string,
+  seat: number,
+  cardId: string,
+  defId: string,
+  now: number,
+): void {
+  void now;
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'revealDecide' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待决策的芯片');
+  }
+  const d = pend.decision;
+  if (!d || (d.t !== 'copy' && d.t !== 'shield')) throw new BloodError('BAD_TARGET', '决策目标不匹配');
+  const p = gs.players.find((x) => x.id === playerId)!;
+  const myChip = p.chips.find((c) => c.id === d.chipId);
+  if (!myChip || myChip.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
+  const target = bySeat(gs, seat);
+  if (!target) throw new BloodError('BAD_TARGET', '目标不存在');
+  const targetChip = target.chips.find((ch) => ch.on === cardId && ch.def === defId && !ch.off);
+  if (!targetChip) throw new BloodError('BAD_TARGET', '目标芯片不存在或已失效');
+
+  if (d.t === 'copy') {
+    if (defId === 'twinLens') throw new BloodError('BAD_TARGET', '双生镜片不可被复制');
+    const srcFx = targetChip.copiedFx ?? BLOOD_MARKET_BY_ID.get(targetChip.def)?.effect;
+    if (!srcFx) throw new BloodError('BAD_TARGET', '该芯片没有可复制的效果');
+    myChip.copiedFx = srcFx;
+    pushLog(gs, 'action', `【复制芯片】${p.name} 复制了 ${target.name} 的【${BLOOD_MARKET_BY_ID.get(defId)?.name}】效果`);
+    // 复制到「镀层（出/夺）」：立即结算；复制到「屏蔽器」：追加失效目标决策
+    if (srcFx.k === 'revealGain') {
+      p.blood += srcFx.blood;
+      pushLog(gs, 'action', `【复制芯片】发动：${p.name} 获得 ${srcFx.blood} 血筹`);
+    } else if (srcFx.k === 'revealSteal') {
+      gs.stealPending = { seat: p.id, blood: srcFx.blood };
+      pushLog(gs, 'action', `【复制芯片】发动：${p.name} 需选择掠夺目标`);
+    } else if (srcFx.k === 'shieldFx') {
+      const rest = (pend.queue ?? []).slice();
+      const shieldDecision: RevealDecision = { t: 'shield', chipId: myChip.id, cardId: d.cardId, defId: 'shield' };
+      gs.secretPending = { ...pend, kind: 'revealDecide', queue: [shieldDecision, ...rest], decision: shieldDecision };
+      return;
+    }
+  } else {
+    targetChip.off = true;
+    pushLog(gs, 'action', `【屏蔽器】${p.name} 令 ${target.name} 的【${BLOOD_MARKET_BY_ID.get(defId)?.name}】本次对决失效`);
+  }
+  advanceRevealDecision(gs, now);
+}
+
+/** 跳过当前决策 */
+export function bSkipDecision(gs: BloodState, playerId: string, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'revealDecide' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待决策的芯片');
+  }
+  advanceRevealDecision(gs, now);
+}
+
+/** 防护屏障决策：use=true 抵消；false 允许生效 */
+export function bBarrierDecide(gs: BloodState, playerId: string, use: boolean, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'barrierAsk' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待回应的反制询问');
+  }
+  resolveBarrier(gs, use, now);
 }
 
 function nextRevealOrSettle(gs: BloodState, now: number): void {
@@ -782,6 +1051,7 @@ export function bUseItem(gs: BloodState, playerId: string, itemId: string | null
   const def = BLOOD_MARKET_BY_ID.get(item.def);
   if (def?.effect.k !== 'demagNullify') throw new BloodError('BAD_TIMING', '该道具当前无法使用');
   p.items = p.items.filter((i) => i.id !== itemId);
+  // 防护屏障询问：受害者为亮牌顺序中的下家暂不可知，按目标选择后再拦截（demagTarget 分支内处理）
   gs.secretPending = { seat: p.id, kind: 'demagTarget', defId: item.def };
   pushLog(gs, 'action', `${p.name} 使用【消磁枪】：请选择要失效的强化芯片来源`);
 }
@@ -868,17 +1138,18 @@ function settle(gs: BloodState, now: number): void {
     const p = bySeat(gs, r.seat)!;
     p.tickets += r.gainTickets;
     p.blood += r.gainBlood;
-    // 镀层触发：胜/败
+    // 镀层触发：胜/败（含复制芯片的快照效果）
     for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
       const def = BLOOD_MARKET_BY_ID.get(ch.def);
       if (!def) continue;
-      const eff = def.effect;
-      if (eff.k === 'settleWin' && p === winner) {
-        p.blood += eff.blood;
-        pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：魁首获得 ${eff.blood} 血筹`);
-      } else if (eff.k === 'settleLose' && p !== winner) {
-        p.blood += eff.blood;
-        pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：战败获得 ${eff.blood} 血筹`);
+      for (const eff of chipEffectsFor(p, ch)) {
+        if (eff.k === 'settleWin' && p === winner) {
+          p.blood += eff.blood;
+          pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：魁首获得 ${eff.blood} 血筹`);
+        } else if (eff.k === 'settleLose' && p !== winner) {
+          p.blood += eff.blood;
+          pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：战败获得 ${eff.blood} 血筹`);
+        }
       }
     }
   }
@@ -888,10 +1159,13 @@ function settle(gs: BloodState, now: number): void {
     const p = bySeat(gs, r.seat)!;
     for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
       const def = BLOOD_MARKET_BY_ID.get(ch.def);
-      if (def?.effect.k === 'settleWinTicket' && p === winner) {
-        r.gainTickets += def.effect.tickets;
-        p.tickets += def.effect.tickets;
-        pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：魁首获得 ${def.effect.tickets} 车票`);
+      if (!def) continue;
+      for (const eff of chipEffectsFor(p, ch)) {
+        if (eff.k === 'settleWinTicket' && p === winner) {
+          r.gainTickets += eff.tickets;
+          p.tickets += eff.tickets;
+          pushLog(gs, 'action', `${p.name} 的【${def.name}】发动：魁首获得 ${eff.tickets} 车票`);
+        }
       }
     }
   }
@@ -1015,9 +1289,9 @@ function settle(gs: BloodState, now: number): void {
   for (const p of gs.players) {
     if (effChar(p) === 'gunner') gunnerFours.set(p.id, p.play.filter((c) => c.r === 4).map((c) => c.id));
     if (
-      p.play.some(
-        (c) => p.chips.some((ch) => ch.on === c.id && !ch.off && BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'selfDestruct'),
-      )
+      p.chips
+        .filter((ch) => p.play.some((card) => card.id === ch.on) && !ch.off)
+        .some((ch) => chipEffectsFor(p, ch).some((eff) => eff.k === 'selfDestruct'))
     ) {
       selfDestructFired = true;
     }
@@ -1489,6 +1763,11 @@ export function bViolent(gs: BloodState, playerId: string, targetSeat: number, n
   const target = bySeat(gs, targetSeat);
   if (!target) throw new BloodError('BAD_TARGET', '目标不存在');
   if (target.draw.length < 3) throw new BloodError('BAD_TARGET', '目标抽牌堆不足3张');
+  // 防护屏障询问（对自己发动不触发）
+  if (target.id !== p.id) {
+    const eff: BarrierEffect = { t: 'violent', by: p.id, seat: target.id, after: 'market' };
+    if (tryBarrierAsk(gs, target.id, p.id, eff)) return;
+  }
   const top = target.draw.splice(-3, 3);
   target.removed.push(...top);
   pushLog(gs, 'action', `【暴力删除】发动：${p.name} 删除 ${target.name} 抽牌堆顶的 ${top.map(bloodCardText).join(' ')}`);
@@ -1655,6 +1934,14 @@ function startReorg(gs: BloodState, now: number): void {
 
 /** 重整阶段全部完成 → 回合收尾（清洁工等阶段结束效果）并进入下回合 */
 function finishReorg(gs: BloodState, now: number): void {
+  // 对决期芯片状态（失效/弹簧修正/复制快照）回合结束清除
+  for (const p2 of gs.players) {
+    for (const ch of p2.chips) {
+      delete ch.off;
+      delete ch.springMod;
+      delete ch.copiedFx;
+    }
+  }
   // 清洁工：重整阶段结束时删除自己抽牌堆顶 1 张（简化：不自选）
   for (const p2 of gs.players) {
     if (effChar(p2) !== 'cleaner') continue;
@@ -1738,6 +2025,11 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       return true;
     }
     case 'swap': {
+      if (gs.secretPending?.kind === 'barrierAsk') {
+        pushLog(gs, 'action', '【防护屏障】询问超时，视为允许生效');
+        resolveBarrier(gs, false, now);
+        return true;
+      }
       for (const p of gs.players) {
         if (gs.phase !== 'swap') break;
         if (!p.swapDone && !(gs.secretPending && gs.secretPending.seat === p.id)) {
@@ -1761,6 +2053,17 @@ export function bloodTick(gs: BloodState, now: number): boolean {
     }
     case 'reveal': {
       if (gs.phase !== 'reveal') return true;
+      if (gs.secretPending?.kind === 'revealDecide') {
+        pushLog(gs, 'action', '对决决策超时，剩余芯片效果按跳过处理');
+        gs.secretPending = null;
+        nextRevealOrSettle(gs, now);
+        return true;
+      }
+      if (gs.secretPending?.kind === 'barrierAsk') {
+        pushLog(gs, 'action', '【防护屏障】询问超时，视为允许生效');
+        resolveBarrier(gs, false, now);
+        return true;
+      }
       const p = bySeat(gs, gs.turnSeat ?? -1);
       if (!p) return true;
       if (gs.secretPending?.kind === 'demagTarget') {
@@ -1796,6 +2099,11 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (gs.phase !== 'buy') return true;
       // 挂起中的交互（含共享信息的对手链）优先按其座位解析超时
       if (gs.secretPending) {
+        if (gs.secretPending.kind === 'barrierAsk') {
+          pushLog(gs, 'action', '【防护屏障】询问超时，视为允许生效');
+          resolveBarrier(gs, false, now);
+          return true;
+        }
         const pp = gs.players.find((x) => x.id === gs.secretPending!.seat);
         if (pp) resolvePendingOnTimeout(gs, pp, now);
         return true;
@@ -1838,6 +2146,19 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
     if (pend.kind === 'signalTarget') return; // 道具：无购买推进
     afterMarketResolved(gs, p, false);
   };
+  // 防护屏障：单独指定的效果先询问受害者是否抵消
+  const barrierMap: Partial<Record<typeof pend.kind, BarrierEffect['t']>> = {
+    poisonTarget: 'poison',
+    freezeTarget: 'freeze',
+    amnesiaTarget: 'amnesia',
+    boxRobTarget: 'boxRob',
+    signalTarget: 'signal',
+  };
+  const effKind = barrierMap[pend.kind];
+  if (effKind) {
+    const eff: BarrierEffect = { t: effKind, by: p.id, seat: t.id, after: pend.kind === 'signalTarget' ? 'none' : 'market' };
+    if (tryBarrierAsk(gs, t.id, p.id, eff)) return; // 进入反制询问窗口
+  }
   switch (pend.kind) {
     case 'poisonTarget': {
       t.swapMalus += 2;
@@ -1888,6 +2209,9 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
       return;
     }
     case 'demagTarget': {
+      // 防护屏障询问（消磁枪单独指向）
+      const eff: BarrierEffect = { t: 'demag', by: p.id, seat: t.id, after: 'reveal' };
+      if (tryBarrierAsk(gs, t.id, p.id, eff)) return;
       const chips = t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off);
       if (chips.length === 0) {
         pushLog(gs, 'action', `【消磁枪】${t.name} 的出牌区没有强化芯片，效果落空`);
@@ -1951,6 +2275,9 @@ export function bPinpoint(gs: BloodState, playerId: string, seat: number, rank: 
   const t = bySeat(gs, seat);
   if (!t || t.id === playerId) throw new BloodError('BAD_TARGET', '目标无效');
   if (!Number.isInteger(rank) || rank < 2 || rank > 14) throw new BloodError('BAD_TARGET', '点数无效');
+  // 防护屏障询问
+  const eff: BarrierEffect = { t: 'pinpoint', by: p.id, seat: t.id, rank, after: 'market' };
+  if (tryBarrierAsk(gs, t.id, p.id, eff)) return;
   const matches = t.discard.filter((c) => finalRank(t, c) === rank);
   if (matches.length === 0) {
     pushLog(gs, 'action', `【定点爆破】${t.name} 公示弃牌堆：没有 ${rank} 点的牌，效果落空`);

@@ -1,4 +1,5 @@
 import type { Suit } from '@shared/protocol';
+import type { BloodEffect } from '@shared/bloodCards';
 import type { LogLine } from '@shared/protocol';
 
 /** 血色牌局基础牌（s=null 为大小王） */
@@ -15,6 +16,29 @@ export interface ChipInst {
   on: string; // 挂载的 BCard.id
   /** 消磁枪/屏蔽器：本次对决失效 */
   off?: boolean;
+  /** 弹簧夹层：本次对决临时点数修正（±X） */
+  springMod?: number;
+  /** 复制芯片：复制得到的效果快照 */
+  copiedFx?: BloodEffect;
+}
+
+/** 亮牌决策队列条目 */
+export interface RevealDecision {
+  t: 'spring' | 'copy' | 'shield';
+  chipId: string;
+  cardId: string;
+  defId: string;
+}
+
+/** 防护屏障待反制的序列化效果 */
+export interface BarrierEffect {
+  t: 'violent' | 'pinpoint' | 'boxRob' | 'poison' | 'freeze' | 'amnesia' | 'signal' | 'demag';
+  by: string; // 发起者 playerId
+  seat: string; // 受害者 playerId
+  rank?: number; // pinpoint
+  n?: number; // violent
+  /** 结算后推进：market=购买轮推进 / reveal=对决窗口推进 / none=无 */
+  after: 'market' | 'reveal' | 'none';
 }
 
 export interface ItemInst {
@@ -135,7 +159,8 @@ export interface BloodState {
     kind: 'deleteUpTo' | 'violentTarget' | 'insertChip' | 'refreshPick'
       | 'poisonTarget' | 'freezeTarget' | 'amnesiaTarget' | 'boxRobTarget'
       | 'pinpointClaim' | 'pullChip' | 'preciseDel' | 'signalTarget' | 'demagTarget'
-      | 'irisGuess' | 'sharedInfo' | 'sharedInfoOpp' | 'eraserClaim';
+      | 'irisGuess' | 'sharedInfo' | 'sharedInfoOpp' | 'eraserClaim'
+      | 'revealDecide' | 'barrierAsk';
     max?: number;
     chipId?: string;
     defId?: string;
@@ -144,6 +169,12 @@ export interface BloodState {
     /** 共享信息等待顺序的对手队列 */
     oppQueue?: string[];
     buyerId?: string;
+    /** revealDecide：决策队列与当前决策 */
+    queue?: RevealDecision[];
+    decision?: RevealDecision;
+    /** barrierAsk：待反制效果与描述 */
+    barrier?: BarrierEffect;
+    eff?: string;
   } | null;
   /** 魔术橡皮：本回合被降为高牌的牌型 */
   eraserType: number | null;
