@@ -30,8 +30,8 @@ export interface Room {
   maxPlayers: number;
   mode: GameMode;
   settings: { sb: number; bb: number; startChips: number };
-  /** 血色模式：选将开关（默认关，房主开局前可切换） */
-  charPick: boolean;
+  /** 血色模式：拓展选将开关（选将始终进行；开=角色池并入拓展角色，关=仅基础4角色） */
+  charExpansion: boolean;
   /** 血色模式：拓展黑市开关（默认关，房主开局前可切换） */
   expansion: boolean;
   sessions: Map<string, Session>;
@@ -271,7 +271,7 @@ export class RoomManager {
       case 'bRematch': {
         if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
         if (bs.phase !== 'gameover') return;
-        room.game = blood.bloodRematch(bs, now, room.charPick, room.expansion);
+        room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion);
         break;
       }
       default:
@@ -342,7 +342,7 @@ export class RoomManager {
       maxPlayers,
       mode,
       settings: { sb: 5, bb: 10, startChips: 1000 },
-      charPick: false,
+      charExpansion: false,
       expansion: false,
       sessions: new Map(),
       game: null,
@@ -452,7 +452,7 @@ export class RoomManager {
       const players = [...room.sessions.values()]
         .sort((a, b) => a.seat - b.seat)
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
-      room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charPick, room.expansion);
+      room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion);
     } else {
       if (!room.game) {
         const players = [...room.sessions.values()]
@@ -487,7 +487,7 @@ export class RoomManager {
       if (stranded) throw new GameError('SEATS_OCCUPIED', '有玩家坐在更大号座位，无法缩小房间');
       room.maxPlayers = mp;
     }
-    if (msg.charPick != null) room.charPick = !!msg.charPick;
+    if (msg.charExpansion != null) room.charExpansion = !!msg.charExpansion;
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     this.broadcast(room);
   }

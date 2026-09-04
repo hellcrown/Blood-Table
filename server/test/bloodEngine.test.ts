@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { showdownReadyMs } from '@shared/bloodShowdown';
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
+import { charPoolIds } from '@shared/bloodChars';
 import { BLOOD_SD_WAIT_MS, type BCard, type BloodState, type BPlayer } from '../src/blood/types';
 import {
   bBuy,
@@ -222,20 +223,44 @@ describe('血色引擎 · 选将与角色技能', () => {
     expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
   });
 
-  it('关闭选将：直接进入初始构筑，无角色牌', () => {
+  it('2人局基础池：仍在选将阶段，选项全部来自基础4角色', () => {
     const gs = createBloodGame(
       2,
       [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }],
       NOW,
       false,
     );
-    expect(gs.phase).toBe('setup');
-    expect(gs.players.every((p) => p.charId === null && p.charOptions.length === 0)).toBe(true);
-    expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
-    // 再来一场保持关闭状态
+    expect(gs.phase).toBe('pick');
+    const basic = charPoolIds(false);
+    expect(basic.length).toBe(4);
+    expect(gs.players.every((p) => p.charOptions.length === 2 && p.charOptions.every((c) => basic.includes(c)))).toBe(
+      true,
+    );
+    // 再来一场保持基础池（仍进入选将）
     const fresh = bloodRematch(gs, NOW, false);
-    expect(fresh.phase).toBe('setup');
-    expect(fresh.players.every((p) => p.charId === null)).toBe(true);
+    expect(fresh.phase).toBe('pick');
+    expect(fresh.players.every((p) => p.charOptions.length === 2)).toBe(true);
+  });
+
+  it('3/4人局：直接随机分配1名角色，不经过选将阶段', () => {
+    const basic = charPoolIds(false);
+    for (const n of [3, 4]) {
+      const players = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
+      const gs = createBloodGame(n, players, NOW, false);
+      expect(gs.phase).toBe('setup');
+      expect(gs.players.every((p) => p.charId !== null && p.charOptions.length === 0)).toBe(true);
+      const ids = new Set(gs.players.map((p) => p.charId));
+      expect(ids.size).toBe(n); // 分配互不重复
+      expect([...ids].every((c) => basic.includes(c))).toBe(true); // 基础池
+      // 基础4角色均不跳过初始构筑
+      expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
+    }
+    // 拓展池：4人局分配的角色来自全部58名
+    const players4 = Array.from({ length: 4 }, (_, i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
+    const ex = createBloodGame(4, players4, NOW, true);
+    const all = charPoolIds(true);
+    expect(all.length).toBe(58);
+    expect(ex.players.every((p) => all.includes(p.charId!))).toBe(true);
   });
 
   it('贵族：游戏开始获得12血筹', () => {

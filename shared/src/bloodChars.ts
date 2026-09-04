@@ -19,13 +19,15 @@ export interface BloodCharDef {
   impl: 'full' | 'partial' | 'todo';
   /** 实装说明（partial 时解释自动化范围） */
   implNote?: string;
+  /** 基础版角色（编号 1~4）；未标记的为拓展版角色 */
+  basic?: true;
 }
 
 export const BLOOD_CHARS: BloodCharDef[] = [
-  { id: 'dealer', name: '赌场荷官', emoji: '🎰', hue: 45, tags: ['结算'], impl: 'full', text: '【结算阶段】你的牌型的总点数+20。', implNote: '仅在比较总点数时+20（不提高牌型等级），按官方FAQ实现。' },
-  { id: 'clerk', name: '银行职员', emoji: '🏦', hue: 210, tags: ['重整', '游戏开始'], impl: 'full', text: '【重整阶段】获得2血筹。游戏开始时，额外获得2血筹。' },
-  { id: 'magician', name: '魔术师', emoji: '🎩', hue: 275, tags: ['常驻'], impl: 'full', text: '你的手牌上限+1。' },
-  { id: 'bartender', name: '酒保', emoji: '🍸', hue: 330, tags: ['换牌'], impl: 'full', text: '【换牌阶段】你的换牌次数+1，当剩余可换牌次数为0时，获得1血筹。' },
+  { id: 'dealer', name: '赌场荷官', emoji: '🎰', hue: 45, tags: ['结算'], impl: 'full', basic: true, text: '【结算阶段】你的牌型的总点数+20。', implNote: '仅在比较总点数时+20（不提高牌型等级），按官方FAQ实现。' },
+  { id: 'clerk', name: '银行职员', emoji: '🏦', hue: 210, tags: ['重整', '游戏开始'], impl: 'full', basic: true, text: '【重整阶段】获得2血筹。游戏开始时，额外获得2血筹。' },
+  { id: 'magician', name: '魔术师', emoji: '🎩', hue: 275, tags: ['常驻'], impl: 'full', basic: true, text: '你的手牌上限+1。' },
+  { id: 'bartender', name: '酒保', emoji: '🍸', hue: 330, tags: ['换牌'], impl: 'full', basic: true, text: '【换牌阶段】你的换牌次数+1，当剩余可换牌次数为0时，获得1血筹。' },
   { id: 'actor', name: '特型演员', emoji: '🎭', hue: 15, tags: ['对决', '游戏开始'], impl: 'full', text: '【对决阶段】你的2视为joker。游戏开始时，删除2张2。' },
   { id: 'miner', name: '矿工', emoji: '⛏️', hue: 100, tags: ['对决'], impl: 'full', text: '【对决阶段】若你打出的牌均为黑色，获得3血筹。' },
   { id: 'acrobat', name: '杂技演员', emoji: '🤹', hue: 190, tags: ['对决'], impl: 'full', text: '【对决阶段】你的【6】可视为【9】，【9】可视为【6】。', implNote: '评估时自动取6/9互换后的最优解释。' },
@@ -83,6 +85,11 @@ export const BLOOD_CHARS: BloodCharDef[] = [
 ];
 
 export const BLOOD_CHAR_BY_ID = new Map(BLOOD_CHARS.map((c) => [c.id, c]));
+
+/** 本局可选角色池：基础版仅前 4 名基础角色；拓展版并入全部拓展角色 */
+export function charPoolIds(includeExpansion: boolean): string[] {
+  return includeExpansion ? BLOOD_CHARS.map((c) => c.id) : BLOOD_CHARS.filter((c) => c.basic).map((c) => c.id);
+}
 
 /** 默认手牌上限（魔术师+1） */
 export function charHandCap(charId: string | null | undefined): number {

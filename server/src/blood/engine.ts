@@ -1,7 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { BLOOD_MARKET_BY_ID, buildBloodMarketDeck, type BloodEffect } from '@shared/bloodCards';
 import { catName, evalBloodHand, toEvalCard, applyImitate, type EvalCard } from '@shared/bloodEval';
-import { BLOOD_CHARS, BLOOD_CHAR_BY_ID, applyCharEval, charHandCap, charSwapMax } from '@shared/bloodChars';
+import { BLOOD_CHAR_BY_ID, applyCharEval, charHandCap, charPoolIds, charSwapMax } from '@shared/bloodChars';
 import { coreOrder, showdownReadyMs } from '@shared/bloodShowdown';
 import type { LogLine, Suit } from '@shared/protocol';
 import {
@@ -74,7 +74,7 @@ export function createBloodGame(
   seatCount: number,
   players: BloodPlayerInit[],
   now = Date.now(),
-  pickChars = true,
+  charExpansion = false,
   expansion = false,
 ): BloodState {
   const bps: BPlayer[] = players
@@ -162,23 +162,27 @@ export function createBloodGame(
     `掷骰定特权证：${rolls.map((r) => `${r.p.name} ${r.roll}点`).join('，')} → ${holder.p.name} 获得【临时特权证】（2血筹，其余3血筹）`,
   );
 
-  // 选将：每人从随机两张角色牌中选择一张（选完后进入初始构筑）；房间开关关闭时跳过
-  if (pickChars) {
-    const charDeck = shuffle(BLOOD_CHARS.map((c) => c.id));
-    for (const p of bps) p.charOptions = [charDeck.pop()!, charDeck.pop()!];
-    pushLog(gs, 'sys', '🎭 选将阶段：每人从两张随机角色牌中选择一张');
+  // 选将/分配：始终进行。2人局每人随机2张选1；3/4人局每人直接随机分配1名角色
+  const pool = shuffle(charPoolIds(charExpansion));
+  pushLog(gs, 'sys', `🎭 本局角色池：${charExpansion ? `全部 ${pool.length} 名角色（含拓展）` : `基础版 ${pool.length} 名角色`}`);
+  if (seatCount === 2) {
+    for (const p of bps) p.charOptions = [pool.pop()!, pool.pop()!];
+    pushLog(gs, 'sys', '🎭 2人局选将：每人从两张随机角色牌中选择一张');
   } else {
-    pushLog(gs, 'sys', '未开启选将模式，直接开始（房主可在房间设置勾选「选将模式」）');
-    for (const p of bps) drawSetupHand(gs, p);
-    gs.phase = 'setup';
+    const assigned = bps.map((p) => {
+      p.charId = pool.pop()!;
+      return `${p.name}【${BLOOD_CHAR_BY_ID.get(p.charId)!.name}】`;
+    });
+    pushLog(gs, 'sys', `🎭 ${seatCount}人局随机分配角色：${assigned.join('、')}`);
+    beginAfterPick(gs, now);
   }
   gs.deadline = now + BLOOD_TURN_MS;
   return gs;
 }
 
-/** 选将完成 → 游戏开始效果结算 → 初始构筑（飞车党跳过） */
+/** 角色确定 → 游戏开始效果结算 → 初始构筑（飞车党跳过） */
 function beginAfterPick(gs: BloodState, now: number): void {
-  pushLog(gs, 'sys', '🎭 选将完毕，游戏开始');
+  pushLog(gs, 'sys', '🎭 角色确定，游戏开始');
   for (const p of gs.players) {
     const def = BLOOD_CHAR_BY_ID.get(p.charId!)!;
     switch (effChar(p)) {
@@ -2494,12 +2498,12 @@ export function bResign(gs: BloodState, playerId: string, now: number): void {
 
 /* ---------------- 再来一场 ---------------- */
 
-export function bloodRematch(gs: BloodState, now: number, pickChars = true, expansion = false): BloodState {
+export function bloodRematch(gs: BloodState, now: number, charExpansion = false, expansion = false): BloodState {
   return createBloodGame(
     gs.seatCount,
     gs.players.map((p) => ({ id: p.id, name: p.name, seat: p.seat })),
     now,
-    pickChars,
+    charExpansion,
     expansion,
   );
 }

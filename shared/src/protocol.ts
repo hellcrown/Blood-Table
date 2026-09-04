@@ -88,8 +88,8 @@ export interface TableView {
   maxPlayers: number;
   settings: RoomSettings;
   hostId: string;
-  /** 血色模式：选将开关（开=开局随机抽2张角色牌选1；默认关） */
-  charPick: boolean;
+  /** 血色模式：拓展选将开关（选将始终进行；开=角色池并入拓展角色，关=仅基础4角色） */
+  charExpansion: boolean;
   /** 血色模式：拓展黑市开关（开=牌库并入拓展牌；默认关） */
   expansion: boolean;
   players: SeatView[];
@@ -139,7 +139,7 @@ export type C2S =
   | { t: 'rejoin'; token: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charPick?: boolean; expansion?: boolean }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean }
   | { t: 'sit'; seat: number }
   | { t: 'act'; action: PlayerAction }
   | { t: 'nextHand' }

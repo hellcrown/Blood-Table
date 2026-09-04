@@ -66,7 +66,7 @@ export function Room({ view }: { view: TableView }) {
     bb?: number;
     startChips?: number;
     maxPlayers?: number;
-    charPick?: boolean;
+    charExpansion?: boolean;
     expansion?: boolean;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -146,6 +146,7 @@ export function Room({ view }: { view: TableView }) {
           {view.mode === 'blood' ? (
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·
+              开局定角色（2人局随机2选1，3/4人局随机分配1名）·
               集齐 {view.maxPlayers <= 2 ? 24 : view.maxPlayers === 3 ? 20 : 16} 张车票获胜（
               {view.maxPlayers <= 2 ? '2人局' : view.maxPlayers === 3 ? '3人局' : '4人局'}目标）
             </p>
@@ -212,15 +213,18 @@ export function Room({ view }: { view: TableView }) {
                   <option value={4}>4 人</option>
                 </select>
               </label>
-              <label className="charpick-toggle" title="开启后开局每人随机抽 2 张角色牌，选择 1 张获得其技能">
-                选将模式
+              <label
+                className="charpick-toggle"
+                title="选将始终进行：2人局每人随机2张角色牌选1，3/4人局每人随机分配1名角色。开启后角色池并入拓展角色（共58名），关闭则仅用基础版4名角色"
+              >
+                拓展选将
                 <input
                   type="checkbox"
-                  checked={view.charPick}
+                  checked={view.charExpansion}
                   disabled={!isHost}
-                  onChange={(e) => update({ charPick: e.target.checked })}
+                  onChange={(e) => update({ charExpansion: e.target.checked })}
                 />
-                <span className="hint">{view.charPick ? '开（2选1角色牌）' : '关（默认）'}</span>
+                <span className="hint">{view.charExpansion ? '开（全部58名角色）' : '关（仅基础4角色）'}</span>
               </label>
               <label className="charpick-toggle" title="开启后黑市牌库并入拓展牌（仿制印章、加密线路、闭店礼等）">
                 拓展黑市

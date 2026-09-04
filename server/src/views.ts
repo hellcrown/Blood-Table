@@ -12,7 +12,7 @@ export function buildView(room: Room, viewerId: string | null): TableView {
     maxPlayers: room.maxPlayers,
     settings: room.settings,
     hostId: room.hostId,
-    charPick: room.charPick,
+    charExpansion: room.charExpansion,
     expansion: room.expansion,
     serverTime: now,
   };

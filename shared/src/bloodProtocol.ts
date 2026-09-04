@@ -158,7 +158,7 @@ export interface BloodView {
     seat: number;
     blood: number;
     tickets: number;
-    /** 选将阶段：随机抽到的两张角色牌 id（选完或非选将阶段为空） */
+    /** 2人局选将阶段：随机抽到的两张角色牌 id（选完或非选将阶段为空；3/4人局随机分配不经过选将） */
     charOptions: string[];
     hand: BloodCardView[];
     discard: BloodCardView[];

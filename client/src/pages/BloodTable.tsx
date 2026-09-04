@@ -1379,11 +1379,11 @@ export function BloodTable({ view }: { view: BloodView }) {
         </div>
       )}
 
-      {/* 选将：从随机两张角色牌中选择一张（点击放大查看技能） */}
+      {/* 选将（仅2人局）：从随机两张角色牌中选择一张（点击放大查看技能） */}
       {view.phase === 'pick' && (
         <div className="overlay char-pick">
           <div className="panel char-pick-panel" onClick={(e) => e.stopPropagation()}>
-            <h3>🎭 选将 · 从两张随机角色牌中选择一张</h3>
+            <h3>🎭 选将 · 2人局：从两张随机角色牌中选择一张</h3>
             {(() => {
               const mine = view.players.find((p) => p.seat === view.me.seat);
               const myChar = mine?.charId ?? null;

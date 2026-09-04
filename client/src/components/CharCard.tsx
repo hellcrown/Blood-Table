@@ -68,7 +68,7 @@ export function CharDetail({
           {def.impl === 'todo' && (
             <p className="char-impl-note todo">
               ⚙️ 该角色的技能需要玩家间自由互动（谈判、质疑、指定目标等），暂未接入自动结算；
-              开启选将模式时仍可能抽到，请按卡面文本与同桌协商执行
+              拓展选将开启时仍可能抽到，请按卡面文本与同桌协商执行
             </p>
           )}
           <div className="char-detail-actions">
