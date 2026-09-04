@@ -13,7 +13,10 @@ export function Lobby({ connected }: { connected: boolean }) {
 
   /** 粘贴识别：支持直接粘贴邀请文本（网址 — 血色牌局房间码：XXXX），自动提取房间码 */
   const applyCode = (raw: string): void => {
-    const m = /房间码\s*[：:]\s*([A-Z0-9]{4})/i.exec(raw);
+    const m =
+      /房间码\s*[：:]\s*([A-Z0-9]{4})/i.exec(raw) ??
+      /[?&]room=([A-Za-z0-9]{4})/i.exec(raw) ??
+      /\/([A-Z0-9]{4})\/?\s*$/.exec(raw.trim());
     if (m) {
       setCode(m[1].toUpperCase());
       return;

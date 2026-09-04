@@ -34,8 +34,8 @@ export function Room({ view }: { view: TableView }) {
     setSettings(view.settings);
   }, [view.settings]);
 
-  // 邀请链接 = 当前访问地址（部署在云服务器上，朋友直接打开同网址进大厅）
-  const inviteUrl = `${location.origin}/`;
+  // 邀请链接 = 当前访问地址 + 房间码参数（朋友打开后自动预填房间码）
+  const inviteUrl = `${location.origin}/?room=${view.code}`;
   const inviteText = `${inviteUrl} — 血色牌局房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
