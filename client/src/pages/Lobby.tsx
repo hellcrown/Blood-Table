@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
 
@@ -10,6 +10,22 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [adminOpen, setAdminOpen] = useState(false);
 
   const nameOk = name.trim().length > 0;
+
+  /** 粘贴识别：支持直接粘贴邀请文本（网址 — 血色牌局房间码：XXXX），自动提取房间码 */
+  const applyCode = (raw: string): void => {
+    const m = /房间码\s*[：:]\s*([A-Z0-9]{4})/i.exec(raw);
+    if (m) {
+      setCode(m[1].toUpperCase());
+      return;
+    }
+    setCode(raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4));
+  };
+
+  // 深链支持：?room=CODE 或 /CODE 直接预填房间码
+  useEffect(() => {
+    const m = /[?&]room=([A-Za-z0-9]{4})/.exec(location.search) ?? /^\/([A-Za-z0-9]{4})\/?$/.exec(location.pathname);
+    if (m) setCode(m[1].toUpperCase());
+  }, []);
 
   const create = () => {
     net.saveName(name.trim());
@@ -66,9 +82,9 @@ export function Lobby({ connected }: { connected: boolean }) {
               <input
                 className="code-input"
                 value={code}
-                maxLength={4}
-                placeholder="房间码"
-                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                maxLength={64}
+                placeholder="房间码（可粘贴邀请文本）"
+                onChange={(e) => applyCode(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && nameOk && code.length === 4) join();
                 }}
