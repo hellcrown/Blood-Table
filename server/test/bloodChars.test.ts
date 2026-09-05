@@ -758,8 +758,29 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     }
   });
 
-  it('飞行检查：决胜探索——时装表现', () => {
-    // 占位：保持套件结构完整
-    expect(true).toBe(true);
+  it('双生子：初始构筑后双生镜片插入弃牌区并置顶', () => {
+    const gs = makeGame('twinA', 'clerk');
+    driveTo(gs, 'swap');
+    const p0 = gs.players[0];
+    expect(gs.supply.filter((d) => d === 'twinLens').length).toBe(1); // 2 张中 1 张已插入
+    const lens = p0.chips.find((ch) => ch.def === 'twinLens');
+    expect(lens).toBeTruthy();
+    // 镜片宿主牌置顶后随即被抽入手牌（抽牌阶段抽至上限）
+    expect(p0.hand.some((c) => c.id === lens!.on) || p0.draw[p0.draw.length - 1].id === lens!.on).toBe(true);
+  });
+
+  it('金科玉律10：被删的牌连同强化芯片一起进删牌区', () => {
+    const gs = makeGame('clerk', 'clerk');
+    driveTo(gs, 'remove');
+    const p0 = gs.players[0];
+    // 给弃牌区一张牌插上芯片
+    const card = p0.discard[0];
+    p0.chips.push({ id: 'ch-test', def: 'calib1', on: card.id });
+    const recycleBefore = gs.recycle.length;
+    bRemove(gs, p0.id, [card.id], NOW);
+    expect(p0.removed.some((c) => c.id === card.id)).toBe(true);
+    expect(p0.chips.some((ch) => ch.on === card.id)).toBe(false);
+    expect(gs.recycle.length).toBe(recycleBefore + 1);
+    expect(gs.recycle).toContain('calib1');
   });
 });

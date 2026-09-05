@@ -1172,9 +1172,10 @@ export function BloodTable({ view }: { view: BloodView }) {
                   <div className="act-row wrap">
                     <span className="hint">宣告视为高牌的牌型：</span>
                     <select value={eraserCat} onChange={(e) => setEraserCat(Number(e.target.value))}>
-                      {HAND_LADDER.filter((h) => !h.chipOnly).map((h, i) => (
+                      {HAND_LADDER.map((h, i) => (
                         <option key={h.name} value={14 - i}>
                           {h.name}
+                          {h.chipOnly ? '（芯片）' : ''}
                         </option>
                       ))}
                     </select>
@@ -1913,9 +1914,10 @@ export function BloodTable({ view }: { view: BloodView }) {
                 {view.prompt.k === 'mynameSet' && (
                   <div className="act-row wrap">
                     <select value={mynameCatSel} onChange={(e) => setMynameCatSel(Number(e.target.value))}>
-                      {HAND_LADDER.filter((h) => !h.chipOnly).map((h, i) => (
+                      {HAND_LADDER.map((h, i) => (
                         <option key={h.name} value={14 - i}>
                           {h.name}
+                          {h.chipOnly ? '（芯片）' : ''}
                         </option>
                       ))}
                     </select>

@@ -565,6 +565,7 @@ export function bSetup(gs: BloodState, playerId: string, removedIds: string[], n
     drawSetupHand(gs, p);
   } else if (allDone(gs, (x) => x.setupRound >= 2)) {
     pushLog(gs, 'sys', '初始构筑完毕');
+    runTwinSetup(gs);
     startDrawPhase(gs, now);
   }
 }
@@ -643,6 +644,33 @@ function markSwapStopped(gs: BloodState, p: BPlayer): void {
 }
 
 /** 某玩家换牌结束（停止或次数用尽）后的角色钩子：入队等待逐一结算 */
+/** 双生子：初始构筑结束后，从黑市牌堆找出【双生镜片】插入弃牌区一张牌、重洗牌库并置顶 */
+function runTwinSetup(gs: BloodState): void {
+  for (const p of gs.players) {
+    if (p.charId !== 'twinA' && p.charId !== 'twinB') continue;
+    const lensIdx = gs.supply.indexOf('twinLens');
+    if (lensIdx < 0) {
+      pushLog(gs, 'sys', `${p.name}【双生子】黑市牌堆中没有【双生镜片】，跳过`);
+      continue;
+    }
+    gs.supply.splice(lensIdx, 1);
+    const candidates = p.discard.filter((c) => !p.chips.some((ch) => ch.on === c.id));
+    if (candidates.length === 0) {
+      gs.recycle.push('twinLens');
+      pushLog(gs, 'sys', `${p.name}【双生子】弃牌区没有可插入的牌，【双生镜片】弃置`);
+      continue;
+    }
+    const host = candidates[randomInt(0, candidates.length)];
+    p.discard = p.discard.filter((c) => c.id !== host.id);
+    p.chips.push({ id: `ch-${Math.random().toString(36).slice(2, 10)}`, def: 'twinLens', on: host.id });
+    p.draw = shuffle([...p.discard, ...p.draw]);
+    p.discard = [];
+    p.draw.push(host); // 末端为堆顶
+    onLibraryReshuffle(gs);
+    pushLog(gs, 'action', `🪞 ${p.name}【双生子】将【双生镜片】插入 ${bloodCardText(host)}、重洗牌库后置于抽牌堆顶`);
+  }
+}
+
 function afterSwapEnded(gs: BloodState, p: BPlayer, now: number): void {
   void now;
   // 神作章鱼：换牌结束时洗混弃牌区，随机取回至多 2 张加入手牌
@@ -1032,6 +1060,7 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
       const n = Math.min(3, t.draw.length);
       const top = t.draw.splice(-n, n);
       t.removed.push(...top);
+      purgeChipsOn(gs, t, new Set(top.map((c) => c.id)));
       pushLog(gs, 'action', `【暴力删除】生效：${t.name} 抽牌堆顶 ${top.map(bloodCardText).join(' ')} 被删除`);
       break;
     }
@@ -1044,6 +1073,7 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
         const pick = matches[randomInt(0, matches.length)];
         t.discard = t.discard.filter((c) => c.id !== pick.id);
         t.removed.push(pick);
+        purgeChipsOn(gs, t, new Set([pick.id]));
         pushLog(gs, 'action', `【定点爆破】生效：${t.name} 删除弃牌堆中的 ${bloodCardText(pick)}`);
       }
       break;
@@ -1274,6 +1304,7 @@ export function bPinpointVictimPick(gs: BloodState, playerId: string, cardId: st
   if (finalRank(t, card) !== rank) throw new BloodError('BAD_CARD', `须选择 ${rank} 点的牌`);
   t.discard = t.discard.filter((c) => c.id !== cardId);
   t.removed.push(card);
+  purgeChipsOn(gs, t, new Set([cardId]));
   const buyer = gs.players.find((x) => x.id === pend.buyerId)!;
   gs.secretPending = null;
   pushLog(gs, 'action', `【定点爆破】${t.name} 删除弃牌堆中的 ${bloodCardText(card)}（${rank} 点）`);
@@ -1722,6 +1753,7 @@ function settle(gs: BloodState, now: number): void {
     const moved = p.discard.filter((c) => ids.includes(c.id));
     p.discard = p.discard.filter((c) => !ids.includes(c.id));
     p.removed.push(...moved);
+    purgeChipsOn(gs, p, new Set(ids));
     pushLog(gs, 'action', `${p.name}【枪手】结算结束：删除本回合打出的4（${moved.map(bloodCardText).join(' ')}）`);
   }
   if (selfDestructFired) {
@@ -1731,6 +1763,7 @@ function settle(gs: BloodState, now: number): void {
       if (moved.length === 0) continue;
       p.discard = p.discard.filter((c) => !ids.includes(c.id));
       p.removed.push(...moved);
+      purgeChipsOn(gs, p, new Set(ids));
       pushLog(gs, 'action', `【自毁芯片】发动：${p.name} 本回合打出的 ${moved.length} 张牌全部删除`);
     }
   }
@@ -1749,6 +1782,7 @@ function settle(gs: BloodState, now: number): void {
         p.removed.push(c);
         deleted.push(c);
       }
+      purgeChipsOn(gs, p, new Set(deleted.map((c) => c.id)));
       if (deleted.length > 0) {
         pushLog(gs, 'action', `💣 ${p.name}${effChar(p) === 'bomber' ? '【炸弹客】' : '（炸弹客宣告）'}随机删除本回合打出的牌：${deleted.map(bloodCardText).join(' ')}`);
       }
@@ -2186,12 +2220,18 @@ function processMarketDef(
       return;
     }
     case 'stealPrivilege': {
-      // 鬼手探囊：夺得更衣室大权——临时特权证归你
-      for (const o of gs.players) o.privilege = false;
-      p.privilege = true;
-      gs.privilegeSeat = p.seat;
-      gs.recycle.push(def.id);
-      pushLog(gs, 'action', `【${def.name}】发动：${p.name} 夺得【临时特权证】`);
+      // 鬼手探囊：夺得更衣室大权——临时特权证归你（江东之主持有期间不可夺）
+      const holder = gs.players.find((o) => o.privilege);
+      if (holder && effChar(holder) === 'sunwu') {
+        gs.recycle.push(def.id);
+        pushLog(gs, 'action', `【${def.name}】发动失败：${holder.name}【江东之主】的特权证不可被夺走`);
+      } else {
+        for (const o of gs.players) o.privilege = false;
+        p.privilege = true;
+        gs.privilegeSeat = p.seat;
+        gs.recycle.push(def.id);
+        pushLog(gs, 'action', `【${def.name}】发动：${p.name} 夺得【临时特权证】`);
+      }
       afterMarketResolved(gs, p, false);
       return;
     }
@@ -2338,6 +2378,7 @@ export function bSecretDelete(gs: BloodState, playerId: string, cardIds: string[
   if (cards.length !== cardIds.length) throw new BloodError('BAD_CARD', '目标牌不在你的弃牌区');
   p.discard = p.discard.filter((c) => !set.has(c.id));
   p.removed.push(...cards);
+  purgeChipsOn(gs, p, set);
   if (cards.length > 0) {
     pushLog(gs, 'action', `${p.name} 删除：${cards.map(bloodCardText).join(' ')}`);
   }
@@ -2393,6 +2434,7 @@ export function bViolent(gs: BloodState, playerId: string, targetSeat: number, n
   }
   const top = target.draw.splice(-3, 3);
   target.removed.push(...top);
+  purgeChipsOn(gs, target, new Set(top.map((c) => c.id)));
   pushLog(gs, 'action', `【暴力删除】发动：${p.name} 删除 ${target.name} 抽牌堆顶的 ${top.map(bloodCardText).join(' ')}`);
   afterMarketResolved(gs, p, false);
 }
@@ -2539,6 +2581,7 @@ export function bRemove(gs: BloodState, playerId: string, cardIds: string[], now
   p.blood -= cost;
   p.discard = p.discard.filter((c) => !set.has(c.id));
   p.removed.push(...cards);
+  purgeChipsOn(gs, p, set);
   p.removeDone = true;
   p.lastAction = cards.length > 0 ? `删除 ${cards.length} 张` : '跳过删牌';
   if (cards.length > 0) {
@@ -2550,6 +2593,19 @@ export function bRemove(gs: BloodState, playerId: string, cardIds: string[], now
   checkLiuWin(gs, p, now);
   if (gs.phase !== 'remove') return; // 皇叔达成特殊胜利
   if (allDone(gs, (x) => x.removeDone)) startReorg(gs, now);
+}
+
+/** 金科玉律10：被删除的牌连同其强化芯片一起进删牌区（芯片实例移出游戏，计入回收站） */
+function purgeChipsOn(gs: BloodState, p: BPlayer, cardIds: Set<string>): void {
+  const removed = p.chips.filter((ch) => cardIds.has(ch.on));
+  if (removed.length === 0) return;
+  p.chips = p.chips.filter((ch) => !cardIds.has(ch.on));
+  for (const ch of removed) gs.recycle.push(ch.def);
+  pushLog(
+    gs,
+    'sys',
+    `⛓️ 被删除的牌上的强化芯片随之移出游戏：${removed.map((ch) => `【${BLOOD_MARKET_BY_ID.get(ch.def)?.name ?? '?'}】`).join('、')}`,
+  );
 }
 
 /** 皇叔：分数达到目标一半且整副 54 张全部删除 → 直接获胜 */
@@ -3028,7 +3084,17 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
   if (!pend || pend.seat !== playerId) throw new BloodError('PENDING', '当前没有待选择的目标');
   const p = gs.players.find((x) => x.id === playerId)!;
   const t = bySeat(gs, seat);
-  if (!t || t.id === playerId) throw new BloodError('BAD_TARGET', '目标无效');
+  if (!t) throw new BloodError('BAD_TARGET', '目标无效');
+  // 暂时失忆卡面为“一位玩家”：允许指定自己（跳过屏障询问）
+  if (pend.kind === 'amnesiaTarget' && t.id === p.id) {
+    t.charOffNextRound = true;
+    gs.recycle.push(pend.defId ?? 'amnesia');
+    gs.secretPending = null;
+    pushLog(gs, 'action', `【暂时失忆】${p.name} 使自己的技能下回合失效`);
+    afterMarketResolved(gs, p, false);
+    return;
+  }
+  if (t.id === playerId) throw new BloodError('BAD_TARGET', '目标无效');
   const finish = (): void => {
     gs.secretPending = null;
     if (pend.kind === 'signalTarget') return; // 道具：无购买推进
@@ -3191,6 +3257,7 @@ export function bPreciseDel(gs: BloodState, playerId: string, cardIds: string[],
   const picked = drawn.filter((c) => uniq.includes(c.id));
   if (picked.length !== uniq.length) throw new BloodError('BAD_CARD', '目标牌不在抽到的 3 张中');
   p.removed.push(...picked);
+  purgeChipsOn(gs, p, new Set(picked.map((c) => c.id)));
   const rest = drawn.filter((c) => !uniq.includes(c.id));
   p.discard.push(...rest);
   pushLog(
@@ -3359,9 +3426,15 @@ export function bResign(gs: BloodState, playerId: string, now: number): void {
   const others = gs.players.filter((x) => x.id !== playerId);
   if (others.length === 0) return;
   const winner = others.slice().sort((a, b) => b.tickets - a.tickets || b.blood - a.blood)[0];
+  const sunwuHolder = gs.players.find((x) => x.charId === 'sunwu' && x.id !== playerId);
   for (const o of gs.players) o.privilege = false;
-  winner.privilege = true;
-  gs.privilegeSeat = winner.seat;
+  if (sunwuHolder) {
+    sunwuHolder.privilege = true;
+    gs.privilegeSeat = sunwuHolder.seat;
+  } else {
+    winner.privilege = true;
+    gs.privilegeSeat = winner.seat;
+  }
   gs.phase = 'gameover';
   gs.deadline = null;
   gs.final = {
@@ -3405,6 +3478,7 @@ function afterStartupResolved(gs: BloodState, now: number): void {
   if (gs.secretPending) return;
   if (gs.phase === 'setup' && allDone(gs, (x) => x.setupRound >= 2)) {
     pushLog(gs, 'sys', '初始构筑完毕');
+    runTwinSetup(gs);
     startDrawPhase(gs, now);
     return;
   }
@@ -3564,6 +3638,7 @@ export function bStudentDump(gs: BloodState, playerId: string, accept: boolean, 
       p.blood -= 2;
       p.discard = p.discard.filter((c) => c.id !== cardId);
       p.removed.push(card);
+      purgeChipsOn(gs, p, new Set([cardId]));
       pushLog(gs, 'action', `${p.name}【高中生】执行删牌：删除 ${bloodCardText(card)}（支付 2 血筹）`);
       gainChefDeleteThrees(gs, p, [card]);
       checkLiuWin(gs, p, now);
@@ -3999,6 +4074,7 @@ export function bDogTarget(gs: BloodState, playerId: string, seat: number, now: 
   const n = Math.max(0, roll - 1);
   const take = t.draw.splice(-Math.min(n, t.draw.length));
   t.removed.push(...take);
+  purgeChipsOn(gs, t, new Set(take.map((c) => c.id)));
   pushLog(
     gs,
     'action',
@@ -4291,6 +4367,7 @@ export function bCleanerDel(gs: BloodState, playerId: string, seat: number, card
     t.discard = t.discard.filter((c) => c.id !== card.id);
   }
   t.removed.push(card);
+  purgeChipsOn(gs, t, new Set([card.id]));
   gs.secretPending = null;
   pushLog(gs, 'action', `🧹 ${p.name}【清洁工】删除 ${t.name} ${fromDraw ? '抽牌堆' : '弃牌区'}中的 ${bloodCardText(card)}${fromDraw ? '（并重洗其抽牌堆）' : ''}`);
   const next = pend.oppQueue?.shift();
