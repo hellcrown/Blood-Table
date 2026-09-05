@@ -209,6 +209,17 @@ export function BloodTable({ view }: { view: BloodView }) {
     setPinSeat(-1);
     setIrisSeat(-1);
     setPrecisePick([]);
+    setSmugSlot(-1);
+    setDetPick([]);
+    setDesignerPick([]);
+    setGamblerSeat(-1);
+    setGenSeat(-1);
+    setCleanSeat(-1);
+    setCeoSeat(-1);
+    setBlufferDecl({});
+    setInspectorPick('');
+    setTarotDraw(0);
+    setCursePick([]);
   }, [view.round, view.phase]);
 
   const offsetRef = useRef(0);
@@ -229,6 +240,23 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [precisePick, setPrecisePick] = useState<string[]>([]);
   const [delPick, setDelPick] = useState<string[]>([]);
   const [refreshPick, setRefreshPick] = useState<number[]>([]);
+  /* ---- 拓展角色交互状态 ---- */
+  const [smugSlot, setSmugSlot] = useState(-1);
+  const [detMode, setDetMode] = useState<'top' | 'bottom'>('top');
+  const [detPick, setDetPick] = useState<string[]>([]);
+  const [designerPick, setDesignerPick] = useState<string[]>([]);
+  const [gamblerSeat, setGamblerSeat] = useState(-1);
+  const [genSeat, setGenSeat] = useState(-1);
+  const [cleanSeat, setCleanSeat] = useState(-1);
+  const [ceoSeat, setCeoSeat] = useState(-1);
+  const [ceoAmt, setCeoAmt] = useState(1);
+  const [auctionAmt, setAuctionAmt] = useState(1);
+  const [mynameCatSel, setMynameCatSel] = useState(1);
+  const [mynameText, setMynameText] = useState('');
+  const [blufferDecl, setBlufferDecl] = useState<Record<string, { r: number; s: string }>>({});
+  const [inspectorPick, setInspectorPick] = useState('');
+  const [tarotDraw, setTarotDraw] = useState(0);
+  const [cursePick, setCursePick] = useState<string[]>([]);
   /** 芯片购买：{defId, slot} —— 点购买后立即弹出弃牌区选牌 */
   const [chipBuying, setChipBuying] = useState<{ defId: string; slot: number } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
@@ -390,6 +418,69 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '屏蔽器：点击一名玩家的芯片令其本次对决失效';
       case 'barrierAsk':
         return `防护屏障：${view.prompt.eff ?? '有效果即将对你生效'} —— 是否抵消？`;
+      /* ---- 拓展角色 ---- */
+      case 'gamblerGuess':
+        return '职业赌徒：选择本回合夺魁者（可猜自己，猜中 +（人数+2）🩸）';
+      case 'bomberClaim':
+        return '炸弹客：宣告 0-2 中的一个数字 X，获得 X 血筹（结算时将随机删牌）';
+      case 'succubusSteal':
+        return `魅魔：选择抢夺目标（${view.prompt.blood ?? 1}🩸），或直接获得等量血筹`;
+      case 'scalperDeal':
+        return '票贩子：支付 3 血筹向夺魁者强购 1 车票？';
+      case 'studentDump':
+        return '高中生：可弃光出牌区（视为高牌 0 点）获得 2 血筹并执行一次删牌';
+      case 'studentRemove':
+        return '高中生：打开弃牌区点击一张牌删除（支付 2 血筹），或放弃';
+      case 'designerDiscard':
+        return '桌游设计师：从出牌区选 1 张得 2 血筹，或 2 张得 4 血筹';
+      case 'dogTarget':
+        return '赌狗：选择一名玩家掷骰，删除其抽牌堆顶 X-1 张（X 为点数）';
+      case 'generalChoice':
+        return '将军：令一名玩家随机弃1摸1，或自己额外换牌一次';
+      case 'vagrantDraw':
+        return '无业游民：从一名对手的抽牌堆顶抽 2 张入手牌';
+      case 'fryerDel':
+        return '炸鸡店老板：点击本回合打出的牌，花 1 血筹删除 1 张（至多 3 张）';
+      case 'curseTake':
+        return '咒术师：选择取回角色牌下的哪些【5】入手牌';
+      case 'godPeek':
+        return '赌神：查看所有玩家手牌后，选择额外换牌一次或获得 1 血筹';
+      case 'detectivePick':
+        return '私家侦探：弃牌区 1 张置顶 / 至多 3 张置底 / 放弃得 1 血筹';
+      case 'hackerSetup':
+        return '黑客：初始构筑——从全牌库中恰好选 8 张删除';
+      case 'smugglerMark':
+        return '走私客：点击黑市一张牌标记（自己买-2，他人买须先付你 2 血筹）';
+      case 'pirateRob':
+        return '海盗：选择抢劫目标';
+      case 'pirateDecide':
+        return '海盗抢劫：【放弃】交 2 血筹，或【抵抗】掷骰对决';
+      case 'auctionPick':
+        return '瞎掰帝：查看黑市牌堆顶 2 张，暗置其中 1 张开始叫价';
+      case 'auctionBid':
+        return `瞎掰帝叫价：当前最高 ${view.prompt.amount ?? 0}🩸，出价须更高且不超过持有血筹（0 = 不叫价）`;
+      case 'impDraw':
+        return '捣蛋鬼：点击抽牌来源（对手抽牌堆），抽至手牌上限';
+      case 'impRedeem':
+        return '支付 1 血筹，从捣蛋鬼牌区赎回属于自己的所有牌？';
+      case 'facelessPick':
+        return '无面人：从两张角色牌中选择 1 张获得其技能（或永久转化）';
+      case 'blufferDeclare':
+        return '瞎掰王：为出牌区每张牌宣告点数与花色（随后依次询问质疑）';
+      case 'blufferChallenge':
+        return '瞎掰王宣告完毕：你是否质疑？';
+      case 'ceoGive':
+        return `霸道总裁：选择玩家与给予血筹（已累计 ${view.prompt.given ?? 0}🩸 给出），完成后点「结束给予」`;
+      case 'ceoDecide':
+        return `霸道总裁给予你 ${view.prompt.given ?? 0} 血筹：收下并弃光手牌重抽，或拒绝并支付双倍`;
+      case 'agentAsk':
+        return '特工：询问一名玩家交换出牌区（拒绝须付你 2 血筹）';
+      case 'agentDecide':
+        return '特工询问：是否交换出牌区？拒绝须支付 2 血筹';
+      case 'mynameSet':
+        return '我的名字？：选择一种牌型并为其自定义名称（任何人打出它你 +2🩸）';
+      case 'cleanerDel':
+        return '清洁工：选择目标玩家，从其弃牌区选牌删除（或随机删其抽牌堆一张，删自抽牌堆则重洗）';
       default:
         return '等待对方操作…';
     }
@@ -436,8 +527,44 @@ export function BloodTable({ view }: { view: BloodView }) {
     }
     if (view.prompt.k === 'remove') {
       toggle(selRemove, setSelRemove, c.id, 99);
+      return;
+    }
+    if (view.prompt.k === 'studentRemove') {
+      send({ t: 'bStudentDump', accept: true, cardId: c.id });
+      setZoneModal(null);
+      return;
+    }
+    if (view.prompt.k === 'detectivePick') {
+      if (detMode === 'top') {
+        send({ t: 'bDetectivePick', mode: 'top', cardIds: [c.id] });
+        setZoneModal(null);
+      } else {
+        toggle(detPick, setDetPick, c.id, 3);
+      }
     }
   };
+
+  /** 通用座位选择按钮（目标类交互） */
+  const seatButtons = (
+    sel: number,
+    setSel: (n: number) => void,
+    opts: { includeSelf?: boolean; minDraw?: number } = {},
+  ) =>
+    view.players
+      .filter(
+        (p) =>
+          (opts.includeSelf || p.seat !== view.me.seat) &&
+          (opts.minDraw == null || p.drawCount >= opts.minDraw),
+      )
+      .map((p) => (
+        <button
+          key={p.seat}
+          className={`btn tiny ${sel === p.seat ? 'primary' : ''}`}
+          onClick={() => setSel(p.seat)}
+        >
+          {p.seat === view.me.seat ? '自己' : p.name}
+        </button>
+      ));
 
   const zoneTitle =
     zoneModal?.kind === 'discard'
@@ -449,7 +576,11 @@ export function BloodTable({ view }: { view: BloodView }) {
             ? `弃牌区（${view.me.discard.length}）· 点击带芯片的牌拔除（+4🩸）`
             : view.prompt.k === 'pinpointVictim'
               ? `弃牌区（${view.me.discard.length}）· 定点爆破：点击一张 ${view.prompt.rank} 点的牌删除`
-              : `弃牌区（${view.me.discard.length}）`
+              : view.prompt.k === 'studentRemove'
+                ? `弃牌区（${view.me.discard.length}）· 点击一张牌删除（支付 2 血筹）`
+                : view.prompt.k === 'detectivePick'
+                  ? `弃牌区（${view.me.discard.length}）· ${detMode === 'top' ? '点击一张牌公示置顶' : '点击选择至多 3 张置底'}`
+                  : `弃牌区（${view.me.discard.length}）`
       : zoneModal?.kind === 'removed'
         ? `删牌区（${view.me.removed.length}）`
         : '道具区';
@@ -605,18 +736,21 @@ export function BloodTable({ view }: { view: BloodView }) {
             <div className="market-slots">
               {view.market.map((m, i) => {
                 const pickable = view.prompt.k === 'refreshPick';
-                const selected = pickable && refreshPick.includes(i);
+                const smugPickable = view.prompt.k === 'smugglerMark' && m.defId != null;
+                const selected = (pickable && refreshPick.includes(i)) || (smugPickable && smugSlot === i);
                 return (
                   <div
                     key={i}
-                    className={`market-card ${i >= 3 ? 'hot' : ''} ${selected ? 'sel' : ''} ${pickable && m.defId ? 'clickable' : ''}`}
+                    className={`market-card ${i >= 3 ? 'hot' : ''} ${selected ? 'sel' : ''} ${(pickable || smugPickable) && m.defId ? 'clickable' : ''}`}
                     onClick={
                       pickable && m.defId
                         ? () =>
                             setRefreshPick((s) =>
                               s.includes(i) ? s.filter((x) => x !== i) : s.length < (view.prompt.max ?? 2) ? [...s, i] : s,
                             )
-                        : undefined
+                        : smugPickable
+                          ? () => setSmugSlot(i)
+                          : undefined
                     }
                   >
                     {m.defId ? (
@@ -631,6 +765,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <div className="mc-foot">
                           <span className="mc-cost">🩸{m.cost}</span>
                           {m.bonus > 0 && <span className="mc-bonus">+{m.bonus}🩸</span>}
+                          {view.me.smugglerSlot === i && <span className="mc-bonus">🚚已标记</span>}
                           <span className="spacer" />
                           {view.prompt.k === 'buy' && (
                             <button
@@ -667,6 +802,23 @@ export function BloodTable({ view }: { view: BloodView }) {
                 );
               })}
             </div>
+            {view.prompt.k === 'smugglerMark' && (
+              <div className="act-row" style={{ marginTop: 8 }}>
+                <button
+                  className="btn primary"
+                  disabled={smugSlot < 0}
+                  onClick={() => {
+                    send({ t: 'bSmugglerMark', slot: smugSlot });
+                    setSmugSlot(-1);
+                  }}
+                >
+                  🚚 标记选中的黑市牌
+                </button>
+                <button className="btn" onClick={() => send({ t: 'bSmugglerMark', slot: -1 })}>
+                  不标记
+                </button>
+              </div>
+            )}
             {view.prompt.k === 'refreshPick' && (
               <div className="act-row" style={{ marginTop: 8 }}>
                 <button
@@ -754,6 +906,15 @@ export function BloodTable({ view }: { view: BloodView }) {
                   当前选择：{selPlay.length < 5 ? `还需 ${5 - selPlay.length} 张` : `【${playHint.name}】· ${playHint.pips} 点`}
                 </div>
               )}
+              {myCharId === 'faceless' && view.me.tempChar && (
+                <button
+                  className="btn"
+                  onClick={() => send({ t: 'bFacelessConvert' })}
+                  title="将当前持有的临时技能永久转化（不可逆转，之后不再抽角色牌）"
+                >
+                  🎭 永久转化为【{BLOOD_CHAR_BY_ID.get(view.me.tempChar)?.name}】
+                </button>
+              )}
               <div className="act-row">
                 {view.prompt.k === 'setup' && (
                   <button
@@ -768,19 +929,68 @@ export function BloodTable({ view }: { view: BloodView }) {
                 )}
                 {view.prompt.k === 'swap' && (
                   <>
+                    {myCharId === 'tarot' && (
+                      <div className="act-row wrap">
+                        <span className="hint">塔罗师 · 先抽牌：</span>
+                        {[0, 1, 2].map((n) => (
+                          <button
+                            key={n}
+                            className={`btn tiny ${tarotDraw === n ? 'primary' : ''}`}
+                            onClick={() => setTarotDraw(n)}
+                          >
+                            抽 {n} 张
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button
                       className="btn primary"
-                      disabled={selSwap.length === 0}
+                      disabled={myCharId !== 'tarot' && selSwap.length === 0}
                       onClick={() => {
-                        send({ t: 'bSwap', cardIds: selSwap });
+                        send({ t: 'bSwap', cardIds: selSwap, drawCount: tarotDraw });
                         setSelSwap([]);
                       }}
                     >
-                      换掉选中的 {selSwap.length} 张
+                      {myCharId === 'tarot'
+                        ? `换牌：先抽 ${tarotDraw} 张，弃 ${selSwap.length} 张`
+                        : `换掉选中的 ${selSwap.length} 张`}
                     </button>
                     <button className="btn" onClick={() => send({ t: 'bSwapStop' })}>
                       停止换牌（剩余 {view.me.swapLeft} 次兑 {view.me.swapLeft}🩸）
                     </button>
+                    {myCharId === 'fryer' && (
+                      <button
+                        className="btn"
+                        disabled={view.me.blood < 1}
+                        onClick={() => send({ t: 'bFryerDraw' })}
+                      >
+                        🍗 支付 1 血筹抽 1 张牌
+                      </button>
+                    )}
+                    {myCharId === 'curse' &&
+                      view.me.hand
+                        .filter((c) => c.r === 5 && c.s != null)
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            className="btn"
+                            onClick={() => send({ t: 'bCurseHide', cardId: c.id })}
+                          >
+                            ✨ 藏入{cardLabel(c)}（抽1张+1🩸）
+                          </button>
+                        ))}
+                    {myCharId === 'undertaker' && (
+                      <button
+                        className="btn"
+                        disabled={selSwap.length === 0 || view.me.swapLeft <= 0}
+                        onClick={() => {
+                          send({ t: 'bUndertakerSwap', cardIds: selSwap });
+                          setSelSwap([]);
+                        }}
+                      >
+                        ⚰️ 特殊换牌：置 {selSwap.length} 张于角色牌上，从弃牌区随机取回
+                      </button>
+                    )}
                     {view.me.items.some((it) => it.name === '皮下密信') && (
                       <button
                         className="btn"
@@ -826,7 +1036,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                 {view.prompt.k === 'play' && (
                   <button
                     className="btn primary"
-                    disabled={selPlay.length !== 5}
+                    disabled={selPlay.length !== Math.min(5, view.me.hand.length)}
                     onClick={() => {
                       // 按牌型排序后发送，对决亮牌时自然有序（三条在前、顺子按序等）
                       const chosen = handList.filter((c) => selPlay.includes(c.id));
@@ -854,9 +1064,26 @@ export function BloodTable({ view }: { view: BloodView }) {
                   </>
                 )}
                 {view.prompt.k === 'buy' && (
-                  <button className="btn" onClick={() => send({ t: 'bPassBuy' })}>
-                    跳过购买
-                  </button>
+                  <>
+                    <button className="btn" onClick={() => send({ t: 'bPassBuy' })}>
+                      跳过购买
+                    </button>
+                    {myCharId === 'seer' && (view.me.seerZone ?? []).length > 0 && (
+                      <span className="act-row wrap">
+                        <span className="hint">🔮 天意（价格-2）：</span>
+                        {view.me.seerZone!.map((z, i) => (
+                          <button
+                            key={`${z.defId}-${i}`}
+                            className="btn tiny"
+                            disabled={view.me.blood < z.cost}
+                            onClick={() => send({ t: 'bBuySeer', idx: i })}
+                          >
+                            {z.name}（{z.cost}🩸）
+                          </button>
+                        ))}
+                      </span>
+                    )}
+                  </>
                 )}
                 {view.prompt.k === 'insertChip' && (
                   <button
@@ -1125,9 +1352,636 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button className="btn primary" onClick={() => send({ t: 'bReorg', choice: 'reshuffle' })}>
                       重洗牌库（弃牌堆+牌库合成新牌库）
                     </button>
-                    <button className="btn" onClick={() => send({ t: 'bReorg', choice: 'blood' })}>
+                    <button className="btn" onClick={() => send({ t: 'bReorg', choice: 'blood', pickCardId: inspectorPick || undefined })}>
                       获得 2 血筹
                     </button>
+                  </>
+                )}
+                {view.prompt.k === 'reorg' && myCharId === 'inspector' && view.me.discard.length > 0 && (
+                  <div className="act-row wrap">
+                    <span className="hint">质检员 · 不重洗时可公示 1 张弃牌置顶：</span>
+                    {view.me.discard.map((c) => (
+                      <button
+                        key={c.id}
+                        className={`btn tiny ${inspectorPick === c.id ? 'primary' : ''}`}
+                        onClick={() => setInspectorPick(inspectorPick === c.id ? '' : c.id)}
+                      >
+                        {cardLabel(c)}
+                      </button>
+                    ))}
+                    {inspectorPick && (
+                      <button className="btn tiny" onClick={() => setInspectorPick('')}>
+                        不选
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* ---- 拓展角色交互 ---- */}
+                {view.prompt.k === 'gamblerGuess' && (
+                  <div className="act-row wrap">
+                    {seatButtons(gamblerSeat, setGamblerSeat, { includeSelf: true })}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bGamblerGuess', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      确认竞猜
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'bomberClaim' && (
+                  <div className="act-row wrap">
+                    {[0, 1, 2].map((x) => (
+                      <button key={x} className="btn primary" onClick={() => send({ t: 'bBomberClaim', x })}>
+                        宣告 X={x}{x > 0 ? `（+${x}🩸）` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {view.prompt.k === 'succubusSteal' && (
+                  <div className="act-row wrap">
+                    <span className="hint">抢夺目标（{view.prompt.blood ?? 1}🩸）：</span>
+                    {seatButtons(gamblerSeat, setGamblerSeat)}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bSuccubusSteal', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      抢夺
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bSuccubusSteal', seat: -1 })}>
+                      直接获得 {view.prompt.blood ?? 1}🩸
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'scalperDeal' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bScalperDeal', accept: true })}>
+                      支付 3🩸 强购 1 车票
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bScalperDeal', accept: false })}>
+                      放弃
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'studentDump' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bStudentDump', accept: true })}>
+                      弃光出牌区（+2🩸 + 一次删牌）
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bStudentDump', accept: false })}>
+                      保留出牌区
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'studentRemove' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => setZoneModal({ kind: 'discard' })}>
+                      打开弃牌区选牌删除（2🩸）
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bStudentDump', accept: false })}>
+                      放弃删牌
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'designerDiscard' && (
+                  <>
+                    <div className="my-hand">
+                      {(view.me.playCards ?? []).map((c) => (
+                        <div key={c.id} className="hand-cell">
+                          <BCard
+                            c={c}
+                            size="lg"
+                            selected={designerPick.includes(c.id)}
+                            onClick={() => toggle(designerPick, setDesignerPick, c.id, 2)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          send({ t: 'bDesignerDiscard', cardIds: designerPick });
+                          setDesignerPick([]);
+                        }}
+                      >
+                        弃置 {designerPick.length} 张（+{designerPick.length * 2}🩸）
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'dogTarget' && (
+                  <div className="act-row wrap">
+                    {seatButtons(gamblerSeat, setGamblerSeat, { includeSelf: true })}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bDogTarget', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      掷骰
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bDogTarget', seat: -1 })}>
+                      放弃发动
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'generalChoice' && (
+                  <>
+                    <div className="act-row wrap">
+                      <span className="hint">弃1摸1目标：</span>
+                      {seatButtons(genSeat, setGenSeat)}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        disabled={genSeat < 0}
+                        onClick={() => {
+                          send({ t: 'bGeneralChoice', mode: 'gift', seat: genSeat });
+                          setGenSeat(-1);
+                        }}
+                      >
+                        令其随机弃1摸1
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bGeneralChoice', mode: 'extra' })}>
+                        自己额外换牌一次
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bGeneralChoice', mode: 'skip' })}>
+                        放弃
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'vagrantDraw' && (
+                  <div className="act-row wrap">
+                    {seatButtons(gamblerSeat, setGamblerSeat, { minDraw: 2 })}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bVagrantDraw', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      抽 2 张
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bVagrantDraw', seat: -1 })}>
+                      放弃
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'fryerDel' && (
+                  <>
+                    <div className="my-hand">
+                      {(view.me.playCards ?? []).map((c) => (
+                        <div key={c.id} className="hand-cell">
+                          <BCard c={c} size="lg" onClick={() => send({ t: 'bFryerDel', cardIds: [c.id], done: false })} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button className="btn" onClick={() => send({ t: 'bFryerDel', cardIds: [], done: true })}>
+                        结束删牌
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'curseTake' && (
+                  <>
+                    <div className="my-hand">
+                      {(view.me.stash?.curse ?? []).map((c) => (
+                        <div key={c.id} className="hand-cell">
+                          <BCard
+                            c={c}
+                            size="lg"
+                            selected={cursePick.includes(c.id)}
+                            onClick={() => toggle(cursePick, setCursePick, c.id, 99)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          send({ t: 'bCurseTake', cardIds: cursePick });
+                          setCursePick([]);
+                        }}
+                      >
+                        取回选中的 {cursePick.length} 张
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bCurseTake', cardIds: [] })}>
+                        全部保留在角色牌下
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'godPeek' && (
+                  <>
+                    <div className="act-row wrap">
+                      {view.me.peekHands?.map((ph) => (
+                        <span key={ph.seat} className="hint">
+                          {view.players.find((p) => p.seat === ph.seat)?.name}：{ph.cards.map(cardLabel).join(' ') || '（空）'}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button className="btn primary" onClick={() => send({ t: 'bGodPeekChoice', mode: 'extra' })}>
+                        额外换牌一次
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bGodPeekChoice', mode: 'blood' })}>
+                        获得 1 血筹
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'detectivePick' && (
+                  <div className="act-row wrap">
+                    <button
+                      className={`btn tiny ${detMode === 'top' ? 'primary' : ''}`}
+                      onClick={() => setDetMode('top')}
+                    >
+                      置顶模式（1张）
+                    </button>
+                    <button
+                      className={`btn tiny ${detMode === 'bottom' ? 'primary' : ''}`}
+                      onClick={() => setDetMode('bottom')}
+                    >
+                      置底模式（至多3张）
+                    </button>
+                    <button className="btn" onClick={() => setZoneModal({ kind: 'discard' })}>
+                      打开弃牌区
+                    </button>
+                    {detMode === 'bottom' && detPick.length > 0 && (
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          send({ t: 'bDetectivePick', mode: 'bottom', cardIds: detPick });
+                          setDetPick([]);
+                          setZoneModal(null);
+                        }}
+                      >
+                        确认置底 {detPick.length} 张
+                      </button>
+                    )}
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        send({ t: 'bDetectivePick', mode: 'skip', cardIds: [] });
+                        setDetPick([]);
+                        setZoneModal(null);
+                      }}
+                    >
+                      放弃（+1🩸）
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'hackerSetup' && (
+                  <>
+                    <div className="my-hand">
+                      {(view.prompt.cards ?? []).map((c) => (
+                        <div key={c.id} className="hand-cell">
+                          <BCard
+                            c={{ ...c, s: c.s as BloodCardView['s'], chipIds: [] }}
+                            size="lg"
+                            selected={delPick.includes(c.id)}
+                            onClick={() => toggle(delPick, setDelPick, c.id, 8)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        disabled={delPick.length !== 8}
+                        onClick={() => {
+                          send({ t: 'bHackerSetup', removed: delPick });
+                          setDelPick([]);
+                        }}
+                      >
+                        删除选中的 {delPick.length}/8 张
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'pirateRob' && (
+                  <div className="act-row wrap">
+                    {seatButtons(gamblerSeat, setGamblerSeat)}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bPirateRob', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      抢劫
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bPirateRob', seat: -1 })}>
+                      放弃
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'pirateDecide' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bPirateDecide', resist: false })}>
+                      放弃（交 2🩸，不足全给）
+                    </button>
+                    <button className="btn danger" onClick={() => send({ t: 'bPirateDecide', resist: true })}>
+                      抵抗（轮流掷骰）
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'auctionPick' && (
+                  <div className="act-row wrap">
+                    {(view.prompt.options ?? []).map((defId, i) => (
+                      <button key={defId} className="btn primary" onClick={() => send({ t: 'bAuctionPick', idx: i })}>
+                        暗置【{BLOOD_MARKET_BY_ID.get(defId)?.name}】并开始叫价
+                      </button>
+                    ))}
+                    <button className="btn" onClick={() => send({ t: 'bAuctionPick', idx: -1 })}>
+                      不发动拍卖
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'auctionBid' && (
+                  <div className="act-row wrap">
+                    <span className="hint">出价（当前最高 {view.prompt.amount ?? 0}🩸，持有 {view.me.blood}🩸）：</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={view.me.blood}
+                      value={auctionAmt}
+                      onChange={(e) => setAuctionAmt(Number(e.target.value))}
+                      style={{ width: 72 }}
+                    />
+                    <button
+                      className="btn primary"
+                      disabled={auctionAmt <= (view.prompt.amount ?? 0) || auctionAmt > view.me.blood}
+                      onClick={() => send({ t: 'bAuctionBid', amount: auctionAmt })}
+                    >
+                      叫价
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bAuctionBid', amount: 0 })}>
+                      不叫价
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'impDraw' && (
+                  <div className="act-row wrap">
+                    <span className="hint">点击抽牌来源（抽至手牌上限）：</span>
+                    {view.players
+                      .filter((p) => p.seat !== view.me.seat && p.drawCount > 0)
+                      .map((p) => (
+                        <button
+                          key={p.seat}
+                          className="btn primary tiny"
+                          onClick={() => send({ t: 'bImpDraw', seat: p.seat })}
+                        >
+                          从 {p.name} 抽 1 张（剩 {p.drawCount}）
+                        </button>
+                      ))}
+                  </div>
+                )}
+                {view.prompt.k === 'impRedeem' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bImpRedeem', accept: true })}>
+                      支付 1🩸 赎回自己的牌
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bImpRedeem', accept: false })}>
+                      不赎回
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'facelessPick' && (
+                  <div className="act-row wrap">
+                    {(view.prompt.options ?? []).map((cid) => (
+                      <span key={cid} className="act-row wrap">
+                        <button className="btn primary" onClick={() => send({ t: 'bFacelessPick', charId: cid })}>
+                          临时获得【{BLOOD_CHAR_BY_ID.get(cid)?.name}】
+                        </button>
+                        <button className="btn tiny" onClick={() => setCharDetail(cid)}>
+                          看技能
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {view.prompt.k === 'blufferDeclare' && (
+                  <>
+                    <div className="act-row wrap">
+                      {(view.me.playCards ?? []).map((c) => (
+                        <span key={c.id} className="act-row wrap">
+                          <span className="hint">{cardLabel(c)} →</span>
+                          <select
+                            value={blufferDecl[c.id]?.r ?? c.r}
+                            onChange={(e) =>
+                              setBlufferDecl((m) => ({
+                                ...m,
+                                [c.id]: { r: Number(e.target.value), s: blufferDecl[c.id]?.s ?? (c.s ?? 's') },
+                              }))
+                            }
+                          >
+                            {Array.from({ length: 13 }, (_, i) => i + 2).map((r) => (
+                              <option key={r} value={r}>
+                                {r === 14 ? 'A' : r === 13 ? 'K' : r === 12 ? 'Q' : r === 11 ? 'J' : r}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={blufferDecl[c.id]?.s ?? (c.s ?? 's')}
+                            onChange={(e) =>
+                              setBlufferDecl((m) => ({
+                                ...m,
+                                [c.id]: { r: blufferDecl[c.id]?.r ?? c.r, s: e.target.value },
+                              }))
+                            }
+                          >
+                            <option value="s">♠</option>
+                            <option value="h">♥</option>
+                            <option value="d">♦</option>
+                            <option value="c">♣</option>
+                          </select>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="act-row">
+                      <button
+                        className="btn primary"
+                        onClick={() =>
+                          send({
+                            t: 'bBlufferDeclare',
+                            declared: (view.me.playCards ?? []).map((c) => ({
+                              id: c.id,
+                              r: blufferDecl[c.id]?.r ?? c.r,
+                              s: (blufferDecl[c.id]?.s ?? c.s ?? 's') as BloodCardView['s'],
+                            })),
+                          })
+                        }
+                      >
+                        宣告完毕（进入质疑）
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'blufferChallenge' && (
+                  <div className="act-row">
+                    <button className="btn danger" onClick={() => send({ t: 'bBlufferChallenge', challenge: true })}>
+                      质疑！
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bBlufferChallenge', challenge: false })}>
+                      不质疑
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'ceoGive' && (
+                  <>
+                    <div className="act-row wrap">
+                      <span className="hint">给予对象：</span>
+                      {seatButtons(ceoSeat, setCeoSeat)}
+                    </div>
+                    <div className="act-row wrap">
+                      <span className="hint">金额（持有 {view.me.blood}🩸）：</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={view.me.blood}
+                        value={ceoAmt}
+                        onChange={(e) => setCeoAmt(Number(e.target.value))}
+                        style={{ width: 72 }}
+                      />
+                      <button
+                        className="btn primary"
+                        disabled={ceoSeat < 0 || ceoAmt < 1 || ceoAmt > view.me.blood}
+                        onClick={() => send({ t: 'bCeoGive', seat: ceoSeat, amount: ceoAmt })}
+                      >
+                        给予并等待回应
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bCeoDone' })}>
+                        结束给予
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view.prompt.k === 'ceoDecide' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bCeoDecide', accept: true })}>
+                      收下（弃光手牌重抽等量）
+                    </button>
+                    <button className="btn danger" onClick={() => send({ t: 'bCeoDecide', accept: false })}>
+                      拒绝（支付双倍 {((view.prompt.given ?? 0) * 2)}🩸）
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'agentAsk' && (
+                  <div className="act-row wrap">
+                    {seatButtons(gamblerSeat, setGamblerSeat)}
+                    <button
+                      className="btn primary"
+                      disabled={gamblerSeat < 0}
+                      onClick={() => {
+                        send({ t: 'bAgentAsk', seat: gamblerSeat });
+                        setGamblerSeat(-1);
+                      }}
+                    >
+                      询问交换
+                    </button>
+                    <button className="btn" onClick={() => send({ t: 'bAgentAsk', seat: -1 })}>
+                      放弃
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'agentDecide' && (
+                  <div className="act-row">
+                    <button className="btn primary" onClick={() => send({ t: 'bAgentDecide', accept: true })}>
+                      接受交换出牌区
+                    </button>
+                    <button className="btn danger" onClick={() => send({ t: 'bAgentDecide', accept: false })}>
+                      拒绝（付 2🩸）
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'mynameSet' && (
+                  <div className="act-row wrap">
+                    <select value={mynameCatSel} onChange={(e) => setMynameCatSel(Number(e.target.value))}>
+                      {HAND_LADDER.filter((h) => !h.chipOnly).map((h, i) => (
+                        <option key={h.name} value={14 - i}>
+                          {h.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      maxLength={12}
+                      placeholder="自定义名称"
+                      value={mynameText}
+                      onChange={(e) => setMynameText(e.target.value)}
+                      style={{ width: 140 }}
+                    />
+                    <button
+                      className="btn primary"
+                      disabled={!mynameText.trim()}
+                      onClick={() => {
+                        send({ t: 'bMynameSet', cat: mynameCatSel, name: mynameText.trim() });
+                        setMynameText('');
+                      }}
+                    >
+                      命名
+                    </button>
+                  </div>
+                )}
+                {view.prompt.k === 'cleanerDel' && (
+                  <>
+                    <div className="act-row wrap">
+                      <span className="hint">目标：</span>
+                      {view.players.map((p) => (
+                        <button
+                          key={p.seat}
+                          className={`btn tiny ${cleanSeat === p.seat ? 'primary' : ''}`}
+                          onClick={() => setCleanSeat(p.seat)}
+                        >
+                          {p.seat === view.me.seat ? '自己' : p.name}
+                        </button>
+                      ))}
+                    </div>
+                    {cleanSeat >= 0 && (
+                      <div className="act-row wrap">
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            send({ t: 'bCleanerDel', seat: cleanSeat, cardId: '' });
+                            setCleanSeat(-1);
+                          }}
+                        >
+                          随机删其抽牌堆 1 张（并重洗）
+                        </button>
+                        {(view.prompt.zones ?? [])
+                          .filter((z) => z.seat === cleanSeat)
+                          .flatMap((z) =>
+                            z.cards.map((c) => (
+                              <button
+                                key={c.id}
+                                className="btn tiny"
+                                onClick={() => {
+                                  send({ t: 'bCleanerDel', seat: cleanSeat, cardId: c.id });
+                                  setCleanSeat(-1);
+                                }}
+                              >
+                                删除其弃牌区的{cardLabel({ ...c, s: c.s as BloodCardView['s'], chipIds: [] })}
+                              </button>
+                            )),
+                          )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

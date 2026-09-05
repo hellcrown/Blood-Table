@@ -93,6 +93,28 @@ export interface BPlayer {
   claimedWin: boolean;
   /** 双重人格公主：true=常时人格（黑），false=躁狂人格（红） */
   princessDark: boolean;
+  /** 咒术师：藏在角色牌下的【5】（视为在游戏外） */
+  curseStash: BCard[];
+  /** 入殓师：特殊换牌置于角色牌上的牌 */
+  undertakerStash: BCard[];
+  /** 入殓师：本回合是否用过特殊换牌 */
+  undertakerUsed: boolean;
+  /** 赌狗：本回合是否已发动掷骰删牌 */
+  dogUsed: boolean;
+  /** 将军/赌神：额外换牌次数不兑换成血筹 */
+  extraSwapProtected: boolean;
+  /** 炸鸡店老板：本回合结算期已删除的本回合打出牌张数（≤3） */
+  fryerDelCount: number;
+  /** 咖啡师：本回合购买后待发放的免费黑市牌 */
+  baristaPending: boolean;
+  /** 无面人：临时持有的角色技能（持续至下个抽牌阶段开始前） */
+  tempChar: string | null;
+  /** 无面人：是否已永久转化（转化后不再抽角色牌） */
+  facelessDone: boolean;
+  /** 特工：本回合是否已发动询问交换（含放弃） */
+  agentUsed: boolean;
+  /** 换牌结束互动（赌神/将军/总裁/咒术师/无业游民）每回合只入队一次 */
+  swapEndPrompted: boolean;
   /** 对决展示确认（settle 阶段全员确认后统一进入购买） */
   sdSeen: boolean;
   lastAction: string | null;
@@ -160,11 +182,20 @@ export interface BloodState {
       | 'poisonTarget' | 'freezeTarget' | 'amnesiaTarget' | 'boxRobTarget'
       | 'pinpointClaim' | 'pullChip' | 'preciseDel' | 'signalTarget' | 'demagTarget'
       | 'irisGuess' | 'sharedInfo' | 'sharedInfoOpp' | 'eraserClaim'
-      | 'revealDecide' | 'barrierAsk' | 'demagPick' | 'pinpointVictim';
+      | 'revealDecide' | 'barrierAsk' | 'demagPick' | 'pinpointVictim'
+      /* 拓展角色交互 */
+      | 'gamblerGuess' | 'bomberClaim' | 'succubusSteal' | 'scalperDeal'
+      | 'studentDump' | 'studentRemove' | 'designerDiscard' | 'dogTarget'
+      | 'generalChoice' | 'vagrantDraw' | 'fryerDel' | 'curseTake'
+      | 'godPeek' | 'detectivePick' | 'hackerSetup' | 'smugglerMark'
+      | 'pirateRob' | 'pirateDecide' | 'auctionPick' | 'auctionBid'
+      | 'impDraw' | 'impRedeem' | 'facelessPick' | 'blufferDeclare'
+      | 'blufferChallenge' | 'ceoGive' | 'ceoDecide' | 'agentAsk'
+      | 'agentDecide' | 'mynameSet' | 'cleanerDel';
     max?: number;
     chipId?: string;
     defId?: string;
-    /** preciseDel: 抽到的 3 张牌 */
+    /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 弃牌区 */
     cards?: BCard[];
     /** 共享信息等待顺序的对手队列 */
     oppQueue?: string[];
@@ -179,6 +210,14 @@ export interface BloodState {
     targetSeat?: string;
     /** pinpointVictim：被宣称的点数 */
     rank?: number;
+    /** succubusSteal：本次抢夺金额（3/1）；fryerDel：剩余可删张数 */
+    blood?: number;
+    /** auctionBid：当前最高价 */
+    amount?: number;
+    /** auctionPick：可暗置的两张黑市牌 defId */
+    options?: string[];
+    /** generalChoice/ceoGive/agentAsk：可多次给的累计金额等 */
+    given?: number;
   } | null;
   /** 魔术橡皮：本回合被降为高牌的牌型 */
   eraserType: number | null;
@@ -192,6 +231,37 @@ export interface BloodState {
   resultAt: number | null;
   /** 换牌阶段：是否已有玩家宣告结束（白蔷薇判定） */
   swapStopSeen: boolean;
+  /** 无面人：本局角色牌堆（开局洗混，每回合抽2张） */
+  charDeck: string[];
+  /** 职业赌徒：本回合的夺魁竞猜 */
+  gamblerGuess: { by: string; seat: number } | null;
+  /** 炸弹客：本回合宣告的数字 X */
+  bomberX: number | null;
+  /** 瞎掰王：本回合宣告（declared 为宣告牌，challenged=是否有人质疑，challengers=质疑者） */
+  bluffer: { seat: string; declared: BCard[]; challenged: boolean; challengers: string[] } | null;
+  /** 我的名字？：自定义牌型与名称 */
+  mynameCat: number | null;
+  mynameText: string | null;
+  /** 走私客：本回合标记的黑市栏位 */
+  smugglerMark: { slot: number; by: string } | null;
+  /** 窥天师：天意（暗置的黑市牌 defId 序列） */
+  seerZone: string[];
+  /** 特工：本回合的出牌区交换记录（aCards/bCards 为双方交换时的出牌 id） */
+  agentSwap: { a: string; b: string; aCards: string[]; bCards: string[] } | null;
+  /** 捣蛋鬼：等待触发的抽牌+换牌小回合数 */
+  impTurns: number;
+  /** 购买阶段前的角色互动队列（海盗/走私客/瞎掰帝/捣蛋鬼赎回） */
+  preBuyQueue: { seat: string; kind: 'pirateRob' | 'smugglerMark' | 'auctionStart' | 'impRedeem' }[];
+  /** 瞎掰帝：进行中的叫价（by=拍卖师） */
+  auction: { defId: string; highest: number; highestBy: string | null; queue: string[]; by: string } | null;
+  /** 游戏开始前的角色初始化队列（我的名字？/黑客初始构筑） */
+  startupQueue: { seat: string; kind: 'mynameSet' | 'hackerSetup' }[];
+  /** 抽牌阶段前的角色互动队列（私家侦探/无面人） */
+  preDrawQueue: { seat: string; kind: 'detectivePick' | 'facelessPick' }[];
+  /** 换牌阶段结束的角色互动队列（炸弹客/咒术师/将军/赌神/无业游民/霸道总裁） */
+  swapEndQueue: { seat: string; kind: 'bomberClaim' | 'curseTake' | 'generalChoice' | 'godPeek' | 'vagrantDraw' | 'ceoGive' }[];
+  /** 结算阶段的角色互动队列（魅魔/票贩子/炸鸡店老板） */
+  settleQueue: { seat: string; kind: 'succubusSteal' | 'scalperDeal' | 'fryerDel' }[];
   final: BloodFinal | null;
   target: number;
   log: LogLine[];

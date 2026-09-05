@@ -96,7 +96,7 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
 
     // 换牌：甲换一次再停，乙直接停
     const p0 = gs.players[0];
-    bSwap(gs, p0.id, [p0.hand[0].id, p0.hand[1].id], NOW);
+    bSwap(gs, p0.id, [p0.hand[0].id, p0.hand[1].id], undefined, NOW);
     expect(p0.hand.length).toBe(6);
     expect(p0.swapLeft).toBe(p0.privilege ? 3 : 2);
     bSwapStop(gs, p0.id, NOW);
@@ -251,7 +251,7 @@ describe('血色引擎 · 选将与角色技能', () => {
       expect(gs.players.every((p) => p.charId !== null && p.charOptions.length === 0)).toBe(true);
       const ids = new Set(gs.players.map((p) => p.charId));
       expect(ids.size).toBe(n); // 分配互不重复
-      expect([...ids].every((c) => basic.includes(c))).toBe(true); // 基础池
+      expect([...ids].every((c) => basic.includes(c!))).toBe(true); // 基础池
       // 基础4角色均不跳过初始构筑
       expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
     }

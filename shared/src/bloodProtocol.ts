@@ -36,6 +36,8 @@ export interface BloodSeatView {
   played?: BloodCardView[];
   handName?: string;
   pips?: number;
+  /** 捣蛋鬼：其弃牌区对所有人公开（本人视图不含，直接看 me.discard） */
+  impDiscard?: BloodCardView[];
 }
 
 export interface BloodMarketSlotView {
@@ -100,12 +102,44 @@ export interface BloodMyPrompt {
     | 'revealDecide'
     | 'barrierAsk'
     | 'demagPick'
-    | 'pinpointVictim';
+    | 'pinpointVictim'
+    /** 拓展角色交互 */
+    | 'gamblerGuess'
+    | 'bomberClaim'
+    | 'succubusSteal'
+    | 'scalperDeal'
+    | 'studentDump'
+    | 'studentRemove'
+    | 'designerDiscard'
+    | 'dogTarget'
+    | 'generalChoice'
+    | 'vagrantDraw'
+    | 'fryerDel'
+    | 'curseTake'
+    | 'godPeek'
+    | 'detectivePick'
+    | 'hackerSetup'
+    | 'smugglerMark'
+    | 'pirateRob'
+    | 'pirateDecide'
+    | 'auctionPick'
+    | 'auctionBid'
+    | 'impDraw'
+    | 'impRedeem'
+    | 'facelessPick'
+    | 'blufferDeclare'
+    | 'blufferChallenge'
+    | 'ceoGive'
+    | 'ceoDecide'
+    | 'agentAsk'
+    | 'agentDecide'
+    | 'mynameSet'
+    | 'cleanerDel';
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
   defId?: string; // insertChip: 待插入芯片
-  /** preciseDel: 抽到的 3 张牌 */
+  /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 自己弃牌区 */
   cards?: { id: string; r: number; s: string | null }[];
   /** revealDecide：当前决策类型与决策牌 */
   decision?: { t: 'spring' | 'copy' | 'shield'; cardId: string };
@@ -116,6 +150,16 @@ export interface BloodMyPrompt {
   targetSeat?: number;
   /** pinpointVictim：被宣称的点数 */
   rank?: number;
+  /** succubusSteal：本次抢夺金额 */
+  blood?: number;
+  /** auctionBid：当前最高价 */
+  amount?: number;
+  /** auctionPick：可暗置的两张黑市牌 defId；facelessPick：两张候选角色 id */
+  options?: string[];
+  /** ceoGive：已给出的累计血筹 */
+  given?: number;
+  /** cleanerDel：所有玩家的弃牌区（全牌库自选删除用） */
+  zones?: { seat: number; cards: { id: string; r: number; s: string | null }[] }[];
 }
 
 export interface BloodAnnounceView {
@@ -167,6 +211,22 @@ export interface BloodView {
     setupHand: BloodCardView[];
     items: { id: string; defId: string; name: string; text: string }[];
     swapLeft: number;
+    /** 自己的出牌区（designer/student/agent/bluffer 等交互需要） */
+    playCards?: BloodCardView[];
+    /** 咒术师/入殓师：角色牌下的藏牌 */
+    stash?: { curse: BloodCardView[]; undertaker: BloodCardView[] };
+    /** 窥天师：自己抽牌堆顶 1 张 */
+    seerTop?: BloodCardView | null;
+    /** 窥天师：天意（可购买的黑市牌，价格为原价-2） */
+    seerZone?: { defId: string; name: string; cost: number; text: string }[];
+    /** 赌神：换牌结束查看的所有玩家手牌 */
+    peekHands?: { seat: number; cards: BloodCardView[] }[];
+    /** 赌狗：本回合是否已发动掷骰删牌 */
+    dogUsed?: boolean;
+    /** 无面人：临时持有的角色技能 */
+    tempChar?: string | null;
+    /** 走私客：本回合被标记的黑市栏位（-1 无） */
+    smugglerSlot?: number;
   };
   prompt: BloodMyPrompt;
 }
@@ -176,7 +236,7 @@ export interface BloodView {
 export type BloodAction =
   | { t: 'bPickChar'; charId: string }
   | { t: 'bSetup'; removed: string[] }
-  | { t: 'bSwap'; cardIds: string[] }
+  | { t: 'bSwap'; cardIds: string[]; drawCount?: number }
   | { t: 'bSwapStop' }
   | { t: 'bPlay'; cardIds: string[] }
   | { t: 'bUseItem'; itemId: string | null }
@@ -204,7 +264,44 @@ export type BloodAction =
   | { t: 'bPassBuy' }
   | { t: 'bRemove'; cardIds: string[] }
   | { t: 'bRemoveDone' }
-  | { t: 'bReorg'; choice: 'reshuffle' | 'blood' }
-  | { t: 'bRematch' };
+  | { t: 'bReorg'; choice: 'reshuffle' | 'blood'; pickCardId?: string }
+  | { t: 'bRematch' }
+  /* 拓展角色 */
+  | { t: 'bGamblerGuess'; seat: number }
+  | { t: 'bBomberClaim'; x: number }
+  | { t: 'bSuccubusSteal'; seat: number }
+  | { t: 'bScalperDeal'; accept: boolean }
+  | { t: 'bStudentDump'; accept: boolean; cardId?: string }
+  | { t: 'bDesignerDiscard'; cardIds: string[] }
+  | { t: 'bDogTarget'; seat: number }
+  | { t: 'bGeneralChoice'; mode: 'gift' | 'extra' | 'skip'; seat?: number }
+  | { t: 'bVagrantDraw'; seat: number }
+  | { t: 'bFryerDraw' }
+  | { t: 'bFryerDel'; cardIds: string[]; done: boolean }
+  | { t: 'bCurseHide'; cardId: string }
+  | { t: 'bCurseTake'; cardIds: string[] }
+  | { t: 'bUndertakerSwap'; cardIds: string[] }
+  | { t: 'bGodPeekChoice'; mode: 'extra' | 'blood' }
+  | { t: 'bDetectivePick'; mode: 'top' | 'bottom' | 'skip'; cardIds: string[] }
+  | { t: 'bHackerSetup'; removed: string[] }
+  | { t: 'bSmugglerMark'; slot: number }
+  | { t: 'bPirateRob'; seat: number }
+  | { t: 'bPirateDecide'; resist: boolean }
+  | { t: 'bAuctionPick'; idx: number }
+  | { t: 'bAuctionBid'; amount: number }
+  | { t: 'bBuySeer'; idx: number }
+  | { t: 'bImpDraw'; seat: number }
+  | { t: 'bImpRedeem'; accept: boolean }
+  | { t: 'bFacelessPick'; charId: string }
+  | { t: 'bFacelessConvert' }
+  | { t: 'bBlufferDeclare'; declared: { id: string; r: number; s: import('./protocol').Suit | null }[] }
+  | { t: 'bBlufferChallenge'; challenge: boolean }
+  | { t: 'bCeoGive'; seat: number; amount: number }
+  | { t: 'bCeoDone' }
+  | { t: 'bCeoDecide'; accept: boolean }
+  | { t: 'bAgentAsk'; seat: number }
+  | { t: 'bAgentDecide'; accept: boolean }
+  | { t: 'bMynameSet'; cat: number; name: string }
+  | { t: 'bCleanerDel'; seat: number; cardId: string };
 
 export type { BloodEffect };

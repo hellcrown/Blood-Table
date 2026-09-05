@@ -1,7 +1,7 @@
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
 import type { BloodCardView, BloodMyPrompt, BloodSeatView, BloodView } from '@shared/bloodProtocol';
 import type { Room } from '../rooms';
-import { evalForPlayer } from './engine';
+import { evalForPlayer, effChar } from './engine';
 import type { BCard, BloodState, BPlayer } from './types';
 
 function cardView(c: BCard, p: BPlayer): BloodCardView {
@@ -42,12 +42,13 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
       }
       case 'pinpointVictim':
         return { k: 'pinpointVictim', rank: pend.rank ?? 0 };
-      case 'demagPick': {
-        const tp = gs.players.find((x) => x.id === pend.targetSeat);
-        return { k: 'demagPick', targetSeat: tp?.seat ?? -1 };
-      }
-      case 'pinpointVictim':
-        return { k: 'pinpointVictim', rank: pend.rank ?? 0 };
+      case 'revealDecide':
+        return {
+          k: 'revealDecide',
+          decision: pend.decision ? { t: pend.decision.t, cardId: pend.decision.cardId } : undefined,
+        };
+      case 'barrierAsk':
+        return { k: 'barrierAsk', eff: pend.eff };
       case 'pullChip':
         return { k: 'pullChip' };
       case 'preciseDel':
@@ -60,6 +61,75 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
         return { k: 'secretDelete', max: pend.max ?? 2 };
       case 'sharedInfoOpp':
         return { k: 'secretDelete', max: 1 };
+      /* ---- 拓展角色交互 ---- */
+      case 'gamblerGuess':
+        return { k: 'gamblerGuess' };
+      case 'bomberClaim':
+        return { k: 'bomberClaim' };
+      case 'succubusSteal':
+        return { k: 'succubusSteal', blood: pend.blood };
+      case 'scalperDeal':
+        return { k: 'scalperDeal' };
+      case 'studentDump':
+        return { k: 'studentDump' };
+      case 'studentRemove':
+        return { k: 'studentRemove', cost: 2 };
+      case 'designerDiscard':
+        return { k: 'designerDiscard' };
+      case 'dogTarget':
+        return { k: 'dogTarget' };
+      case 'generalChoice':
+        return { k: 'generalChoice' };
+      case 'vagrantDraw':
+        return { k: 'vagrantDraw' };
+      case 'fryerDel':
+        return { k: 'fryerDel', max: pend.max ?? 3 };
+      case 'curseTake':
+        return { k: 'curseTake' };
+      case 'godPeek':
+        return { k: 'godPeek' };
+      case 'detectivePick':
+        return { k: 'detectivePick' };
+      case 'hackerSetup':
+        return { k: 'hackerSetup', cards: p.draw.map((c) => ({ id: c.id, r: c.r, s: c.s })) };
+      case 'smugglerMark':
+        return { k: 'smugglerMark' };
+      case 'pirateRob':
+        return { k: 'pirateRob' };
+      case 'pirateDecide':
+        return { k: 'pirateDecide' };
+      case 'auctionPick':
+        return { k: 'auctionPick', options: pend.options };
+      case 'auctionBid':
+        return { k: 'auctionBid', amount: pend.amount ?? 0 };
+      case 'impDraw':
+        return { k: 'impDraw' };
+      case 'impRedeem':
+        return { k: 'impRedeem' };
+      case 'facelessPick':
+        return { k: 'facelessPick', options: pend.options };
+      case 'blufferDeclare':
+        return { k: 'blufferDeclare' };
+      case 'blufferChallenge':
+        return { k: 'blufferChallenge' };
+      case 'ceoGive':
+        return { k: 'ceoGive', given: pend.given };
+      case 'ceoDecide':
+        return { k: 'ceoDecide', given: pend.given };
+      case 'agentAsk':
+        return { k: 'agentAsk' };
+      case 'agentDecide':
+        return { k: 'agentDecide' };
+      case 'mynameSet':
+        return { k: 'mynameSet' };
+      case 'cleanerDel':
+        return {
+          k: 'cleanerDel',
+          zones: gs.players.map((o) => ({
+            seat: o.seat,
+            cards: o.discard.map((c) => ({ id: c.id, r: c.r, s: c.s })),
+          })),
+        };
       default:
         break;
     }
@@ -69,6 +139,8 @@ function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
       return p.charId ? { k: 'wait' } : { k: 'pick' };
     case 'setup':
       return p.setupRound < 2 ? { k: 'setup', max: 4 } : { k: 'wait' };
+    case 'draw':
+      return { k: 'wait' };
     case 'swap':
       return p.swapDone ? { k: 'wait' } : { k: 'swap' };
     case 'play':
@@ -131,10 +203,16 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       lastAction: p.lastAction,
     };
     if (revealPublic) {
-      sv.played = p.play.map((c) => cardView(c, p));
-      const ev = evalForPlayer(p);
+      // 瞎掰王宣告成立（无人质疑）时，亮牌按宣告的牌展示
+      const bluffing = gs.bluffer && gs.bluffer.seat === p.id && !gs.bluffer.challenged;
+      sv.played = (bluffing ? gs.bluffer!.declared : p.play).map((c) => cardView(c, p));
+      const ev = evalForPlayer(p, gs);
       sv.handName = ev.catName;
       sv.pips = ev.pips;
+    }
+    // 捣蛋鬼的弃牌区对所有人公开
+    if (p.charId === 'imp' && p.id !== me?.id) {
+      sv.impDiscard = p.discard.map((c) => cardView(c, p));
     }
     return sv;
   });
@@ -246,6 +324,32 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
           setupHand: me.setupHand.map((c) => cardView(c, me)),
           items: myItems,
           swapLeft: me.swapLeft,
+          playCards: me.play.map((c) => cardView(c, me)),
+          stash: {
+            curse: me.curseStash.map((c) => cardView(c, me)),
+            undertaker: me.undertakerStash.map((c) => cardView(c, me)),
+          },
+          seerTop:
+            effChar(me) === 'seer' && me.draw.length > 0 ? cardView(me.draw[me.draw.length - 1], me) : null,
+          seerZone:
+            effChar(me) === 'seer'
+              ? gs.seerZone.map((id) => {
+                  const def = BLOOD_MARKET_BY_ID.get(id);
+                  return {
+                    defId: id,
+                    name: def?.name ?? '?',
+                    cost: Math.max(0, (def?.cost ?? 0) - 2),
+                    text: def?.text ?? '',
+                  };
+                })
+              : [],
+          peekHands:
+            gs.secretPending?.kind === 'godPeek' && gs.secretPending.seat === me.id
+              ? gs.players.map((o) => ({ seat: o.seat, cards: o.hand.map((c) => cardView(c, o)) }))
+              : [],
+          dogUsed: me.dogUsed,
+          tempChar: me.tempChar,
+          smugglerSlot: gs.smugglerMark ? gs.smugglerMark.slot : -1,
         }
       : {
           seat: -1,

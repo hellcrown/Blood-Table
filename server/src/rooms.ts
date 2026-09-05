@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import type { RawData, WebSocket } from 'ws';
-import type { C2S, GameMode, S2C } from '@shared/protocol';
+import type { C2S, GameMode, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
@@ -182,7 +182,7 @@ export class RoomManager {
         blood.bSetup(bs, pid, msg.removed ?? [], now);
         break;
       case 'bSwap':
-        blood.bSwap(bs, pid, msg.cardIds ?? [], now);
+        blood.bSwap(bs, pid, msg.cardIds ?? [], (msg as { drawCount?: number }).drawCount, now);
         break;
       case 'bSwapStop':
         blood.bSwapStop(bs, pid, now);
@@ -266,7 +266,115 @@ export class RoomManager {
         blood.bRemoveDone(bs, pid, now);
         break;
       case 'bReorg':
-        blood.bReorg(bs, pid, msg.choice, now);
+        blood.bReorg(bs, pid, msg.choice, now, (msg as { pickCardId?: string }).pickCardId);
+        break;
+      /* ---- 拓展角色技能交互 ---- */
+      case 'bGamblerGuess':
+        blood.bGamblerGuess(bs, pid, msg.seat, now);
+        break;
+      case 'bBomberClaim':
+        blood.bBomberClaim(bs, pid, (msg as { x?: number }).x ?? 0, now);
+        break;
+      case 'bSuccubusSteal':
+        blood.bSuccubusSteal(bs, pid, msg.seat, now);
+        break;
+      case 'bScalperDeal':
+        blood.bScalperDeal(bs, pid, (msg as { accept?: boolean }).accept ?? false, now);
+        break;
+      case 'bStudentDump':
+        blood.bStudentDump(bs, pid, (msg as { accept?: boolean }).accept ?? false, (msg as { cardId?: string }).cardId, now);
+        break;
+      case 'bDesignerDiscard':
+        blood.bDesignerDiscard(bs, pid, msg.cardIds ?? [], now);
+        break;
+      case 'bDogTarget':
+        blood.bDogTarget(bs, pid, msg.seat, now);
+        break;
+      case 'bGeneralChoice':
+        blood.bGeneralChoice(bs, pid, (msg as { mode?: 'gift' | 'extra' | 'skip' }).mode ?? 'skip', msg.seat, now);
+        break;
+      case 'bVagrantDraw':
+        blood.bVagrantDraw(bs, pid, msg.seat, now);
+        break;
+      case 'bFryerDraw':
+        blood.bFryerDraw(bs, pid, now);
+        break;
+      case 'bFryerDel':
+        blood.bFryerDel(bs, pid, msg.cardIds ?? [], (msg as { done?: boolean }).done ?? false, now);
+        break;
+      case 'bCurseHide':
+        blood.bCurseHide(bs, pid, (msg as { cardId?: string }).cardId ?? '', now);
+        break;
+      case 'bCurseTake':
+        blood.bCurseTake(bs, pid, msg.cardIds ?? [], now);
+        break;
+      case 'bUndertakerSwap':
+        blood.bUndertakerSwap(bs, pid, msg.cardIds ?? [], now);
+        break;
+      case 'bGodPeekChoice':
+        blood.bGodPeekChoice(bs, pid, (msg as { mode?: 'extra' | 'blood' }).mode ?? 'blood', now);
+        break;
+      case 'bDetectivePick':
+        blood.bDetectivePick(bs, pid, (msg as { mode?: 'top' | 'bottom' | 'skip' }).mode ?? 'skip', msg.cardIds ?? [], now);
+        break;
+      case 'bHackerSetup':
+        blood.bHackerSetup(bs, pid, msg.removed ?? [], now);
+        break;
+      case 'bSmugglerMark':
+        blood.bSmugglerMark(bs, pid, (msg as { slot?: number }).slot ?? -1, now);
+        break;
+      case 'bPirateRob':
+        blood.bPirateRob(bs, pid, msg.seat, now);
+        break;
+      case 'bPirateDecide':
+        blood.bPirateDecide(bs, pid, (msg as { resist?: boolean }).resist ?? false, now);
+        break;
+      case 'bAuctionPick':
+        blood.bAuctionPick(bs, pid, (msg as { idx?: number }).idx ?? -1, now);
+        break;
+      case 'bAuctionBid':
+        blood.bAuctionBid(bs, pid, (msg as { amount?: number }).amount ?? 0, now);
+        break;
+      case 'bBuySeer':
+        blood.bBuySeer(bs, pid, (msg as { idx?: number }).idx ?? -1, now);
+        break;
+      case 'bImpDraw':
+        blood.bImpDraw(bs, pid, msg.seat, now);
+        break;
+      case 'bImpRedeem':
+        blood.bImpRedeem(bs, pid, (msg as { accept?: boolean }).accept ?? false, now);
+        break;
+      case 'bFacelessPick':
+        blood.bFacelessPick(bs, pid, (msg as { charId?: string }).charId ?? '', now);
+        break;
+      case 'bFacelessConvert':
+        blood.bFacelessConvert(bs, pid, now);
+        break;
+      case 'bBlufferDeclare':
+        blood.bBlufferDeclare(
+          bs,
+          pid,
+          (msg as { declared?: { id: string; r: number; s: Suit | null }[] }).declared ?? [],
+          now,
+        );
+        break;
+      case 'bBlufferChallenge':
+        blood.bBlufferChallenge(bs, pid, (msg as { challenge?: boolean }).challenge ?? false, now);
+        break;
+      case 'bCeoGive':
+        blood.bCeoGive(bs, pid, msg.seat, (msg as { amount?: number }).amount ?? 0, now);
+        break;
+      case 'bCeoDone':
+        blood.bCeoDone(bs, pid, now);
+        break;
+      case 'bCeoDecide':
+        blood.bCeoDecide(bs, pid, (msg as { accept?: boolean }).accept ?? false, now);
+        break;
+      case 'bMynameSet':
+        blood.bMynameSet(bs, pid, (msg as { cat?: number }).cat ?? 0, (msg as { name?: string }).name ?? '', now);
+        break;
+      case 'bCleanerDel':
+        blood.bCleanerDel(bs, pid, msg.seat, (msg as { cardId?: string }).cardId ?? '', now);
         break;
       case 'bRematch': {
         if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
