@@ -34,6 +34,7 @@ import {
   bloodRematch,
   createBloodGame,
   evalForPlayer,
+  bestFive,
 } from '../src/blood/engine';
 
 const NOW = 1000;
@@ -195,6 +196,36 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
     expect(fresh.round).toBe(0);
     expect(fresh.players.every((p) => p.tickets === 0)).toBe(true);
     expect(fresh.players.every((p) => p.setupHand.length === 8)).toBe(true);
+  });
+});
+
+describe('血色引擎 · 3人局兼容', () => {
+  it('车票目标 20 + 名次奖励表（4🎫 / 2🎫+2🩸 / 4🩸）', () => {
+    const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
+    const gs = createBloodGame(3, players, NOW);
+    expect(gs.target).toBe(20);
+    expect(gs.phase).toBe('setup'); // 3人局随机分配角色，直接进入初始构筑
+    for (const p of gs.players) p.charId = 'dealer'; // 消除角色对结算的干扰
+    for (let r = 0; r < 2; r++) for (const p of gs.players) bSetup(gs, p.id, [], NOW);
+    expect(gs.phase).toBe('swap');
+    for (const p of gs.players) bSwapStop(gs, p.id, NOW);
+    // p0 四条K（第一）、p2 葫芦（第二）、p1 三条（第三）
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(2)]);
+    giveHand(gs, 2, [isRank(7), isRank(7), isRank(7), isRank(12), isRank(12)]);
+    giveHand(gs, 1, [isRank(5), isRank(5), isRank(5), isRank(9), isRank(10)]);
+    for (const p of gs.players) if (!p.locked) bPlay(gs, p.id, bestFive(p), NOW);
+    expect(gs.phase).toBe('settle');
+    const rows = gs.result!.rows;
+    const byRank = new Map(rows.map((r) => [r.rank, r]));
+    expect(byRank.get(1)!.seat).toBe(0);
+    expect(byRank.get(1)!.gainTickets).toBe(4);
+    expect(byRank.get(1)!.gainBlood).toBe(0);
+    expect(byRank.get(2)!.seat).toBe(2);
+    expect(byRank.get(2)!.gainTickets).toBe(2);
+    expect(byRank.get(2)!.gainBlood).toBe(2);
+    expect(byRank.get(3)!.seat).toBe(1);
+    expect(byRank.get(3)!.gainTickets).toBe(0);
+    expect(byRank.get(3)!.gainBlood).toBe(4);
   });
 });
 

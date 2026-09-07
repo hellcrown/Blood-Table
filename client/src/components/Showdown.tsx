@@ -197,13 +197,13 @@ export function Showdown({
             <span>🏆 终局对决 · 决定车票归属的一战</span>
           ) : !ready ? (
             phase < 3 ? (
-              <span>⚔️ 双方依次亮牌…</span>
+              <span>⚔️ 各玩家依次亮牌…</span>
             ) : (
               <span>⚔️ 判定展示中…</span>
             )
           ) : myConfirmed ? (
             <span>
-              已确认 · 等待对方确认（{wait?.done ?? 1}/{wait?.total ?? 2}）· 剩余 <b>{remainSec}s</b>
+              已确认 · 等待其他玩家确认（{wait?.done ?? 0}/{wait?.total ?? 2}）· 剩余 <b>{remainSec}s</b>
             </span>
           ) : (
             <span>
@@ -276,7 +276,7 @@ export function Showdown({
                 ? '点击画面可加速演示'
                 : '点击画面或按钮继续'
               : myConfirmed
-                ? '等待对方确认，或倒计时结束后自动关闭'
+                ? '等待其他玩家确认，或倒计时结束后自动关闭'
                 : phase < 3
                   ? '点击画面可加速演示 · 按钮可提前确认'
                   : '点击画面或按钮立即确认 · 倒计时结束自动关闭'}

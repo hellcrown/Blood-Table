@@ -195,7 +195,7 @@ type ZoneModal = null | { kind: 'discard' | 'removed' | 'items' };
 
 export function BloodTable({ view }: { view: BloodView }) {
   const me = view.players.find((p) => p.seat === view.me.seat) ?? view.players[0];
-  const opp = view.players.find((p) => p.seat !== view.me.seat);
+  const opponents = view.players.filter((p) => p.seat !== view.me.seat);
   const isHost = view.hostId === net.playerId;
 
   // 阶段/回合切换时清空各阶段的选择状态（防止上一阶段的残留占用选择上限）
@@ -482,7 +482,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       case 'cleanerDel':
         return '清洁工：选择目标玩家，从其弃牌区选牌删除（或随机删其抽牌堆一张，删自抽牌堆则重洗）';
       default:
-        return '等待对方操作…';
+        return '等待其他玩家操作…';
     }
   };
 
@@ -662,8 +662,8 @@ export function BloodTable({ view }: { view: BloodView }) {
         )}
 
         <div className="blood-area">
-          {opp && (
-            <div className={`bp-panel ${view.turnSeat === opp.seat ? 'to-act' : ''}`}>
+          {opponents.map((opp) => (
+            <div key={opp.seat} className={`bp-panel ${view.turnSeat === opp.seat ? 'to-act' : ''}`}>
               <div className="bp-head">
                 <span className="bp-name">
                   {opp.name}
@@ -693,6 +693,14 @@ export function BloodTable({ view }: { view: BloodView }) {
                   {opp.handName && (
                     <div className="bp-handname">
                       {opp.handName} {opp.pips}点
+                    </div>
+                  )}
+                  {opp.impDiscard && opp.impDiscard.length > 0 && (
+                    <div className="bp-impdiscard">
+                      <span className="hint">🃏 公开弃牌区：</span>
+                      {opp.impDiscard.map((c) => (
+                        <BCard key={c.id} c={c} size="sm" />
+                      ))}
                     </div>
                   )}
                   {view.prompt.k === 'steal' && (
@@ -727,7 +735,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                 </div>
               </div>
             </div>
-          )}
+          ))}
 
           <div className="market-strip">
             <div className="market-title">
@@ -1117,15 +1125,16 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button className="btn primary" onClick={() => send({ t: 'bViolent', seat: view.me.seat })}>
                       删自己牌堆顶3张（{view.me.drawCount} 张）
                     </button>
-                    {opp && (
+                    {opponents.map((o) => (
                       <button
+                        key={o.seat}
                         className="btn danger"
-                        disabled={opp.drawCount < 3}
-                        onClick={() => send({ t: 'bViolent', seat: opp.seat })}
+                        disabled={o.drawCount < 3}
+                        onClick={() => send({ t: 'bViolent', seat: o.seat })}
                       >
-                        删对方牌堆顶3张（{opp.drawCount} 张）
+                        删{o.name}牌堆顶3张（{o.drawCount} 张）
                       </button>
-                    )}
+                    ))}
                     <button className="btn" onClick={() => send({ t: 'bViolent', seat: -1 })}>
                       放弃
                     </button>

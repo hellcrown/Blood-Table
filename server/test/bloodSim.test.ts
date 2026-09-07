@@ -455,4 +455,10 @@ describe('血色模式 · 随机整场模拟（拓展角色池）', () => {
   it('4人局拓展池 种子 1-5', () => {
     for (let seed = 1; seed <= 5; seed++) simGame(seed, true, 4);
   });
+  it('3人局基础池 种子 1-10', () => {
+    for (let seed = 1; seed <= 10; seed++) simGame(seed, false, 3);
+  });
+  it('3人局拓展池 种子 1-5', () => {
+    for (let seed = 1; seed <= 5; seed++) simGame(seed, true, 3);
+  });
 });

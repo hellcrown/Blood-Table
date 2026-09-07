@@ -1083,6 +1083,16 @@ select:focus {
   font-size: 12px;
 }
 
+.bp-impdiscard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+.bp-impdiscard .hint {
+  width: 100%;
+}
 .bp-handname {
   color: var(--gold);
   font-size: 13px;
@@ -1729,8 +1739,7 @@ body {
   border: 2px solid #b8943f;
   border-radius: 22px;
   box-shadow: 0 0 60px rgba(216, 169, 78, 0.22), 0 28px 90px rgba(0, 0, 0, 0.75);
-  padding: 16px 20px 14px;
-}
+  padding: 16px 20px 14px; max-height: 92vh; overflow-y: auto; }
 
 .sd-title-row {
   display: flex;

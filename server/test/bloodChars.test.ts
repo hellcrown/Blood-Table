@@ -52,7 +52,7 @@ import {
   createBloodGame,
 } from '../src/blood/engine';
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
-import type { BloodPhase, BloodState, BPlayer } from '../src/blood/types';
+import type { BCard, BloodPhase, BloodState, BPlayer } from '../src/blood/types';
 
 const NOW = 1000;
 
@@ -252,6 +252,39 @@ function bloodTickSafe(gs: BloodState): void {
 
 const hasLog = (gs: BloodState, keyword: string) => gs.log.some((l) => l.text.includes(keyword));
 
+const isRankC = (r: number) => (c: BCard) => c.r === r;
+
+/** 从玩家所有区域收集指定牌布置为恰好 5 张手牌（确定性出牌），其余入抽牌堆 */
+function giveHandC(gs: BloodState, seat: number, match: ((c: BCard) => boolean)[]): void {
+  const p = gs.players.find((x) => x.seat === seat)!;
+  const pool = [...p.draw, ...p.hand, ...p.discard, ...p.setupHand];
+  const chosen: BCard[] = [];
+  const rest: BCard[] = [];
+  const used = new Set<string>();
+  for (const m of match) {
+    const found = pool.find((c) => !used.has(c.id) && m(c));
+    if (found) {
+      used.add(found.id);
+      chosen.push(found);
+    }
+  }
+  for (const c of pool) if (!used.has(c.id)) rest.push(c);
+  p.hand = chosen;
+  p.draw = rest;
+  p.discard = [];
+  p.setupHand = [];
+}
+
+/** 双方按给定手牌出牌（对决自动推进至 settle） */
+function playFixed(gs: BloodState, hand0: ((c: BCard) => boolean)[], hand1: ((c: BCard) => boolean)[]): void {
+  giveHandC(gs, 0, hand0);
+  giveHandC(gs, 1, hand1);
+  for (const p of gs.players) if (!p.locked) bPlay(gs, p.id, bestFive(p), NOW);
+}
+
+const FOUR_ACES = [isRankC(14), isRankC(14), isRankC(14), isRankC(14), isRankC(3)];
+const HIGH_CARDS = [isRankC(6), isRankC(7), isRankC(8), isRankC(9), isRankC(11)];
+
 /** 等待轮到指定座位购买 */
 function waitBuyTurn(gs: BloodState, seat: number): void {
   let guard = 0;
@@ -321,21 +354,33 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     }
   });
 
-  it('票贩子：付3血筹强购夺魁者1车票', () => {
+  it('票贩子：未夺魁时付3血筹强购夺魁者1车票', () => {
     const gs = makeGame('scalper', 'noble');
     driveTo(gs, 'play');
-    if (gs.secretPending?.kind === 'gamblerGuess') drainPend(gs);
-    driveTo(gs, 'settle');
+    playFixed(gs, HIGH_CARDS, FOUR_ACES); // 乙（贵族）夺魁
+    expect(gs.secretPending?.kind).toBe('scalperDeal');
     const p0 = gs.players[0];
-    const winner = gs.players.find((p) => p.privilege)!;
-    if (gs.secretPending?.kind === 'scalperDeal' && winner.id !== p0.id) {
-      p0.blood += 5;
-      const wTickets = winner.tickets;
-      bScalperDeal(gs, p0.id, true, NOW);
-      expect(p0.tickets).toBe(1);
-      expect(winner.tickets).toBe(wTickets - 1);
-      expect(p0.blood).toBe(5 - 3 + (gs.players[0].blood - p0.blood) - (gs.players[0].blood - p0.blood));
-    }
+    const p1 = gs.players[1];
+    expect(p0.blood).toBeGreaterThanOrEqual(3);
+    const wT = p1.tickets;
+    const bloodPre = p0.blood;
+    bScalperDeal(gs, p0.id, true, NOW);
+    expect(p0.tickets).toBe(1);
+    expect(p1.tickets).toBe(wT - 1);
+    expect(p0.blood).toBe(bloodPre - 3);
+  });
+
+  it('炸鸡店老板：结算期付1血筹删除本回合打出的牌', () => {
+    const gs = makeGame('fryer', 'clerk');
+    driveTo(gs, 'play');
+    playFixed(gs, HIGH_CARDS, FOUR_ACES); // 乙夺魁
+    expect(gs.secretPending?.kind).toBe('fryerDel');
+    const p0 = gs.players[0];
+    const target = p0.discard.find((c) => c.r === 6)!; // 本回合打出的一张
+    const blood = p0.blood;
+    bFryerDel(gs, p0.id, [target.id], false, NOW);
+    expect(p0.removed.some((c) => c.id === target.id)).toBe(true);
+    expect(p0.blood).toBe(blood - 1);
   });
 
   it('高中生：弃光出牌区+2血筹并执行一次删牌', () => {
@@ -762,11 +807,58 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     const gs = makeGame('twinA', 'clerk');
     driveTo(gs, 'swap');
     const p0 = gs.players[0];
-    expect(gs.supply.filter((d) => d === 'twinLens').length).toBe(1); // 2 张中 1 张已插入
+    // 2 张中 1 张已插入（另一张可能在供应堆或开局黑市格中）
+    const lensInPool =
+      gs.supply.filter((d) => d === 'twinLens').length +
+      gs.market.filter((m) => m.def === 'twinLens').length +
+      gs.recycle.filter((d) => d === 'twinLens').length;
+    expect(lensInPool).toBe(1);
     const lens = p0.chips.find((ch) => ch.def === 'twinLens');
     expect(lens).toBeTruthy();
     // 镜片宿主牌置顶后随即被抽入手牌（抽牌阶段抽至上限）
     expect(p0.hand.some((c) => c.id === lens!.on) || p0.draw[p0.draw.length - 1].id === lens!.on).toBe(true);
+  });
+
+  it('3人局捣蛋鬼：每个小回合结束时立即返还剩余换牌次数', () => {
+    const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
+    const gs = createBloodGame(3, players, NOW, true);
+    // 强制 p0=捣蛋鬼、其余职员；捣蛋鬼清空个人牌堆模拟无牌堆
+    gs.players[0].charId = 'imp';
+    gs.players[0].draw = [];
+    gs.players[0].setupHand = [];
+    gs.players[0].setupRound = 2;
+    gs.players[1].charId = 'clerk';
+    gs.players[2].charId = 'clerk';
+    driveTo(gs, 'swap');
+    bSwapStop(gs, 'p1', NOW); // 对手1 停止 → 小回合1
+    let guard = 0;
+    while (gs.players[0].hand.length < 6 && guard++ < 30) {
+      if (gs.secretPending?.kind !== 'impDraw') break;
+      const t = gs.players.find((o) => o.id !== 'p0' && o.draw.length > 0);
+      if (!t) break;
+      bImpDraw(gs, 'p0', t.seat, NOW);
+    }
+    const blood0 = gs.players[0].blood;
+    const refund1 = gs.players[0].swapLeft; // 特权证持有者小回合为 4 次，其余 3 次
+    bSwapStop(gs, 'p0', NOW); // 小回合1 结束 → 立即返还
+    expect(gs.players[0].blood).toBe(blood0 + refund1);
+    expect(gs.players[0].swapLeft).toBe(0);
+    // 对手2 停止 → 小回合2；抽满后停止同样返还，随后进入出牌阶段
+    bSwapStop(gs, 'p2', NOW);
+    guard = 0;
+    while (gs.phase === 'swap' && guard++ < 60) {
+      if (gs.secretPending?.kind === 'impDraw') {
+        const t = gs.players.find((o) => o.id !== 'p0' && o.draw.length > 0);
+        if (!t) break;
+        bImpDraw(gs, 'p0', t.seat, NOW);
+      } else if (!gs.players[0].swapDone) {
+        const b = gs.players[0].blood;
+        const r2 = gs.players[0].swapLeft;
+        bSwapStop(gs, 'p0', NOW);
+        expect(gs.players[0].blood).toBe(b + r2);
+      } else break;
+    }
+    expect(gs.phase).toBe('play');
   });
 
   it('金科玉律10：被删的牌连同强化芯片一起进删牌区', () => {

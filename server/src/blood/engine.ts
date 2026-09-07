@@ -406,7 +406,7 @@ function drawN(gs: BloodState, p: BPlayer, n: number): BCard[] {
 
 function drawToCap(gs: BloodState, p: BPlayer, cap: number = charHandCap(effChar(p))): void {
   // 捣蛋鬼没有个人牌堆：需要抽牌时改为从对手抽牌堆自选（挂起 impDraw）
-  if (effChar(p) === 'imp') {
+  if (p.charId === 'imp') {
     if (p.hand.length < cap && gs.secretPending == null) tryImpDraw(gs, p, Date.now());
     return;
   }
@@ -441,6 +441,7 @@ export function startDrawPhase(gs: BloodState, now: number): void {
   gs.agentSwap = null;
   gs.impTurns = 0;
   gs.preBuyQueue = [];
+  gs.settleQueue = [];
   gs.auction = null;
   for (const p of gs.players) {
     // 暂时失忆：本回合角色技能失效；餐车投毒：换牌次数 -N（最低 0）
@@ -692,6 +693,12 @@ function afterSwapEnded(gs: BloodState, p: BPlayer, now: number): void {
       p.blood += 2;
       pushLog(gs, 'action', `${p.name}【入殓师】本回合未执行特殊换牌：获得 2 血筹`);
     }
+  }
+  // 捣蛋鬼的小回合结束：剩余换牌次数立即返还（3/4人局还有后续小回合，不能等阶段收尾）
+  if (p.charId === 'imp' && !p.extraSwapProtected && p.swapLeft > 0) {
+    p.blood += p.swapLeft;
+    pushLog(gs, 'action', `${p.name} 未使用的换牌次数兑换 ${p.swapLeft} 血筹`);
+    p.swapLeft = 0;
   }
   // 捣蛋鬼：其他玩家换牌结束时，捣蛋鬼开始抽牌与换牌
   const imp = gs.players.find((x) => x.charId === 'imp');
@@ -1824,6 +1831,15 @@ function settle(gs: BloodState, now: number): void {
     gs.agentSwap = null;
   }
 
+  // 结算期角色互动入队：魅魔抢夺 / 票贩子强购 / 炸鸡店老板结算删牌
+  gs.settleQueue = [];
+  for (const p of gs.players) {
+    const ch = effChar(p);
+    if (ch === 'succubus') gs.settleQueue.push({ seat: p.id, kind: 'succubusSteal' });
+    if (ch === 'scalper') gs.settleQueue.push({ seat: p.id, kind: 'scalperDeal' });
+    if (ch === 'fryer') gs.settleQueue.push({ seat: p.id, kind: 'fryerDel' });
+  }
+
   const result: BloodResultView = {
     rows: rows.slice().sort((a, b) => a.rank - b.rank),
     winnerSeat: winner.seat,
@@ -2386,7 +2402,11 @@ export function bSecretDelete(gs: BloodState, playerId: string, cardIds: string[
 
   // 共享信息链式：买家删完后每位对手依次可删 1 张（空选择=跳过）
   if (pend.kind === 'sharedInfo') {
-    const queue = gs.players.filter((o) => o.id !== p.id).map((o) => o.id);
+    const queue: string[] = [];
+    for (let i = 1; i < gs.seatCount; i++) {
+      const o = bySeat(gs, (p.seat + i) % gs.seatCount);
+      if (o && o.id !== p.id) queue.push(o.id);
+    }
     if (queue.length > 0) {
       gs.secretPending = { seat: queue[0], kind: 'sharedInfoOpp', max: 1, buyerId: p.id, oppQueue: queue.slice(1) };
       pushLog(gs, 'action', '【共享信息】轮到对手选择：可删除 1 张牌或跳过');
