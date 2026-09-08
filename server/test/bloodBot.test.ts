@@ -180,6 +180,7 @@ describe('血色机器人 · 房间管理', () => {
   });
 
   interface TestRoom {
+    code: string;
     sessions: Map<string, { id: string; bot?: boolean; seat: number; connected: boolean }>;
     hostId: string;
     game: BloodState | null;
@@ -209,6 +210,33 @@ describe('血色机器人 · 房间管理', () => {
     (m.handleAddBot as (r: unknown, s: unknown) => void)(room, host);
     (m.handleStart as (r: unknown, s: unknown) => void)(room, host);
     expect(room.game!.players.length).toBe(2);
+  });
+
+  it('真人离开后房主不转移给 bot，新真人加入自动接任', () => {
+    const { mgr, m, room, host } = makeRoomWithBot();
+    (m.handleAddBot as (r: unknown, s: unknown) => void)(room, host);
+    (m.handleLeave as (r: unknown, s: unknown) => void)(room, host);
+    expect(room.hostId).toBe(''); // 不转移给机器人
+    // 新真人加入 → 自动接任房主
+    const ws2 = stubWs();
+    (m.handleJoin as (w: unknown, msg: unknown) => void)(ws2, { t: 'join', name: '乙', code: room.code });
+    expect(room.hostId).not.toBe('');
+    expect([...room.sessions.values()].find((s) => s.id === room.hostId)?.bot).toBeFalsy();
+    void mgr;
+  });
+
+  it('重开局清空机器人跨回合记忆', () => {
+    const { m, room, host } = makeRoomWithBot();
+    (m.handleAddBot as (r: unknown, s: unknown) => void)(room, host);
+    const botId = [...room.sessions.values()].find((s) => s.bot)!.id;
+    room.botBrains.get(botId)!.seen.set(0, new Set(['c1-0']));
+    room.botBrains.get(botId)!.rankSuit.set('13:s', 3);
+    (m.handleStart as (r: unknown, s: unknown) => void)(room, host);
+    // 开局时整表清空（bot 记忆只在单局内有效），开局后重新初始化为空脑
+    expect(room.botBrains.size).toBe(0);
+    expect(m.runBots as unknown).toBeTruthy();
+    void m;
+    void botId;
   });
 
   it('真人全部离开后 5 分钟，房间连同 bot 一起回收', () => {

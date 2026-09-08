@@ -393,6 +393,8 @@ export class RoomManager {
       case 'bRematch': {
         if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
         if (bs.phase !== 'gameover') return;
+        room.botBrains.clear(); // 记忆只在单局内有效
+        room.botNextAct.clear();
         room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion);
         break;
       }
@@ -443,6 +445,7 @@ export class RoomManager {
     session.ws = ws;
     session.connected = true;
     room.pendingRemove.delete(session.id);
+    if (!room.hostId) room.hostId = session.id; // 房主空缺（原房主离开后只剩 bot）时由重连者接任
     this.bind(ws, room, session);
     send(ws, { t: 'hello', token: session.token, playerId: session.id });
     this.broadcast(room);
@@ -516,7 +519,8 @@ export class RoomManager {
     }
     room.pendingRemove.delete(session.id);
     if (room.hostId === session.id) {
-      const next = [...room.sessions.values()].find((s) => s.connected) ?? [...room.sessions.values()][0];
+      // 房主转移永不交给机器人；只剩 bot 时置空，由下一位加入的真人接任
+      const next = [...room.sessions.values()].find((s) => s.connected && !s.bot);
       room.hostId = next?.id ?? '';
     }
   }
@@ -538,9 +542,9 @@ export class RoomManager {
         session.ws = null;
       }
       if (room.hostId === session.id) {
-        const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && s.id !== session.id)
-          ?? [...room.sessions.values()].find((s) => s.connected && s.id !== session.id);
-        if (next) room.hostId = next.id;
+        const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && s.id !== session.id);
+        // 只剩机器人时不转移（置空），原房主重连即恢复身份，新玩家加入自动接任
+        room.hostId = next?.id ?? '';
       }
       this.broadcast(room);
       return;
@@ -579,6 +583,8 @@ export class RoomManager {
       const players = [...room.sessions.values()]
         .sort((a, b) => a.seat - b.seat)
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+      room.botBrains.clear(); // 记忆只在单局内有效（不做跨局学习）
+      room.botNextAct.clear();
       room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion);
     } else {
       if (!room.game) {
