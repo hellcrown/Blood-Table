@@ -13,7 +13,7 @@ function cardView(c: BCard, p: BPlayer): BloodCardView {
   };
 }
 
-function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
+export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
   // 挂起中的拓展牌交互优先（跨阶段）
   const pend = gs.secretPending;
   if (pend && pend.seat === p.id) {

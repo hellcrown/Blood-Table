@@ -141,6 +141,8 @@ export type C2S =
   | { t: 'start' }
   | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean }
   | { t: 'sit'; seat: number }
+  | { t: 'addBot' }
+  | { t: 'kickBot'; seat: number }
   | { t: 'act'; action: PlayerAction }
   | { t: 'nextHand' }
   | { t: 'rematch' }

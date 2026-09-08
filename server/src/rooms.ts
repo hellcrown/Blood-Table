@@ -4,13 +4,15 @@ import type { C2S, GameMode, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
-import { buildBloodView } from './blood/view';
+import { buildBloodView, promptFor } from './blood/view';
+import { botAct, createBrain, updateBrains, type BotBrain } from './blood/botAI';
 import type { BloodState } from './blood/types';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_IDLE_MS = 5 * 60_000; // 全员断线 5 分钟后删除房间（保留重连机会）
+const MAX_ALLBOT_ROOMS = 10; // 全机器人房间数量上限（超出后 bot 停止行动，等待空房回收）
 const BETTING_PHASES = new Set(['preflop', 'flop', 'turn', 'river']);
 
 export interface Session {
@@ -22,6 +24,8 @@ export interface Session {
   ws: WebSocket | null;
   /** 该会话已收到的事件序号（用于增量推送） */
   lastEventSeq: number;
+  /** 服务端机器人（不占用 WebSocket 连接，广播时跳过序列化） */
+  bot?: boolean;
 }
 
 export interface Room {
@@ -39,6 +43,10 @@ export interface Room {
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
   emptySince: number;
+  /** 机器人跨回合记忆（按会话 id） */
+  botBrains: Map<string, BotBrain>;
+  /** 机器人下次允许行动的时间戳（随机 0.8-2s 思考延迟） */
+  botNextAct: Map<string, number>;
 }
 
 function send(ws: WebSocket | null, msg: S2C): void {
@@ -144,6 +152,12 @@ export class RoomManager {
         return;
       case 'sit':
         this.handleSit(room, session, msg);
+        return;
+      case 'addBot':
+        this.handleAddBot(room, session);
+        return;
+      case 'kickBot':
+        this.handleKickBot(room, session, msg);
         return;
       case 'act':
         this.handleAct(room, session, msg);
@@ -456,6 +470,8 @@ export class RoomManager {
       game: null,
       pendingRemove: new Set(),
       emptySince: 0,
+      botBrains: new Map(),
+      botNextAct: new Map(),
     };
     this.rooms.set(code, room);
     return room;
@@ -483,6 +499,8 @@ export class RoomManager {
   private removeSession(room: Room, session: Session): void {
     room.sessions.delete(session.id);
     this.tokenIndex.delete(session.token);
+    room.botBrains.delete(session.id);
+    room.botNextAct.delete(session.id);
     if (room.game) {
       if (room.mode === 'blood') {
         const bs = room.game as BloodState;
@@ -520,7 +538,8 @@ export class RoomManager {
         session.ws = null;
       }
       if (room.hostId === session.id) {
-        const next = [...room.sessions.values()].find((s) => s.connected && s.id !== session.id);
+        const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && s.id !== session.id)
+          ?? [...room.sessions.values()].find((s) => s.connected && s.id !== session.id);
         if (next) room.hostId = next.id;
       }
       this.broadcast(room);
@@ -600,6 +619,77 @@ export class RoomManager {
     this.broadcast(room);
   }
 
+  /* ---------------- 机器人 ---------------- */
+
+  private allBotRoomCount(): number {
+    let n = 0;
+    for (const r of this.rooms.values()) {
+      if (r.sessions.size > 0 && [...r.sessions.values()].every((s) => s.bot)) n++;
+    }
+    return n;
+  }
+
+  private handleAddBot(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以添加机器人');
+    if (room.mode !== 'blood') throw new GameError('BAD_MODE', '机器人仅支持血色模式');
+    if (room.game) throw new GameError('IN_GAME', '对局进行中不能添加机器人');
+    if (room.sessions.size >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
+    const botNo = [...room.sessions.values()].filter((s) => s.bot).length + 1;
+    const taken = new Set([...room.sessions.values()].map((s) => s.seat));
+    let seat = 0;
+    while (taken.has(seat)) seat++;
+    const bot: Session = {
+      id: makeId(),
+      token: randomBytes(16).toString('hex'),
+      name: `🤖机器人${botNo}`,
+      seat,
+      connected: true,
+      ws: null,
+      lastEventSeq: 0,
+      bot: true,
+    };
+    room.sessions.set(bot.id, bot);
+    room.botBrains.set(bot.id, createBrain());
+    room.botNextAct.set(bot.id, 0);
+    this.broadcast(room);
+  }
+
+  private handleKickBot(room: Room, session: Session, msg: Extract<C2S, { t: 'kickBot' }>): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以移除机器人');
+    if (room.game) throw new GameError('IN_GAME', '对局进行中不能移除机器人');
+    const seat = Math.floor(msg.seat);
+    const bot = [...room.sessions.values()].find((s) => s.bot && s.seat === seat);
+    if (!bot) throw new GameError('BAD_SEAT', '该座位没有机器人');
+    this.removeSession(room, bot);
+    this.broadcast(room);
+  }
+
+  /** 机器人调度：每 tick 至多执行 1 个决策；有 0.8-2s 随机思考延迟 */
+  private runBots(room: Room, gs: BloodState, now: number): boolean {
+    if (gs.phase === 'gameover') return false;
+    const bots = [...room.sessions.values()].filter((s) => s.bot).sort((a, b) => a.seat - b.seat);
+    if (bots.length === 0) return false;
+    // 全 bot 房数量上限：超出后 bot 静止（房间将在空房回收中解散）
+    if (bots.length === room.sessions.size && this.allBotRoomCount() > MAX_ALLBOT_ROOMS) return false;
+    updateBrains(room.botBrains, bots.map((b) => b.id), gs);
+    for (const bot of bots) {
+      const player = gs.players.find((p) => p.id === bot.id);
+      if (!player) continue;
+      const prompt = promptFor(gs, player);
+      if (prompt.k === 'wait') continue;
+      if (now < (room.botNextAct.get(bot.id) ?? 0)) continue;
+      let acted = false;
+      try {
+        acted = botAct(room.botBrains.get(bot.id) ?? createBrain(), gs, bot.id, now);
+      } catch {
+        acted = false; // 决策异常回退：交由超时托管安全默认
+      }
+      room.botNextAct.set(bot.id, now + (acted ? 800 + randomInt(0, 1200) : 600));
+      if (acted) return true;
+    }
+    return false;
+  }
+
   private handleSit(room: Room, session: Session, msg: Extract<C2S, { t: 'sit' }>): void {
     const g = room.game;
     if (g && g.phase !== 'waiting') throw new GameError('IN_GAME', '对局进行中不能换座位');
@@ -657,6 +747,7 @@ export class RoomManager {
       let changed = false;
       if (g && room.mode === 'blood') {
         changed = blood.bloodTick(g as BloodState, now);
+        if (!changed) changed = this.runBots(room, g as BloodState, now);
       } else if (g) {
         const cg = g as GState;
         if (cg.phase === 'result' && cg.resultAt != null && now >= cg.resultAt + RESULT_MS) {
@@ -667,7 +758,8 @@ export class RoomManager {
           changed = engine.tick(cg, now);
         }
       }
-      const connectedCount = [...room.sessions.values()].filter((s) => s.connected).length;
+      // 回收只看真实玩家：机器人在线不阻止空房回收
+      const connectedCount = [...room.sessions.values()].filter((s) => s.connected && !s.bot).length;
       if (connectedCount === 0) {
         if (!room.emptySince) room.emptySince = now;
         if (now - room.emptySince >= ROOM_IDLE_MS) {

@@ -248,6 +248,26 @@ export function Room({ view }: { view: TableView }) {
           ) : (
             <span className="hint">等待房主开始游戏…</span>
           )}
+          {isHost && view.mode === 'blood' && view.phase === 'waiting' && (
+            <>
+              {view.players.length < view.maxPlayers && (
+                <button className="btn" onClick={() => net.send({ t: 'addBot' })} title="添加一个机器人玩家（AI 补位）">
+                  🤖 添加机器人
+                </button>
+              )}
+              {view.players.some((pl) => pl.name.startsWith('🤖')) && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    const bot = view.players.filter((pl) => pl.name.startsWith('🤖')).sort((a, b) => b.seat - a.seat)[0];
+                    if (bot) net.send({ t: 'kickBot', seat: bot.seat });
+                  }}
+                >
+                  移除机器人
+                </button>
+              )}
+            </>
+          )}
           {!canStart && <span className="hint">至少需要 2 名玩家</span>}
         </div>
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
