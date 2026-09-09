@@ -2812,7 +2812,10 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  max-width: 560px;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
 }
 
 .char-pick-panel h3 {
@@ -2844,7 +2847,10 @@ body {
 .char-detail .char-detail-panel {
   display: flex;
   gap: 22px;
-  max-width: 640px;
+  width: min(640px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
   align-items: flex-start;
 }
 
@@ -2897,8 +2903,61 @@ body {
 
 .char-detail-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
+}
+
+/* 选将/角色详情 · 移动端适配（卡片随视口缩放，不溢出） */
+@media (max-width: 720px) {
+  .char-pick .char-pick-panel {
+    padding: 14px 10px;
+    gap: 10px;
+  }
+  .char-pick-panel h3 {
+    font-size: 16px;
+    text-align: center;
+  }
+  .char-pick-row {
+    gap: 10px;
+  }
+  .char-pick-row .char-card {
+    width: min(42vw, 190px);
+    padding: 10px 8px 8px;
+  }
+  .char-pick-row .char-card .char-frame span {
+    font-size: clamp(44px, 16vw, 72px);
+  }
+  .char-pick-row .char-card .char-plate b {
+    font-size: 14px;
+  }
+  .char-detail .char-detail-panel {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 12px;
+  }
+  .char-detail-side .char-card {
+    width: min(58vw, 200px);
+  }
+  .char-detail-side .char-card .char-frame span {
+    font-size: clamp(48px, 17vw, 80px);
+  }
+  .char-detail-body {
+    width: 100%;
+  }
+  .char-detail-body h3 {
+    font-size: 17px;
+    flex-wrap: wrap;
+  }
+  .char-skill-text {
+    font-size: 13.5px;
+    line-height: 1.7;
+    padding: 10px 12px;
+  }
+  .char-impl-note {
+    font-size: 11px;
+  }
 }
 
 /* 座位区角色徽章 */
