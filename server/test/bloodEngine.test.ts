@@ -199,6 +199,43 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
   });
 });
 
+describe('血色引擎 · 拓展道具牌购买', () => {
+  function reachBuyLocal2(): ReturnType<typeof make2p> {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    confirmSd(gs);
+    expect(gs.phase).toBe('buy');
+    return gs;
+  }
+  it('购买信号干扰器：道具入手、黑市补齐', () => {
+    const gs = reachBuyLocal2();
+    const buyer = gs.players.find((p) => gs.turnSeat === p.seat)!;
+    buyer.blood += 10;
+    gs.market[0] = { def: 'signalJam', bonus: 0 };
+    bBuy(gs, buyer.id, 0, undefined, NOW);
+    expect(buyer.items.some((i) => i.def === 'signalJam')).toBe(true);
+    // 结算完补齐黑市（空格不残留）
+    expect(gs.market.every((m) => m.def != null)).toBe(true);
+  });
+
+  it('全部 7 张拓展道具均可正常购入道具区', () => {
+    const defs = ['signalJam', 'secretNote', 'loudspeaker', 'irisGamble', 'eraser', 'demag', 'barrier'];
+    for (const defId of defs) {
+      const gs = reachBuyLocal2();
+      const buyer = gs.players.find((p) => gs.turnSeat === p.seat)!;
+      buyer.blood += 10;
+      gs.market[0] = { def: defId, bonus: 0 };
+      bBuy(gs, buyer.id, 0, undefined, NOW);
+      expect(buyer.items.some((i) => i.def === defId)).toBe(true);
+      expect(gs.market.every((m) => m.def != null)).toBe(true);
+    }
+  });
+});
+
 describe('血色引擎 · 3人局兼容', () => {
   it('车票目标 20 + 名次奖励表（4🎫 / 2🎫+2🩸 / 4🩸）', () => {
     const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));

@@ -2150,13 +2150,14 @@ function processMarketDef(
     }
     return;
   }
+  // 备用道具：正面朝上放入道具区，之后可使用一次（使用时机见 bUseItem / tryBarrierAsk）
+  if (def.kind === 'item') {
+    p.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
+    pushLog(gs, 'action', `${p.name} 将【${def.name}】正面朝上放入道具区`);
+    afterMarketResolved(gs, p, false);
+    return;
+  }
   switch (def.effect.k) {
-    case 'dealerLicense': {
-      p.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
-      pushLog(gs, 'action', `${p.name} 将【${def.name}】正面朝上放入道具区`);
-      afterMarketResolved(gs, p, false);
-      return;
-    }
     case 'rollDice': {
       const roll = randomInt(1, 7);
       p.blood += roll;
