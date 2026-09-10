@@ -68,6 +68,7 @@ export function Room({ view }: { view: TableView }) {
     maxPlayers?: number;
     charExpansion?: boolean;
     expansion?: boolean;
+    targetTickets?: number;
   }) => {
     net.send({ t: 'settings', ...patch });
   };
@@ -235,6 +236,22 @@ export function Room({ view }: { view: TableView }) {
                   onChange={(e) => update({ expansion: e.target.checked })}
                 />
                 <span className="hint">{view.expansion ? '开（27种拓展牌）' : '关（默认）'}</span>
+              </label>
+              <label
+                className="charpick-toggle"
+                title="自定义胜利目标票数（8-30）。留空/0 = 按人数默认：2人24、3人20、4人16。内置计分：本局首个夺魁额外+1🎫（抢跑），连续回合夺魁从第二连起每次+1🎫（连胜）"
+              >
+                目标票数
+                <input
+                  type="number"
+                  min={8}
+                  max={30}
+                  value={view.targetTickets || ''}
+                  placeholder="默认"
+                  disabled={!isHost}
+                  onChange={(e) => update({ targetTickets: Number(e.target.value) || 0 })}
+                />
+                <span className="hint">{view.targetTickets ? `${view.targetTickets} 票` : '按人数默认'}</span>
               </label>
             </div>
           )}

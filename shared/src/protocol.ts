@@ -92,6 +92,8 @@ export interface TableView {
   charExpansion: boolean;
   /** 血色模式：拓展黑市开关（开=牌库并入拓展牌；默认关） */
   expansion: boolean;
+  /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
+  targetTickets: number;
   players: SeatView[];
   community: Card[];
   pot: number; // 总池（含本轮未收入注）
@@ -139,7 +141,7 @@ export type C2S =
   | { t: 'rejoin'; token: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }

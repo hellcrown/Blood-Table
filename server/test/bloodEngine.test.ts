@@ -121,7 +121,7 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
     expect(gs.phase).toBe('buy'); // 全员确认后统一进入购买（倒计时同步）
     const winner = gs.players.find((p) => p.privilege)!;
     const loser = gs.players.find((p) => !p.privilege)!;
-    expect(winner.tickets).toBe(4); // 2人局第一名 4 车票
+    expect(winner.tickets).toBe(5); // 2人局第一名 4 车票 + 抢跑 1
     expect(loser.blood).toBeGreaterThanOrEqual(4); // 第二名 4 血筹
     expect(gs.result!.rows[0].catName).toBe('四条');
     // 出牌区已置入弃牌区
@@ -256,7 +256,7 @@ describe('血色引擎 · 3人局兼容', () => {
     const rows = gs.result!.rows;
     const byRank = new Map(rows.map((r) => [r.rank, r]));
     expect(byRank.get(1)!.seat).toBe(0);
-    expect(byRank.get(1)!.gainTickets).toBe(4);
+    expect(byRank.get(1)!.gainTickets).toBe(5); // 4 + 抢跑
     expect(byRank.get(1)!.gainBlood).toBe(0);
     expect(byRank.get(2)!.seat).toBe(2);
     expect(byRank.get(2)!.gainTickets).toBe(2);
@@ -1013,5 +1013,75 @@ describe('血色引擎 · 荷官证时点与投降', () => {
     expect(gs.final!.winnerSeat).toBe(gs.players[0].seat);
     // 投降者排名垫底
     expect(gs.final!.ranking[gs.final!.ranking.length - 1].name).toBe('乙');
+  });
+});
+
+describe('血色引擎 · 抢跑与连胜（速攻计分）', () => {
+  /** 打完一整回合（当前应处于换牌阶段），winnerSeat 以四条 K 夺魁 */
+  function runRound(gs: BloodState, winnerSeat: number) {
+    for (const p of gs.players) bSwapStop(gs, p.id, NOW);
+    giveHand(gs, winnerSeat, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    const loser = gs.players.find((p) => p.seat !== winnerSeat)!;
+    giveHand(gs, loser.seat, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    const rows = gs.result!.rows.slice().sort((a, b) => a.rank - b.rank); // 结算同步完成，先捕获
+    if (gs.phase === 'gameover') return rows; // 达标即胜：跳过后续阶段
+    confirmSd(gs);
+    for (let i = 0; i < gs.seatCount; i++) {
+      const cur = gs.players.find((p) => p.seat === gs.turnSeat)!;
+      bPassBuy(gs, cur.id, NOW);
+    }
+    for (const p of gs.players) bRemoveDone(gs, p.id, NOW);
+    for (const p of gs.players) bReorg(gs, p.id, 'blood', NOW);
+    return rows;
+  }
+
+  it('抢跑：本局首次夺魁额外+1🎫；连胜：连续回合夺魁每次再+1🎫', () => {
+    const gs = make2p();
+    setupDone(gs);
+    let rows = runRound(gs, 0);
+    expect(rows[0].gainTickets).toBe(5); // 4 + 抢跑
+    expect(gs.players[0].tickets).toBe(5);
+    expect(gs.champStreak).toBe(1);
+    expect(gs.firstChampDone).toBe(true);
+    rows = runRound(gs, 0);
+    expect(rows[0].gainTickets).toBe(5); // 4 + 连胜
+    expect(gs.players[0].tickets).toBe(10);
+    expect(gs.champStreak).toBe(2);
+    rows = runRound(gs, 1);
+    expect(rows[0].gainTickets).toBe(4); // 换人夺魁：无抢跑无连胜
+    expect(gs.players[1].tickets).toBe(4);
+    expect(gs.champStreak).toBe(1); // 连击归 1（新连击）
+  });
+
+  it('自定义目标票数：覆盖与钳制，达标（含奖励票）即胜', () => {
+    const mk = (n?: number) => {
+      const g = createBloodGame(2, [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }], NOW, false, false, n == null ? {} : { targetTickets: n });
+      for (const p of g.players) {
+        p.charOptions = ['dealer', 'noble'];
+        bPickChar(g, p.id, 'dealer', NOW);
+      }
+      return g;
+    };
+    expect(mk().target).toBe(24);
+    expect(mk(12).target).toBe(12);
+    expect(mk(99).target).toBe(30);
+    expect(mk(3).target).toBe(8);
+    // 目标 8：首回合 4+抢跑1 = 5 未达标继续；次回合连胜 5 票 → 10 ≥ 8 终局
+    const gs = mk(8);
+    setupDone(gs);
+    runRound(gs, 0);
+    expect(gs.players[0].tickets).toBe(5);
+    expect(gs.phase).toBe('swap');
+    runRound(gs, 0);
+    expect(gs.phase).toBe('gameover');
+    expect(gs.final!.winnerSeat).toBe(0);
+    // 重开局：连胜/抢跑重置，目标保留
+    const again = bloodRematch(gs, NOW);
+    expect(again.firstChampDone).toBe(false);
+    expect(again.champStreak).toBe(0);
+    expect(again.lastChampSeat).toBeNull();
+    expect(again.target).toBe(8); // 重开保留自定义目标（原 5 已被钳制为 8）
   });
 });

@@ -96,12 +96,26 @@ export interface BloodPlayerInit {
   seat: number;
 }
 
+export interface BloodOptions {
+  /** 自定义目标票数（钳制 8-30）；缺省按人数 24/20/16 */
+  targetTickets?: number;
+}
+
+/** 目标票数：自定义覆盖优先（钳制 8-30），否则按人数 */
+export function resolveTargetTickets(seatCount: number, override?: number): number {
+  if (override != null && Number.isFinite(override)) {
+    return Math.min(30, Math.max(8, Math.round(override)));
+  }
+  return targetTickets(seatCount);
+}
+
 export function createBloodGame(
   seatCount: number,
   players: BloodPlayerInit[],
   now = Date.now(),
   charExpansion = false,
   expansion = false,
+  options: BloodOptions = {},
 ): BloodState {
   const bps: BPlayer[] = players
     .slice()
@@ -197,7 +211,10 @@ export function createBloodGame(
     eraserType: null,
     irisGuess: null,
     final: null,
-    target: targetTickets(seatCount),
+    firstChampDone: false,
+    lastChampSeat: null,
+    champStreak: 0,
+    target: resolveTargetTickets(seatCount, options.targetTickets),
     log: [],
     logSeq: 0,
     privilegeSeat: null,
@@ -1614,6 +1631,20 @@ function settle(gs: BloodState, now: number): void {
   });
 
   const winner = bySeat(gs, rows[0].seat)!;
+  // 速攻计分：抢跑（本局首次夺魁 +1🎫）/ 连胜（连续回合夺魁，第二连起每次 +1🎫）
+  if (!gs.firstChampDone) {
+    gs.firstChampDone = true;
+    rows[0].gainTickets += 1;
+    pushLog(gs, 'action', `🏁 ${winner.name} 抢跑成功（本局首个夺魁）：额外 +1🎫`);
+  }
+  if (gs.lastChampSeat === winner.id) {
+    gs.champStreak += 1;
+    rows[0].gainTickets += 1;
+    pushLog(gs, 'action', `🔥 ${winner.name} 达成 ${gs.champStreak} 连胜：额外 +1🎫`);
+  } else {
+    gs.champStreak = 1;
+  }
+  gs.lastChampSeat = winner.id;
   // 特权证转移：江东之主持有期间，任何人都无法以任意方式获得临时特权证
   const curHolder = gs.players.find((p) => p.privilege);
   if (curHolder && curHolder !== winner && effChar(curHolder) === 'sunwu') {
@@ -4599,5 +4630,6 @@ export function bloodRematch(gs: BloodState, now: number, charExpansion = false,
     now,
     charExpansion,
     expansion,
+    { targetTickets: gs.target }, // 重开保留自定义目标票数
   );
 }

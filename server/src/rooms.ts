@@ -38,6 +38,8 @@ export interface Room {
   charExpansion: boolean;
   /** 血色模式：拓展黑市开关（默认关，房主开局前可切换） */
   expansion: boolean;
+  /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
+  targetTickets: number;
   sessions: Map<string, Session>;
   game: GState | BloodState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
@@ -472,6 +474,7 @@ export class RoomManager {
       settings: { sb: 5, bb: 10, startChips: 1000 },
       charExpansion: false,
       expansion: false,
+      targetTickets: 0,
       sessions: new Map(),
       game: null,
       pendingRemove: new Set(),
@@ -588,7 +591,9 @@ export class RoomManager {
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
       room.botBrains.clear(); // 记忆只在单局内有效（不做跨局学习）
       room.botNextAct.clear();
-      room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion);
+      room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
+        targetTickets: room.targetTickets || undefined,
+      });
     } else {
       if (!room.game) {
         const players = [...room.sessions.values()]
@@ -625,6 +630,10 @@ export class RoomManager {
     }
     if (msg.charExpansion != null) room.charExpansion = !!msg.charExpansion;
     if (msg.expansion != null) room.expansion = !!msg.expansion;
+    if (msg.targetTickets != null) {
+      const n = Math.round(msg.targetTickets);
+      room.targetTickets = Math.min(30, Math.max(0, Number.isFinite(n) ? n : 0));
+    }
     this.broadcast(room);
   }
 

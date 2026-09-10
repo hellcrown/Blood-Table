@@ -273,6 +273,11 @@ export interface BloodState {
   deferredDecisions: { seat: string; decision: RevealDecision }[];
   /** 结算阶段的角色互动队列（魅魔/票贩子/炸鸡店老板） */
   settleQueue: { seat: string; kind: 'succubusSteal' | 'scalperDeal' | 'fryerDel' }[];
+  /** 抢跑：本局是否已发放首次夺魁奖励 */
+  firstChampDone: boolean;
+  /** 连胜：上一回合夺魁者 id（null=无）与当前连击数 */
+  lastChampSeat: string | null;
+  champStreak: number;
   final: BloodFinal | null;
   target: number;
   log: LogLine[];

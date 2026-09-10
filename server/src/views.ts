@@ -13,6 +13,7 @@ export function buildView(room: Room, viewerId: string | null): TableView {
     settings: room.settings,
     hostId: room.hostId,
     charExpansion: room.charExpansion,
+    targetTickets: room.targetTickets,
     expansion: room.expansion,
     serverTime: now,
   };
