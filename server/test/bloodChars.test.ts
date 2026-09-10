@@ -645,9 +645,12 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
       bPassBuy(gs, cur.id, NOW);
     }
     p0.blood += 30;
-    const def = BLOOD_MARKET_BY_ID.get(gs.seerZone[0])!;
+    // 选一张强化芯片购买：芯片购买时点不产生额外血筹变动（部分牌自带血筹效果会干扰扣费断言）
+    const chipIdx = gs.seerZone.findIndex((d) => BLOOD_MARKET_BY_ID.get(d)?.kind === 'chip');
+    const buyIdx = chipIdx >= 0 ? chipIdx : 0;
+    const def = BLOOD_MARKET_BY_ID.get(gs.seerZone[buyIdx])!;
     const blood = p0.blood;
-    bBuySeer(gs, p0.id, 0, NOW);
+    bBuySeer(gs, p0.id, buyIdx, NOW);
     expect(gs.seerZone.length).toBe(6);
     expect(p0.blood).toBe(blood - Math.max(0, def.cost - 2));
   });

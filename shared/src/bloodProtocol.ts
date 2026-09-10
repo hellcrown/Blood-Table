@@ -134,7 +134,9 @@ export interface BloodMyPrompt {
     | 'agentAsk'
     | 'agentDecide'
     | 'mynameSet'
-    | 'cleanerDel';
+    | 'cleanerDel'
+    /** 阶段边界道具询问窗口（换牌结束：信号干扰器/皮下密信/魔术橡皮；对决前：广播喇叭/赌徒虹膜/荷官证） */
+    | 'itemAsk';
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
@@ -178,7 +180,20 @@ export interface BloodAnnounceView {
 export interface BloodView {
   kind: 'blood';
   code: string;
-  phase: 'pick' | 'setup' | 'draw' | 'swap' | 'play' | 'reveal' | 'settle' | 'buy' | 'remove' | 'reorg' | 'gameover';
+  phase:
+    | 'pick'
+    | 'setup'
+    | 'draw'
+    | 'swap'
+    | 'swapItem' // 换牌阶段结束：逐一询问换牌结束类道具
+    | 'play'
+    | 'revealPre' // 对决阶段前：逐一询问对决前道具
+    | 'reveal'
+    | 'settle'
+    | 'buy'
+    | 'remove'
+    | 'reorg'
+    | 'gameover';
   round: number;
   target: number;
   seatCount: number;
@@ -302,6 +317,7 @@ export type BloodAction =
   | { t: 'bAgentAsk'; seat: number }
   | { t: 'bAgentDecide'; accept: boolean }
   | { t: 'bMynameSet'; cat: number; name: string }
-  | { t: 'bCleanerDel'; seat: number; cardId: string };
+  | { t: 'bCleanerDel'; seat: number; cardId: string }
+  | { t: 'bItemAsk'; use: boolean };
 
 export type { BloodEffect };

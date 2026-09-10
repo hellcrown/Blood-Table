@@ -1,18 +1,30 @@
 /**
  * 血色牌局 · 机器人决策器（服务端内存 bot，不占用 WebSocket 连接）
- * - 决策全部同步轻量：仅出牌阶段做蒙特卡洛推演（50ms 硬上限），其余阶段为启发式
+ * - 决策同步执行：仅出牌阶段做蒙特卡洛推演（约 200ms 预算上限，用户可接受更长思考时间），其余阶段为启发式
  * - 只读 BloodState 与公开信息；Brain 为跨回合记忆（对手亮牌累计），局结束随房间销毁
  * - 决策异常由 rooms.runBots 捕获并回退到超时托管的安全默认，绝不软锁
  */
 import { randomInt } from 'node:crypto';
-import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
+import { BLOOD_MARKET_BY_ID, type BloodEffect } from '@shared/bloodCards';
 import { applyCharEval, charSwapMax } from '@shared/bloodChars';
-import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
+import { evalBloodHand, toEvalCard, type EvalCard, type Suit } from '@shared/bloodEval';
 import { promptFor } from './view';
 import * as blood from './engine';
 import type { BCard, BPlayer, BloodState } from './types';
 
 /* ---------------- 跨回合记忆 ---------------- */
+
+/**
+ * 长线构筑策略：围绕一个牌型目标统一换牌/购买/删牌。
+ * - rank：凑同一主点数多条（如「凑很多 8」→ 四条/葫芦）
+ * - flush：凑同一花色同花
+ * - straight：凑一个 5 连窗口顺子
+ * score 为可达牌型分（与牌型 cat 同量纲，含万能张/牌库密度加成），用于策略间比较。
+ */
+export type Strat =
+  | { kind: 'rank'; rank: number; score: number }
+  | { kind: 'flush'; suit: Suit; score: number }
+  | { kind: 'straight'; lo: number; score: number };
 
 export interface BotBrain {
   /** 对手座位 -> 对决亮牌累计（跨回合，牌 id） */
@@ -23,10 +35,166 @@ export interface BotBrain {
   lastRound: Map<number, number>;
   /** 对手座位 -> 本回合换牌张数（来自公开 lastAction） */
   swapped: Map<number, number>;
+  /** 当前长线策略（构筑删牌/被对手删牌后活牌构成变化时自动切换） */
+  strategy: Strat | null;
+  /** 对手座位 -> 公开购入的黑市牌 defId（购买宣告滚动记录，至多 12 条） */
+  oppBuys: Map<number, string[]>;
+  /** 对手座位 -> 上次记录的购买宣告时间戳（防同一条宣告重复计数） */
+  oppBuyAt: Map<number, number>;
 }
 
 export function createBrain(): BotBrain {
-  return { seen: new Map(), rankSuit: new Map(), lastRound: new Map(), swapped: new Map() };
+  return {
+    seen: new Map(),
+    rankSuit: new Map(),
+    lastRound: new Map(),
+    swapped: new Map(),
+    strategy: null,
+    oppBuys: new Map(),
+    oppBuyAt: new Map(),
+  };
+}
+
+/* ---------------- 策略推导与切换 ---------------- */
+
+/** 活牌 = 还能抽到/打出的所有牌（抽牌堆+手牌+弃牌区+构筑区，不含删牌区） */
+function aliveCards(p: BPlayer): BCard[] {
+  return [...p.draw, ...p.hand, ...p.discard, ...p.setupHand];
+}
+
+/** 推导全部候选策略并按可达分降序返回（纯函数：随活牌构成自动适应局势变化） */
+export function deriveStrategy(p: BPlayer): Strat[] {
+  const alive = aliveCards(p);
+  const jokers = alive.filter((c) => c.r === 0).length;
+  const rankCount = new Map<number, number>();
+  const suitCount = new Map<Suit, number>();
+  const rankSet = new Set<number>();
+  for (const c of alive) {
+    if (c.r === 0) continue;
+    rankCount.set(c.r, (rankCount.get(c.r) ?? 0) + 1);
+    suitCount.set(c.s!, (suitCount.get(c.s!) ?? 0) + 1);
+    rankSet.add(c.r);
+  }
+  const out: Strat[] = [];
+  // 多条策略：取活牌数量最多的 4 个点数（4 张全活→四条，3 张→葫芦/三条，2 张→两对）
+  const topRanks = [...rankCount.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]).slice(0, 4);
+  for (const [r, n] of topRanks) {
+    const nEff = Math.min(4, n + jokers);
+    let tier: number;
+    if (nEff >= 4) tier = 7.2;
+    else if (nEff === 3) tier = rankSet.size >= 6 ? 4.8 : 4.2; // 有别的对子可配葫芦
+    else if (nEff === 2) tier = 2.2;
+    else tier = 0.9;
+    out.push({ kind: 'rank', rank: r, score: tier + r / 100 });
+  }
+  // 同花策略：花色活牌 + 万能张 ≥5 张才成花，牌库越集中（可删的杂牌越多）分越高
+  for (const s of ['s', 'h', 'd', 'c'] as Suit[]) {
+    const nEff = (suitCount.get(s) ?? 0) + jokers;
+    if (nEff >= 5) {
+      out.push({
+        kind: 'flush',
+        suit: s,
+        score: 5.1 + Math.min(nEff - 5, 8) * 0.12 + (nEff / Math.max(1, alive.length)) * 1.2,
+      });
+    }
+  }
+  // 顺子策略：最长 5 连窗口（万能张补缺），普遍弱于四条/同花，仅在别无更佳时选
+  let bestWin: { lo: number; effLen: number } | null = null;
+  for (let lo = 2; lo <= 10; lo++) {
+    let holes = 0;
+    for (let r = lo; r < lo + 5; r++) if (!rankSet.has(r)) holes++;
+    const effLen = 5 - holes + Math.min(jokers, holes);
+    if (!bestWin || effLen > bestWin.effLen || (effLen === bestWin.effLen && lo > bestWin.lo)) {
+      bestWin = { lo, effLen };
+    }
+  }
+  if (bestWin && bestWin.effLen >= 5) {
+    out.push({ kind: 'straight', lo: bestWin.lo, score: 4.2 + (bestWin.effLen - 5) * 0.05 });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+/** 当前策略：每回合按活牌构成重推，原策略仍接近最优则保持（防抖动），明显更优才切换 */
+export function curStrategy(brain: BotBrain, p: BPlayer): Strat {
+  const ranked = deriveStrategy(p);
+  if (ranked.length === 0) return { kind: 'rank', rank: 14, score: 0 };
+  const best = ranked[0];
+  const cur = brain.strategy;
+  if (cur) {
+    const same = ranked.find(
+      (s) =>
+        (cur.kind === 'rank' && s.kind === 'rank' && s.rank === cur.rank) ||
+        (cur.kind === 'flush' && s.kind === 'flush' && s.suit === cur.suit) ||
+        (cur.kind === 'straight' && s.kind === 'straight'),
+    );
+    if (same && best.score - same.score <= 0.35) return cur;
+  }
+  brain.strategy = best;
+  return best;
+}
+
+/* ---------------- 对手策略猜测 ---------------- */
+
+export interface OppGuess {
+  /** 被猜测对手的座位号 */
+  seat: number;
+  strat: Strat;
+  /** 置信度 0-1：亮牌直方图 + 公开购买方向共同决定 */
+  conf: number;
+}
+
+const SUIT_CHIP_IDS = new Set(['redChip', 'blackChip', 'inkSuit', 'morph']);
+const RANK_CHIP_IDS = new Set(['limiter1', 'limiter2', 'limiter3', 'limiter4', 'calib1', 'calib2', 'calib3', 'calib4', 'slider']);
+
+/** 猜测一名对手的长线策略：对决亮牌直方图（他反复亮什么就是在凑什么）+ 公开购买方向 */
+export function guessOppStrategy(brain: BotBrain, opp: BPlayer): OppGuess | null {
+  const deck = seatDeck(opp.seat);
+  const seen = brain.seen.get(opp.seat);
+  const buys = brain.oppBuys.get(opp.seat) ?? [];
+  if ((!seen || seen.size === 0) && buys.length === 0) return null;
+  const suitCount = new Map<Suit, number>();
+  const rankCount = new Map<number, number>();
+  for (const id of seen ?? []) {
+    const c = deck.find((x) => x.id === id);
+    if (!c || c.r === 0 || c.s == null) continue;
+    suitCount.set(c.s, (suitCount.get(c.s) ?? 0) + 1);
+    rankCount.set(c.r, (rankCount.get(c.r) ?? 0) + 1);
+  }
+  const cands: Omit<OppGuess, 'seat'>[] = [];
+  for (const [s, n] of suitCount) {
+    if (n >= 3) cands.push({ strat: { kind: 'flush', suit: s, score: 0 }, conf: Math.min(0.9, 0.45 + n * 0.09) });
+  }
+  for (const [r, n] of rankCount) {
+    if (n >= 2) cands.push({ strat: { kind: 'rank', rank: r, score: 0 }, conf: Math.min(0.9, 0.4 + n * 0.14) });
+  }
+  cands.sort((a, b) => b.conf - a.conf);
+  if (cands.length === 0) return null;
+  const best: OppGuess = { ...cands[0], seat: opp.seat };
+  // 购买方向佐证：花色芯片→同花，点数芯片→多条（聚焦点数未知，加成给已有候选）
+  const suitChipN = buys.filter((d) => SUIT_CHIP_IDS.has(d)).length;
+  const rankChipN = buys.filter((d) => RANK_CHIP_IDS.has(d)).length;
+  if (best.strat.kind === 'flush') best.conf = Math.min(0.95, best.conf + suitChipN * 0.12);
+  if (best.strat.kind === 'rank') best.conf = Math.min(0.95, best.conf + rankChipN * 0.1);
+  return best;
+}
+
+/** 全场最危险的对手猜测（置信度最高且达到阈值才返回） */
+export function strongestThreat(brain: BotBrain, gs: BloodState, p: BPlayer, minConf = 0.6): OppGuess | null {
+  let best: OppGuess | null = null;
+  for (const o of opponentsOf(gs, p)) {
+    const g = guessOppStrategy(brain, o);
+    if (g && g.conf >= minConf && (!best || g.conf > best.conf)) best = g;
+  }
+  return best;
+}
+
+/** 由猜测策略反推其最可能摆出的牌型（魔术橡皮宣告 / 赌徒虹膜竞猜用） */
+function guessedCat(g: OppGuess): number {
+  if (g.strat.kind === 'flush') return 5; // 同花
+  if (g.strat.kind === 'straight') return 4; // 顺子
+  // 多条：亮牌里该点数已出现 ≥3 次说明成型度高，押四条；否则押葫芦
+  const strat = g.strat;
+  return strat.kind === 'rank' && g.conf >= 0.75 ? 7 : 6;
 }
 
 /** 随对局推进增量更新记忆（对决亮牌、公开的换牌张数） */
@@ -55,6 +223,16 @@ export function updateBrains(brains: Map<string, BotBrain>, botIds: string[], gs
       if (p.id === id) continue;
       const m = /换牌 (\d+)张/.exec(p.lastAction ?? '');
       if (m) brain.swapped.set(p.seat, Number(m[1]));
+    }
+    // 对手的公开购买宣告（购买强化芯片/道具的方向暴露其构筑策略）
+    if (gs.announce) {
+      const buyer = gs.players.find((x) => x.seat === gs.announce!.buyerSeat);
+      if (buyer && buyer.id !== id && gs.announce.at !== (brain.oppBuyAt.get(buyer.seat) ?? -1)) {
+        brain.oppBuyAt.set(buyer.seat, gs.announce.at);
+        const list = brain.oppBuys.get(buyer.seat) ?? [];
+        list.push(gs.announce.defId);
+        brain.oppBuys.set(buyer.seat, list.slice(-12));
+      }
     }
   }
 }
@@ -91,20 +269,42 @@ function beats(a: { cat: number; pips: number }, b: { cat: number; pips: number 
   return a.cat > b.cat || (a.cat === b.cat && a.pips > b.pips);
 }
 
-/** 枚举手牌中选出最优 keep 张（返回牌集合） */
-function bestKeep(gs: BloodState, p: BPlayer, keep: number): BCard[] {
-  const n = Math.min(keep, p.hand.length);
-  const combos = combinations(p.hand, n);
-  let best: BCard[] = p.hand.slice(0, n);
-  let bestEv = { cat: -1, pips: -1 };
+/** 枚举牌池中选出最优 keep 张（默认手牌；构筑阶段传 setupHand）；策略进度加成用于在同等牌型间偏向长线目标 */
+function bestKeep(gs: BloodState, p: BPlayer, keep: number, strat?: Strat, src: BCard[] = p.hand, deadline = 0): BCard[] {
+  const n = Math.min(keep, src.length);
+  const combos = combinations(src, n);
+  let best: BCard[] = src.slice(0, n);
+  let bestVal = -Infinity;
   for (const c of combos) {
+    if (deadline && Date.now() > deadline) break; // 预算耗尽：返回当前最优（时间压力下降级）
     const ev = evalPlay(gs, p, c);
-    if (ev.cat > bestEv.cat || (ev.cat === bestEv.cat && ev.pips > bestEv.pips)) {
-      bestEv = ev;
+    // 牌型一级权重 12，策略加成上限约 3.6，不会越级压过真实牌型
+    const val = ev.cat * 12 + ev.pips * 0.01 + (strat ? stratBonus(c, strat) : 0);
+    if (val > bestVal) {
+      bestVal = val;
       best = c;
     }
   }
   return best;
+}
+
+/** 策略进度加成：组合中贡献策略目标的牌越多分越高（JOKER 计入任意目标） */
+function stratBonus(cards: BCard[], strat: Strat): number {
+  const isWild = (c: BCard): boolean => c.r === 0;
+  switch (strat.kind) {
+    case 'rank': {
+      const n = cards.filter((c) => c.r === strat.rank || isWild(c)).length;
+      return n >= 2 ? (n - 1) * 1.2 : n * 0.3;
+    }
+    case 'flush': {
+      const n = cards.filter((c) => c.s === strat.suit || isWild(c)).length;
+      return n >= 3 ? n * 0.7 : n * 0.25;
+    }
+    case 'straight': {
+      const n = cards.filter((c) => (c.r >= strat.lo && c.r < strat.lo + 5) || isWild(c)).length;
+      return n * 0.4;
+    }
+  }
 }
 
 function combinations<T>(arr: T[], k: number): T[][] {
@@ -127,8 +327,8 @@ function combinations<T>(arr: T[], k: number): T[][] {
 
 /* ---------------- 蒙特卡洛推演（仅出牌阶段） ---------------- */
 
-const MC_SAMPLES = 32;
-const MC_DEADLINE_MS = 40; // 留 10ms 余量给 50ms 硬上限
+const MC_SAMPLES = 64;
+const MC_DEADLINE_MS = 200; // 出牌决策推演预算（毫秒）；预算耗尽按当前最优降级返回
 
 /** 按公开信号采样对手手牌：换牌多→偏弱，没换→偏强 */
 function sampleOppHand(brain: BotBrain, opp: BPlayer): BCard[] {
@@ -152,21 +352,23 @@ function sampleOppHand(brain: BotBrain, opp: BPlayer): BCard[] {
   return hand;
 }
 
-/** 推演胜率：我的候选牌对全部已锁定对手的采样胜率 */
+/** 推演胜率：我的候选牌对全部已锁定对手的采样胜率（deadline 为整次决策共享的时间预算） */
 function monteCarloWinProb(
   gs: BloodState,
   brain: BotBrain,
   me: BPlayer,
   cards: BCard[],
   samples = MC_SAMPLES,
+  deadline = 0,
 ): number {
+  if (deadline && Date.now() > deadline) return 0.35; // 预算耗尽：返回偏保守的中性估计
   const start = Date.now();
   const opps = gs.players.filter((o) => o.id !== me.id && o.locked);
   if (opps.length === 0) return 1;
   const mine = evalPlay(gs, me, cards);
   let score = 0;
   for (let s = 0; s < samples; s++) {
-    if ((s & 7) === 7 && Date.now() - start > MC_DEADLINE_MS) break;
+    if (deadline ? Date.now() > deadline : (s & 7) === 7 && Date.now() - start > MC_DEADLINE_MS) break;
     let beatAll = true;
     let ties = 0;
     for (const o of opps) {
@@ -213,21 +415,41 @@ function mostTicketsOpp(gs: BloodState, p: BPlayer): BPlayer | null {
   return opponentsOf(gs, p).sort((a, b) => b.tickets - a.tickets)[0] ?? null;
 }
 
-/** 自己弃牌区中最该删除的牌：孤立的低点数优先（保留成对/高牌） */
-function worstDiscardCards(p: BPlayer, n: number): string[] {
-  const rankCount = new Map<number, number>();
-  for (const c of p.discard) rankCount.set(c.r, (rankCount.get(c.r) ?? 0) + 1);
+function bySeatOf(gs: BloodState, seat: number): BPlayer | null {
+  return gs.players.find((x) => x.seat === seat) ?? null;
+}
+
+/** 自己弃牌区中最该删除的牌：孤立低点数优先，且永不删除策略目标牌（保留成对/高牌） */
+export function worstDiscardCards(p: BPlayer, n: number, strat?: Strat): string[] {
+  const rankFreq = new Map<number, number>();
+  for (const c of p.discard) rankFreq.set(c.r, (rankFreq.get(c.r) ?? 0) + 1);
   const scored = p.discard
-    .map((c) => ({ c, score: (rankCount.get(c.r) ?? 1) * 20 + c.r }))
+    .map((c) => {
+      let score = (rankFreq.get(c.r) ?? 1) * 20 + c.r;
+      if (strat) score += stratKeepWeight(c, strat); // 策略牌 150-500 分，远高于普通牌最高 94
+      return { c, score };
+    })
     .sort((a, b) => a.score - b.score);
   return scored.slice(0, Math.max(0, n)).map((x) => x.c.id);
 }
 
-/** 芯片可插入的弃牌区目标（无芯片、点数合法、非 JOKER 限制） */
-function insertableTarget(gs: BloodState, p: BPlayer, defId: string): BCard | null {
+/** 策略相关牌的保留权重：目标牌绝不被删，窗口内顺子牌次之 */
+function stratKeepWeight(c: BCard, strat: Strat): number {
+  const wild = c.r === 0;
+  switch (strat.kind) {
+    case 'rank':
+      return c.r === strat.rank || wild ? 500 : 0;
+    case 'flush':
+      return wild ? 500 : c.s === strat.suit ? 300 : 0;
+    case 'straight':
+      return (c.r >= strat.lo && c.r < strat.lo + 5) || wild ? 150 : 0;
+  }
+}
+
+/** 芯片可插入的弃牌区目标（无芯片、点数合法、非 JOKER 限制）；有策略时优先服务策略目标 */
+function insertableTarget(gs: BloodState, p: BPlayer, defId: string, strat?: Strat): BCard | null {
   const def = BLOOD_MARKET_BY_ID.get(defId);
   if (!def) return null;
-  const best5 = new Set(bestKeep(gs, p, 5).map((c) => c.id));
   const candidates = p.discard.filter((c) => {
     if (p.chips.some((ch) => ch.on === c.id)) return false;
     if (def.noJoker && c.s == null) return false;
@@ -237,7 +459,62 @@ function insertableTarget(gs: BloodState, p: BPlayer, defId: string): BCard | nu
     }
     return true;
   });
-  return candidates.sort((a, b) => Number(best5.has(b.id)) - Number(best5.has(a.id)) || b.r - a.r)[0] ?? null;
+  if (candidates.length === 0) return null;
+  if (strat) {
+    const preferred = candidates.filter((c) => chipServesStrat(c, def.effect, strat));
+    if (preferred.length > 0) return pickChipHost(preferred);
+  }
+  const best5 = new Set(bestKeep(gs, p, 5, strat).map((c) => c.id));
+  return pickChipHost(candidates, best5);
+}
+
+/** 策略偏好目标：点数芯片转化为目标点数，花色芯片转成目标花色 */
+function chipServesStrat(c: BCard, eff: BloodEffect, strat: Strat): boolean {
+  switch (strat.kind) {
+    case 'rank':
+      return eff.k === 'rankMod' ? c.r + eff.mod === strat.rank : (eff.k === 'rankWild' || eff.k === 'wild') && c.r !== strat.rank;
+    case 'flush':
+      // 红芯片（♦/♥）：宿主为非目标花色的牌才值得插，使其可视为目标花色
+      if (eff.k === 'suit') return eff.suits.includes(strat.suit) && c.s !== strat.suit;
+      if (eff.k === 'suitWild' || eff.k === 'wild') return c.s !== strat.suit;
+      return false;
+    case 'straight':
+      return (eff.k === 'rankWild' || eff.k === 'wild') && !(c.r >= strat.lo && c.r < strat.lo + 5);
+  }
+}
+
+function pickChipHost(cands: BCard[], best5?: Set<string>): BCard {
+  return cands.sort(
+    (a, b) =>
+      Number(best5?.has(b.id) ?? false) - Number(best5?.has(a.id) ?? false) || b.r - a.r,
+  )[0];
+}
+
+/** 芯片对当前策略的额外价值（叠在基础分上，决定买不买） */
+function chipStratBonus(p: BPlayer, eff: BloodEffect, strat: Strat): number {
+  const alive = aliveCards(p);
+  switch (strat.kind) {
+    case 'rank': {
+      if (eff.k === 'rankMod') {
+        const need = strat.rank - eff.mod;
+        const n = alive.filter((c) => c.r === need).length;
+        return n > 0 ? 0.5 + Math.min(3, n) * 0.35 : 0;
+      }
+      if (eff.k === 'rankWild' || eff.k === 'wild') return 0.7;
+      return 0;
+    }
+    case 'flush': {
+      if (eff.k === 'suit') return eff.suits.includes(strat.suit) ? 1.2 : 0;
+      if (eff.k === 'suitWild') return 1.2;
+      if (eff.k === 'wild') return 1.0;
+      return 0;
+    }
+    case 'straight': {
+      if (eff.k === 'rankWild') return 1.2;
+      if (eff.k === 'wild') return 1.0;
+      return 0;
+    }
+  }
 }
 
 function tryOr(primary: () => void, fallback: () => void): void {
@@ -262,7 +539,8 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'setup': {
-      const keep = new Set(bestKeep(gs, p, 5).map((c) => c.id));
+      // 初始构筑：按长线策略在 8 张构筑牌里保留最优 5 张，删掉对策略无贡献的牌（删牌构成决定后续策略走向）
+      const keep = new Set(bestKeep(gs, p, 5, curStrategy(brain, p), p.setupHand).map((c) => c.id));
       const removed = p.setupHand.filter((c) => !keep.has(c.id)).map((c) => c.id).slice(0, 4);
       blood.bSetup(gs, p.id, removed, now);
       return true;
@@ -280,6 +558,30 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       } else {
         blood.bUseItem(gs, p.id, null, now);
       }
+      return true;
+    }
+    case 'itemAsk': {
+      // 阶段边界道具询问：按效果各自的价值启发决定使用或跳过
+      const eff = BLOOD_MARKET_BY_ID.get(prompt.defId ?? '')?.effect;
+      const best = bestKeep(gs, p, Math.min(5, p.hand.length), curStrategy(brain, p));
+      let use = true;
+      switch (eff?.k) {
+        case 'secretNoteFx':
+          use = p.blood >= 4; // 保留基本血筹储备
+          break;
+        case 'eraserFx':
+          use = monteCarloWinProb(gs, brain, p, best) < 0.3; // 自己弱势时压对手牌型
+          break;
+        case 'loudspeakerFx':
+          use = monteCarloWinProb(gs, brain, p, best) > 0.7;
+          break;
+        case 'dealerLicense':
+          use = evalPlay(gs, p, best).pips >= 38;
+          break;
+        default:
+          use = true; // 信号干扰器：直接使用（目标在选择步骤决定）
+      }
+      blood.bItemAsk(gs, p.id, use, now);
       return true;
     }
     case 'steal': {
@@ -326,7 +628,7 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'remove': {
-      return actRemove(gs, p, now);
+      return actRemove(brain, gs, p, now);
     }
     case 'reorg': {
       const reshuffle = p.discard.length >= 6 || p.draw.length <= 2;
@@ -360,7 +662,11 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return false;
     }
     case 'signalTarget': {
-      const t = opponentsOf(gs, p).sort((a, b) => b.hand.length - a.hand.length)[0];
+      // 优先干扰策略成型度最高的对手（其手牌是策略引擎），其次手牌最多者
+      const threat = strongestThreat(brain, gs, p, 0.5);
+      const t = threat
+        ? bySeatOf(gs, threat.seat) ?? opponentsOf(gs, p).sort((a, b) => b.hand.length - a.hand.length)[0]
+        : opponentsOf(gs, p).sort((a, b) => b.hand.length - a.hand.length)[0];
       if (t) {
         blood.bSecretTarget(gs, p.id, t.seat, now);
         return true;
@@ -398,16 +704,24 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'irisGuess': {
-      const t = opponentsOf(gs, p).sort((a, b) => (brain.swapped.get(a.seat) ?? 3) - (brain.swapped.get(b.seat) ?? 3))[0];
+      // 竞猜目标取置信度最高的策略猜测；无猜测时回退"换牌少=手牌强"启发式
+      const threat = strongestThreat(brain, gs, p, 0.5);
+      const t = threat
+        ? bySeatOf(gs, threat.seat) ??
+          opponentsOf(gs, p).sort((a, b) => (brain.swapped.get(a.seat) ?? 3) - (brain.swapped.get(b.seat) ?? 3))[0]
+        : opponentsOf(gs, p).sort((a, b) => (brain.swapped.get(a.seat) ?? 3) - (brain.swapped.get(b.seat) ?? 3))[0];
       if (t) {
-        blood.bIrisGuess(gs, p.id, t.seat, 2, now);
+        const guess = guessOppStrategy(brain, t);
+        blood.bIrisGuess(gs, p.id, t.seat, guess ? guessedCat(guess) : 2, now);
         return true;
       }
       return false;
     }
     case 'eraserClaim': {
+      // 宣告最危险对手最可能摆出的牌型，将其降为高牌；无猜测时回退旧启发式
+      const threat = strongestThreat(brain, gs, p);
       const anyStrongOpp = opponentsOf(gs, p).some((o) => (brain.swapped.get(o.seat) ?? 3) === 0);
-      blood.bEraserClaim(gs, p.id, anyStrongOpp ? 6 : 4, now);
+      blood.bEraserClaim(gs, p.id, threat ? guessedCat(threat) : anyStrongOpp ? 6 : 4, now);
       return true;
     }
     case 'revealDecide': {
@@ -651,7 +965,8 @@ function actSwap(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bool
   }
   const isTarot = ch === 'tarot';
   const maxDrop = Math.min(isTarot ? 2 : charSwapMax(ch), p.hand.length);
-  const keep = new Set(bestKeep(gs, p, 5).map((c) => c.id));
+  // 按长线策略选保留的 5 张：弃掉对策略无贡献的牌，往目标牌型凑
+  const keep = new Set(bestKeep(gs, p, 5, curStrategy(brain, p)).map((c) => c.id));
   const ranked = [...p.hand].sort((a, b) => a.r - b.r);
   let drop = ranked.filter((c) => !keep.has(c.id)).slice(0, maxDrop);
   if (drop.length === 0) drop = ranked.slice(0, Math.min(maxDrop, p.hand.length));
@@ -665,28 +980,12 @@ function actSwap(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bool
 
 /* ---- 出牌决策：蒙特卡洛推演 ---- */
 function actPlay(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boolean {
-  // 物品优先：广播喇叭仅在高胜率时宣告；荷官证在点数领先时使用
+  // 广播喇叭/荷官证/魔术橡皮已改为对决前窗口询问（itemAsk），此处只决定暗扣哪 5 张
   const n = Math.min(5, p.hand.length);
-  const best = bestKeep(gs, p, n);
-  const winProb = monteCarloWinProb(gs, brain, p, best);
-  const loud = p.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'loudspeakerFx');
-  if (loud && winProb > 0.7) {
-    blood.bUseItem(gs, p.id, loud.id, now);
-    return true;
-  }
-  const lic = p.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'dealerLicense');
-  if (lic) {
-    const ev = evalPlay(gs, p, best);
-    if (ev.pips >= 38) {
-      blood.bUseItem(gs, p.id, lic.id, now);
-      return true;
-    }
-  }
-  const eraser = p.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'eraserFx');
-  if (eraser && winProb < 0.3) {
-    blood.bUseItem(gs, p.id, eraser.id, now);
-    return true;
-  }
+  // 整次出牌决策共享推演预算（选牌/候选评估/多候选推演合计）
+  const playDeadline = Date.now() + MC_DEADLINE_MS;
+  const best = bestKeep(gs, p, n, curStrategy(brain, p), p.hand, playDeadline);
+  const winProb = monteCarloWinProb(gs, brain, p, best, MC_SAMPLES, playDeadline);
   // 候选：最优解 + 次优 + 角色效果导向，取推演 EV 最高者
   const candidates: BCard[][] = [];
   const pushCandidate = (cards: BCard[]): void => {
@@ -706,7 +1005,7 @@ function actPlay(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bool
   let bestPick = combos[0]?.c ?? p.hand.slice(0, n);
   let bestEv = -1;
   for (const cand of candidates) {
-    const prob = candidates.length > 1 ? monteCarloWinProb(gs, brain, p, cand, 24) : winProb;
+    const prob = candidates.length > 1 ? monteCarloWinProb(gs, brain, p, cand, 24, playDeadline) : winProb;
     const ev = evalPlay(gs, p, cand);
     const value = prob + charBonus(p, cand, ev);
     if (value > bestEv) {
@@ -720,27 +1019,37 @@ function actPlay(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bool
 
 /* ---- 购买决策：局势打分 ---- */
 function actBuy(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boolean {
-  void brain;
+  const strat = curStrategy(brain, p);
   const nearWinSelf = p.tickets >= gs.target - 8;
   const nearWinOpp = opponentsOf(gs, p).some((o) => o.tickets >= gs.target - 8);
+  // 对手策略成型度威胁：有高置信猜测时提前防御（破坏类/消磁枪/虹膜竞猜）
+  const threat = strongestThreat(brain, gs, p);
   const poor = p.blood <= 5;
   const hasChipInDiscard = p.discard.some((c) => p.chips.some((ch) => ch.on === c.id));
+  // 保留底金：对手接近胜利时多留血防对决期破坏，平时 4 血够弹簧/删牌应急
+  const reserve = nearWinOpp ? 6 : 4;
 
   const scoreDef = (defId: string): number => {
     const def = BLOOD_MARKET_BY_ID.get(defId);
     if (!def) return -1;
-    if (def.kind === 'chip') return insertableTarget(gs, p, defId) ? 2 : -1;
+    // 芯片：可插入即有价值，与策略匹配（转化为目标点数/花色）时大幅加分
+    if (def.kind === 'chip') {
+      const target = insertableTarget(gs, p, defId, strat);
+      if (!target) return -1;
+      return 2.4 + chipStratBonus(p, def.effect, strat);
+    }
     switch (def.id) {
       case 'coatWin': case 'encrypt': return nearWinSelf ? 6 : 2;
       case 'dividend': return p.privilege ? 4 : 0;
-      case 'betDeal': return poor ? 4 : 1;
-      case 'bloodShare': return poor ? 3 : 1;
+      case 'betDeal': return p.blood >= 8 ? 3 : 1; // 血量充裕时才博收益
+      case 'bloodShare': return p.blood >= 8 ? 3 : 1;
       case 'violentDel': case 'pinpoint': case 'poison': case 'freezeCar': case 'amnesia':
-        return nearWinOpp ? 5 : 2;
+        return nearWinOpp ? 5 : threat ? 3 : 2; // 对手策略成型 → 提前拆解
+      case 'irisGamble': return threat ? 3.5 : 2; // 猜得准才值得买
       case 'ghostHand': return p.privilege ? 0 : 3;
       case 'pullChip': return hasChipInDiscard ? 4 : 0;
+      case 'demag': return threat ? 3.5 : 3; // 对手依赖芯片成型 → 消磁价值高
       case 'closingS': case 'closingM': case 'closingL': return poor ? 1 : 0;
-      case 'loudspeaker': return 1;
       default: return 2;
     }
   };
@@ -754,13 +1063,14 @@ function actBuy(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boole
     if (!best || value > best.value) best = { slot: i, value };
   });
   const chosen = best as { slot: number; value: number } | null;
-  if (chosen && chosen.value >= 1.5) {
+  // 门槛 1 分：默认 2 分的 3 费实用牌（干扰器/屏障/橡皮等）也能过线，贵牌靠情境高分
+  if (chosen && chosen.value >= 1) {
     const def = BLOOD_MARKET_BY_ID.get(gs.market[chosen.slot].def!);
     let cost = def?.cost ?? 0;
     if (blood.effChar(p) === 'mascot' && !p.firstBuyUsed) cost = Math.floor(cost / 2);
     if (blood.effChar(p) === 'wei' && def?.kind === 'chip') cost = Math.max(0, cost - 2);
-    if (p.blood - cost >= 3) {
-      const insertInto = def?.kind === 'chip' ? insertableTarget(gs, p, def.id)?.id : undefined;
+    if (p.blood - cost >= reserve) {
+      const insertInto = def?.kind === 'chip' ? insertableTarget(gs, p, def.id, strat)?.id : undefined;
       blood.bBuy(gs, p.id, chosen.slot, insertInto, now);
       return true;
     }
@@ -770,16 +1080,17 @@ function actBuy(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boole
 }
 
 /* ---- 删牌决策 ---- */
-function actRemove(gs: BloodState, p: BPlayer, now: number): boolean {
+function actRemove(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boolean {
+  const strat = curStrategy(brain, p);
   const ch = blood.effChar(p);
   if (ch === 'liu') {
     const n = Math.min(p.discard.length, Math.floor(p.blood));
-    blood.bRemove(gs, p.id, worstDiscardCards(p, n), now);
+    blood.bRemove(gs, p.id, worstDiscardCards(p, n, strat), now);
     return true;
   }
   const freeN = ch === 'hacker' ? 2 : ch === 'biker' || ch === 'twinA' ? 0 : 1;
   const budget = freeN + Math.max(0, Math.floor((p.blood - 6) / 2)); // 保留 6 血筹底线
-  const cards = worstDiscardCards(p, Math.max(0, budget));
+  const cards = worstDiscardCards(p, Math.max(0, budget), strat);
   blood.bRemove(gs, p.id, cards, now);
   return true;
 }

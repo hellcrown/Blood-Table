@@ -246,6 +246,9 @@ export class RoomManager {
       case 'bBarrierDecide':
         blood.bBarrierDecide(bs, pid, msg.use, now);
         break;
+      case 'bItemAsk':
+        blood.bItemAsk(bs, pid, msg.use, now);
+        break;
       case 'bDemagPick':
         blood.bDemagPick(bs, pid, msg.cardId, msg.defId, now);
         break;

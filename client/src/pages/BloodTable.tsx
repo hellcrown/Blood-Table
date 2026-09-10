@@ -32,7 +32,9 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [
 const PHASES: { key: BloodView['phase']; label: string }[] = [
   { key: 'pick', label: '选将' },
   { key: 'swap', label: '换牌' },
+  { key: 'swapItem', label: '换牌结束' },
   { key: 'play', label: '出牌' },
+  { key: 'revealPre', label: '对决前' },
   { key: 'reveal', label: '对决' },
   { key: 'settle', label: '结算' },
   { key: 'buy', label: '购买' },
@@ -259,6 +261,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [cursePick, setCursePick] = useState<string[]>([]);
   /** 芯片购买：{defId, slot} —— 点购买后立即弹出弃牌区选牌 */
   const [chipBuying, setChipBuying] = useState<{ defId: string; slot: number } | null>(null);
+  // 插入芯片二次确认：点选目标牌后弹出（防误触），确认才真正发送插入
+  const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
   /** 角色技能详情弹层（选将确认 / 座位徽章查看共用） */
   const [charDetail, setCharDetail] = useState<string | null>(null);
@@ -374,12 +378,17 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '血幕镀层（夺）：点击对方面板掠夺 1 血筹';
       case 'revealItem':
         return '对决宣告：是否使用道具';
+      case 'itemAsk': {
+        const def = BLOOD_MARKET_BY_ID.get(view.prompt.defId ?? '');
+        const boundary = view.phase === 'revealPre' ? '对决阶段前' : '换牌阶段结束';
+        return `${boundary}：是否使用【${def?.name ?? '道具'}】？（${def?.text ?? ''}）`;
+      }
       case 'sdConfirm':
         return '对决展示：关闭演示浮层即确认，全员确认后统一进入购买阶段';
       case 'buy':
         return '购买：点击黑市牌购买（芯片会弹出弃牌区选插入目标），或跳过';
       case 'insertChip':
-        return '强化芯片：从弃牌区选一张牌插入（每张牌限 1 枚，点数范围 2-14）';
+        return '强化芯片：从弃牌区选一张牌插入，点选后需二次确认（每张牌限 1 枚，点数范围 2-14）';
       case 'secretDelete':
         return `廉价删除：从弃牌区选至多 ${view.prompt.max ?? 0} 张删除`;
       case 'violentTarget':
@@ -499,15 +508,14 @@ export function BloodTable({ view }: { view: BloodView }) {
   const onDiscardClick = (c: BloodCardView) => {
     if (chipBuying) {
       if (c.chipIds.length > 0) return;
-      send({ t: 'bBuy', slot: chipBuying.slot, insertInto: c.id });
-      setChipBuying(null);
+      // 先弹确认框，确认后才发送购买+插入
+      setInsertConfirm({ cardId: c.id, defId: chipBuying.defId, buySlot: chipBuying.slot });
       return;
     }
-    // 待插入芯片状态（如货箱盲掏免费获得的芯片）：点击弃牌区的牌完成插入
+    // 待插入芯片状态（如货箱盲掏免费获得的芯片）：点选目标牌后弹确认框
     if (view.prompt.k === 'insertChip') {
       if (c.chipIds.length > 0) return;
-      send({ t: 'bInsertChip', cardId: c.id });
-      setZoneModal(null);
+      setInsertConfirm({ cardId: c.id, defId: view.prompt.defId ?? '' });
       return;
     }
     if (view.prompt.k === 'secretDelete') {
@@ -1000,46 +1008,12 @@ export function BloodTable({ view }: { view: BloodView }) {
                       </button>
                     )}
                     {view.me.items.some((it) => it.name === '皮下密信') && (
-                      <button
-                        className="btn"
-                        disabled={view.me.blood < 2}
-                        onClick={() =>
-                          send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '皮下密信')!.id })
-                        }
-                      >
-                        📜 皮下密信（2🩸抽3张）
-                      </button>
+                      <span className="hint">📜 皮下密信：换牌结束后会单独询问是否使用</span>
                     )}
                     {view.me.items.some((it) => it.name === '信号干扰器') && (
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '信号干扰器')!.id })
-                        }
-                      >
-                        📡 信号干扰器（选一名玩家弃1抽1）
-                      </button>
+                      <span className="hint">📡 信号干扰器：换牌结束后会单独询问是否使用</span>
                     )}
                   </>
-                )}
-                {view.prompt.k === 'play' &&
-                  ['魔术橡皮', '广播喇叭', '赌徒虹膜'].map((nm) => {
-                    const it = view.me.items.find((i) => i.name === nm);
-                    return it ? (
-                      <button key={it.id} className="btn" onClick={() => send({ t: 'bUseItem', itemId: it.id })}>
-                        使用【{nm}】
-                      </button>
-                    ) : null;
-                  })}
-                {view.prompt.k === 'play' && view.me.items.some((it) => it.name === '荷官证') && (
-                  <button
-                    className="btn"
-                    onClick={() =>
-                      send({ t: 'bUseItem', itemId: view.me.items.find((it) => it.name === '荷官证')!.id })
-                    }
-                  >
-                    ⚖️ 使用荷官证（宣告先比总点数）
-                  </button>
                 )}
                 {view.prompt.k === 'play' && (
                   <button
@@ -1057,6 +1031,40 @@ export function BloodTable({ view }: { view: BloodView }) {
                     确认出牌
                   </button>
                 )}
+                {view.prompt.k === 'play' &&
+                  view.me.items.some((it) => it.name === '魔术橡皮') && (
+                    <span className="hint">【魔术橡皮】：换牌结束后会单独询问是否使用</span>
+                  )}
+                {view.prompt.k === 'play' &&
+                  ['广播喇叭', '赌徒虹膜', '荷官证'].map((nm) =>
+                    view.me.items.some((it) => it.name === nm) ? (
+                      <span key={nm} className="hint">
+                        【{nm}】：全员出牌后会单独询问是否使用
+                      </span>
+                    ) : null,
+                  )}
+                {view.prompt.k === 'itemAsk' && (() => {
+                  const def = BLOOD_MARKET_BY_ID.get(view.prompt.defId ?? '');
+                  const needBlood = def?.effect.k === 'secretNoteFx' ? 2 : 0;
+                  const boundary = view.phase === 'revealPre' ? '对决阶段前' : '换牌阶段结束';
+                  return (
+                    <>
+                      <span className="hint">
+                        {boundary}：是否使用【{def?.name ?? '道具'}】？（{def?.text ?? ''}）
+                      </span>
+                      <button
+                        className="btn primary"
+                        disabled={view.me.blood < needBlood}
+                        onClick={() => send({ t: 'bItemAsk', use: true })}
+                      >
+                        使用【{def?.name ?? '道具'}】
+                      </button>
+                      <button className="btn" onClick={() => send({ t: 'bItemAsk', use: false })}>
+                        不使用
+                      </button>
+                    </>
+                  );
+                })()}
                 {view.prompt.k === 'revealItem' && (
                   <>
                     {view.me.items
@@ -2164,6 +2172,65 @@ export function BloodTable({ view }: { view: BloodView }) {
           </div>
         </div>
       )}
+
+      {/* 插入芯片二次确认框：展示芯片效果与目标牌，确认才发送 */}
+      {insertConfirm && (() => {
+        const target = view.me.discard.find((c) => c.id === insertConfirm.cardId);
+        const def = BLOOD_MARKET_BY_ID.get(insertConfirm.defId);
+        const mod = def?.effect.k === 'rankMod' ? def.effect.mod : null;
+        const baseRank = target ? effRankOf(target).r : 0;
+        const newRank = mod != null ? Math.min(14, Math.max(2, baseRank + mod)) : baseRank;
+        return (
+          <div className="overlay" onClick={() => setInsertConfirm(null)}>
+            <div className="panel insert-confirm" onClick={(e) => e.stopPropagation()}>
+              <h3>确认插入强化芯片？</h3>
+              <div className="insert-confirm-body">
+                {target && <BCard c={target} size="lg" />}
+                <div className="detail-info">
+                  <div className="detail-line">
+                    芯片：<b>【{def?.name ?? '?'}】</b>
+                    {def && <span className="mc-kind k-chip">强化芯片</span>}
+                  </div>
+                  <div className="detail-line">效果：{def?.text ?? ''}</div>
+                  {target && (
+                    <div className="detail-line">
+                      插入目标：<b>{cardLabel(target)}</b>
+                      {mod != null && mod !== 0 && target.r !== 0 && (
+                        <span className={mod > 0 ? 'mod-note up' : 'mod-note down'}>
+                          （点数 {baseRank} → {newRank}）
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {insertConfirm.buySlot != null && (
+                    <div className="detail-line hint">插入后立即生效并随牌移动；芯片一旦插入不可主动取下（拔除芯片道具除外）</div>
+                  )}
+                </div>
+              </div>
+              <div className="panel-actions" style={{ marginTop: 14 }}>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    if (insertConfirm.buySlot != null) {
+                      send({ t: 'bBuy', slot: insertConfirm.buySlot, insertInto: insertConfirm.cardId });
+                      setChipBuying(null);
+                    } else {
+                      send({ t: 'bInsertChip', cardId: insertConfirm.cardId });
+                    }
+                    setInsertConfirm(null);
+                    setZoneModal(null);
+                  }}
+                >
+                  ✅ 确认插入
+                </button>
+                <button className="btn" onClick={() => setInsertConfirm(null)}>
+                  取消（重选目标牌）
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 黑市牌宣告浮窗：全员可见（按效果类型定制特效） */}
       {view.announce && annHiddenAt !== view.announce.at && (

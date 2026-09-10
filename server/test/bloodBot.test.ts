@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { bloodTick, createBloodGame } from '../src/blood/engine';
 import { promptFor } from '../src/blood/view';
-import { botAct, createBrain, updateBrains, type BotBrain } from '../src/blood/botAI';
-import type { BCard, BloodState } from '../src/blood/types';
+import { botAct, createBrain, updateBrains, deriveStrategy, curStrategy, worstDiscardCards, guessOppStrategy, strongestThreat, type BotBrain } from '../src/blood/botAI';
+import type { BCard, BPlayer, BloodState } from '../src/blood/types';
 
 const NOW = 1000;
 
@@ -54,16 +54,19 @@ describe('血色机器人 · 完整对局', () => {
     expect(gs.final).not.toBeNull();
   }, 60_000);
 
-  it('出牌决策（含推演）单次 < 50ms', () => {
+  it('出牌决策（含推演）单次 < 250ms', () => {
     const gs = createBloodGame(2, makePlayers(2), NOW, true);
     driveBots(gs, ['p0', 'p1'], 'play');
     const brains = new Map([['p0', createBrain()]]);
     const p0 = gs.players[0];
     if (gs.phase === 'play' && !p0.locked) {
+      // 预热 JIT：在状态快照上先跑一次（首次调用的解释器/内联缓存成本不代表稳态）
+      const snapshot = JSON.parse(JSON.stringify(gs)) as BloodState;
+      botAct(createBrain(), snapshot, 'p0', NOW);
       const t0 = performance.now();
       botAct(brains.get('p0')!, gs, 'p0', NOW);
       const cost = performance.now() - t0;
-      expect(cost).toBeLessThan(50);
+      expect(cost).toBeLessThan(250); // 推演预算 200ms + 评估开销余量（更长思考时间可接受）
     }
   });
 });
@@ -128,25 +131,33 @@ describe('血色机器人 · AI 行为', () => {
     gs.phase = 'remove';
     for (const p of gs.players) p.removeDone = false;
     const p0 = gs.players[0];
+    const brain = createBrain();
+    const strat = curStrategy(brain, p0);
+    const isFocus = (c: BCard): boolean =>
+      (strat.kind === 'rank' && c.r === strat.rank) ||
+      (strat.kind === 'flush' && c.s === strat.suit) ||
+      (strat.kind === 'straight' && c.r >= strat.lo && c.r < strat.lo + 5);
+    // 从牌池自适应取牌：一个非策略目标的成对点数（保留）+ 一个非策略目标的孤立低点数（删除）
     const pool = [...p0.draw, ...p0.hand, ...p0.discard];
-    const used = new Set<string>();
-    const pick = (r: number) => {
-      const f = pool.find((c) => c.r === r && !used.has(c.id));
-      if (!f) throw new Error(`no rank ${r}`);
-      used.add(f.id);
-      return f;
-    };
-    const sevenA = pick(7);
-    const sevenB = pick(7);
-    const three = pick(3);
-    void sevenB;
-    p0.discard = [sevenA, sevenB, three];
+    const byRank = new Map<number, BCard[]>();
+    for (const c of pool) {
+      if (c.r === 0 || isFocus(c)) continue; // 王牌与策略目标牌不参与"待删"候选
+      const list = byRank.get(c.r) ?? [];
+      list.push(c);
+      byRank.set(c.r, list);
+    }
+    const pairEntry = [...byRank.entries()].filter(([, cs]) => cs.length >= 2).sort((a, b) => b[0] - a[0])[0];
+    const junkEntry = [...byRank.entries()].filter(([r]) => pairEntry == null || r !== pairEntry[0]).sort((a, b) => a[0] - b[0])[0];
+    expect(pairEntry && junkEntry).toBeTruthy(); // 牌池中必然存在成对与更低的点数
+    const kept = pairEntry![1].slice(0, 2);
+    const junk = junkEntry![1][0];
+    p0.discard = [...kept, junk];
     p0.hand = [];
-    p0.draw = pool.filter((c) => !used.has(c.id));
-    p0.blood = 7; // 只够免费额度：恰好删 1 张（最孤立的低牌 3）
-    botAct(createBrain(), gs, 'p0', NOW);
-    expect(p0.removed.some((c) => c.id === three.id)).toBe(true);
-    expect(p0.discard.some((c) => c.r === 7)).toBe(true);
+    p0.draw = pool.filter((c) => c.id !== kept[0].id && c.id !== kept[1].id && c.id !== junk.id);
+    p0.blood = 7; // 只够免费额度：恰好删 1 张（最孤立的低牌 junk）
+    botAct(brain, gs, 'p0', NOW);
+    expect(p0.removed.some((c) => c.id === junk.id)).toBe(true);
+    expect(p0.discard.some((c) => c.r === pairEntry![0])).toBe(true);
   });
 
   it('跨回合记忆：对决亮牌后 Brain 记录对手出牌', () => {
@@ -249,5 +260,192 @@ describe('血色机器人 · 房间管理', () => {
     vi.setSystemTime(new Date(NOW + 6 * 60_000));
     mgr.tickAll();
     expect(m.rooms.size).toBe(0);
+  });
+});
+
+describe('血色机器人 · 长线构筑策略', () => {
+  /** 构造一局并返回 p0（活牌由调用方自行装填） */
+  function freshP0(): { gs: BloodState; p: BPlayer; brain: BotBrain } {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const p = gs.players[0];
+    return { gs, p, brain: createBrain() };
+  }
+
+  const card = (r: number, s: BCard['s']): BCard => ({ id: `t${r}${s ?? 'j'}${Math.random().toString(36).slice(2, 6)}`, r, s });
+
+  it('满配牌库：默认选中主点数多条策略（高点数优先）', () => {
+    const { p } = freshP0();
+    const alive: BCard[] = [];
+    for (const s of ['s', 'h', 'd', 'c'] as const) for (let r = 2; r <= 14; r++) alive.push(card(r, s));
+    alive.push(card(0, null), card(0, null));
+    p.draw = alive;
+    const ranked = deriveStrategy(p);
+    expect(ranked[0].kind).toBe('rank');
+    expect(ranked[0].kind === 'rank' && ranked[0].rank).toBe(14); // 四条 A 分数最高
+  });
+
+  it('构筑删光了方片：策略自动转向，不再选方片同花', () => {
+    const { p } = freshP0();
+    const alive: BCard[] = [];
+    for (let r = 2; r <= 14; r++) alive.push(card(r, 's')); // 黑桃 13 张
+    for (let r = 2; r <= 12; r++) alive.push(card(r, 'c')); // 梅花 11 张
+    for (let r = 2; r <= 11; r++) alive.push(card(r, 'h')); // 红心 10 张
+    alive.push(card(9, 'd'), card(5, 'd')); // 方片仅剩 2 张（构筑时被删光）
+    alive.push(card(9, 'h'), card(9, 's'), card(9, 'c')); // 三张 9
+    p.draw = alive;
+    const ranked = deriveStrategy(p);
+    expect(ranked.some((s) => s.kind === 'flush' && s.suit === 'd')).toBe(false);
+    expect(ranked[0].kind).toBe('rank'); // 转向三张 9 的葫芦/四条路线
+    expect(ranked[0].kind === 'rank' && ranked[0].rank).toBe(9);
+  });
+
+  it('策略滞后切换：原策略仍接近最优时保持，明显更差才换', () => {
+    const { p, brain } = freshP0();
+    const alive: BCard[] = [];
+    for (let r = 2; r <= 14; r++) alive.push(card(r, 's'));
+    alive.push(card(9, 'h'), card(9, 'd'), card(9, 'c'), card(9, 's'));
+    p.draw = alive;
+    brain.strategy = { kind: 'rank', rank: 9, score: 7.24 };
+    // 三张 9 被对手删掉两张：rank 9 大幅掉分 → 切换到别的策略
+    p.draw = p.draw.filter((c) => !(c.r === 9)).concat(card(9, 'h'));
+    const next = curStrategy(brain, p);
+    expect(next.kind === 'rank' && next.rank === 9).toBe(false);
+    expect(brain.strategy).toBe(next);
+  });
+
+  it('删牌决策：永不删除策略目标牌', () => {
+    const { p } = freshP0();
+    p.discard = [card(8, 'h'), card(3, 'd'), card(4, 'c'), card(0, null)];
+    const del = worstDiscardCards(p, 2, { kind: 'rank', rank: 8, score: 7 });
+    expect(del).not.toContain(p.discard[0].id); // 8 不删
+    expect(del).not.toContain(p.discard[3].id); // JOKER 不删
+    expect(del).toContain(p.discard[1].id); // 删孤立低牌
+  });
+
+  it('构筑阶段按策略删牌：保留同花主体，删无关杂牌', () => {
+    const { gs, p, brain } = freshP0();
+    gs.phase = 'setup';
+    p.setupRound = 0;
+    p.setupHand = [
+      card(5, 'd'), card(9, 'd'), card(12, 'd'), card(13, 'd'), card(14, 'd'), // 五张方片主体
+      card(3, 's'), card(7, 'h'), card(10, 'c'), card(2, 's'),
+    ];
+    botAct(brain, gs, p.id, NOW);
+    // bSetup：保留的进弃牌区，删除的进删牌区（随后发新一轮构筑牌）
+    expect(p.discard.filter((c) => c.s === 'd').length).toBe(5);
+    expect(p.removed.length).toBe(4);
+    expect(p.removed.every((c) => c.s !== 'd')).toBe(true);
+  });
+
+  it('购买接入策略：点数芯片插向可转化成目标点数的牌', () => {
+    const { gs, p, brain } = freshP0();
+    gs.phase = 'buy';
+    gs.turnSeat = p.seat;
+    p.buyPassed = false;
+    p.blood = 20;
+    p.privilege = false; // 排除特权分红抢购与随机特权影响
+    p.setupHand = []; // 排除随机构筑牌对策略推导的干扰
+    p.discard = [card(8, 'h'), card(5, 'c')];
+    p.draw = [card(9, 's'), card(9, 'h'), card(9, 'd')];
+    p.hand = [];
+    brain.strategy = { kind: 'rank', rank: 9, score: 7 };
+    gs.market[0] = { def: 'calib1', bonus: 0 }; // 校准器+1：8 → 9
+    gs.market[1] = { def: 'refill', bonus: 0 };
+    gs.market[2] = { def: 'dividend', bonus: 0 }; // 无特权 → 低分，避免干扰
+    gs.market[3] = { def: 'closingS', bonus: 0 };
+    gs.market[4] = { def: 'dividend', bonus: 0 };
+    botAct(brain, gs, p.id, NOW);
+    const chip = p.chips.find((ch) => ch.def === 'calib1');
+    expect(chip).toBeTruthy();
+    expect(p.discard.find((c) => c.id === chip!.on)?.r).toBe(8); // 插在 8 上凑成第 4 张 9
+  });
+});
+
+describe('血色机器人 · 对手策略猜测', () => {
+
+  /** 座位 deck 中 (点数,花色) 对应的牌 id（与 seatDeck 发牌顺序一致） */
+  function seenId(seat: number, r: number, s: 's' | 'h' | 'd' | 'c'): string {
+    const suits = ['s', 'h', 'd', 'c'];
+    let n = 0;
+    for (const ss of suits) {
+      for (let rr = 2; rr <= 14; rr++) {
+        if (ss === s && rr === r) return `c${seat}-${n}`;
+        n++;
+      }
+    }
+    throw new Error('unreachable');
+  }
+
+  it('亮牌直方图：反复亮红心 → 猜同花红心，带座位号', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const brain = createBrain();
+    brain.seen.set(1, new Set([seenId(1, 3, 'h'), seenId(1, 7, 'h'), seenId(1, 12, 'h')]));
+    const g = guessOppStrategy(brain, gs.players[1]);
+    expect(g).not.toBeNull();
+    expect(g!.strat.kind).toBe('flush');
+    expect(g!.strat.kind === 'flush' && g!.strat.suit).toBe('h');
+    expect(g!.seat).toBe(1);
+    const threat = strongestThreat(brain, gs, gs.players[0]);
+    expect(threat?.seat).toBe(1);
+  });
+
+  it('购买宣告佐证：花色芯片购买提高同花猜测置信度', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const brain = createBrain();
+    brain.seen.set(1, new Set([seenId(1, 3, 'h'), seenId(1, 7, 'h'), seenId(1, 12, 'h')]));
+    const baseConf = guessOppStrategy(brain, gs.players[1])!.conf;
+    brain.oppBuys.set(1, ['redChip', 'inkSuit', 'betDeal']);
+    const boosted = guessOppStrategy(brain, gs.players[1])!;
+    expect(boosted.conf).toBeGreaterThan(baseConf);
+    expect(boosted.conf).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('信号不足：亮牌太少且无购买记录 → 不猜测', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const brain = createBrain();
+    brain.seen.set(1, new Set([seenId(1, 3, 'h'), seenId(1, 7, 'h')])); // 同花仅 2 张、无对子
+    expect(guessOppStrategy(brain, gs.players[1])).toBeNull();
+    expect(strongestThreat(brain, gs, gs.players[0])).toBeNull();
+  });
+
+  it('updateBrains 采集对手公开购买宣告，且不重复计数', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    gs.announce = { defId: 'redChip', buyerSeat: 1, at: 12345 };
+    const brains = new Map([['p0', createBrain()]]);
+    updateBrains(brains, ['p0'], gs);
+    updateBrains(brains, ['p0'], gs); // 同一条宣告不重复计
+    expect(brains.get('p0')!.oppBuys.get(1)).toEqual(['redChip']);
+    gs.announce = { defId: 'inkSuit', buyerSeat: 1, at: 19999 };
+    updateBrains(brains, ['p0'], gs);
+    expect(brains.get('p0')!.oppBuys.get(1)).toEqual(['redChip', 'inkSuit']);
+  });
+
+  it('赌徒虹膜：按推断牌型竞猜最危险对手', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const p0 = gs.players[0];
+    gs.secretPending = { seat: p0.id, kind: 'irisGuess' };
+    const brain = createBrain();
+    brain.seen.set(1, new Set([seenId(1, 8, 's'), seenId(1, 8, 'h'), seenId(1, 8, 'd')])); // 反复亮 8 → 猜多条
+    botAct(brain, gs, 'p0', NOW);
+    expect(gs.irisGuess?.seat).toBe(1);
+    expect(gs.irisGuess?.cat).toBe(7); // 成型度高 → 押四条
+  });
+
+  it('赌徒虹膜：无猜测时回退盲猜牌型 2', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const p0 = gs.players[0];
+    gs.secretPending = { seat: p0.id, kind: 'irisGuess' };
+    botAct(createBrain(), gs, 'p0', NOW);
+    expect(gs.irisGuess?.cat).toBe(2);
+  });
+
+  it('魔术橡皮：宣告最危险对手的推断牌型', () => {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    const p0 = gs.players[0];
+    gs.secretPending = { seat: p0.id, kind: 'eraserClaim' };
+    const brain = createBrain();
+    brain.seen.set(1, new Set([seenId(1, 5, 'd'), seenId(1, 5, 's'), seenId(1, 5, 'c')])); // 对手凑 5
+    botAct(brain, gs, 'p0', NOW);
+    expect(gs.eraserType).toBe(7); // 宣告四条，压其成型牌型
   });
 });

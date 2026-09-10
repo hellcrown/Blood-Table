@@ -130,6 +130,8 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
             cards: o.discard.map((c) => ({ id: c.id, r: c.r, s: c.s })),
           })),
         };
+      case 'itemAsk':
+        return { k: 'itemAsk', defId: pend.defId };
       default:
         break;
     }

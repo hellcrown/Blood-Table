@@ -12,12 +12,16 @@ import {
   bRemoveDone,
   bReorg,
   bSecretDelete,
+  bSecretTarget,
+  bEraserClaim,
+  bIrisGuess,
   bSetup,
   bShowdownDone,
   bSteal,
   bSwap,
   bSwapStop,
   bUseItem,
+  bItemAsk,
   bViolent,
   bestFive,
   bloodTick,
@@ -182,6 +186,34 @@ function randomAction(gs: BloodState, p: BPlayer, rng: () => number, now: number
       }
       return;
     }
+    case 'swapItem': {
+      // 换牌结束道具窗口：信号干扰器（询问+选目标）/皮下密信
+      const pend = gs.secretPending;
+      if (pend && pend.seat === p.id) {
+        if (pend.kind === 'itemAsk') {
+          tryAct(() => bItemAsk(gs, p.id, rng() < 0.7, now));
+        } else if (pend.kind === 'signalTarget') {
+          const t = pick(rng, others);
+          if (t) tryAct(() => bSecretTarget(gs, p.id, t.seat, now));
+        }
+      }
+      return;
+    }
+    case 'revealPre': {
+      // 对决前道具窗口：荷官证/广播喇叭/赌徒虹膜/魔术橡皮
+      const pend = gs.secretPending;
+      if (pend && pend.seat === p.id) {
+        if (pend.kind === 'itemAsk') {
+          tryAct(() => bItemAsk(gs, p.id, rng() < 0.7, now));
+        } else if (pend.kind === 'eraserClaim') {
+          tryAct(() => bEraserClaim(gs, p.id, ri(rng, 15), now));
+        } else if (pend.kind === 'irisGuess') {
+          const t = pick(rng, gs.players);
+          if (t) tryAct(() => bIrisGuess(gs, p.id, t.seat, ri(rng, 15), now));
+        }
+      }
+      return;
+    }
     case 'play': {
       const pendP = gs.secretPending;
       if (pendP && pendP.seat === p.id) {
@@ -224,9 +256,10 @@ function randomAction(gs: BloodState, p: BPlayer, rng: () => number, now: number
         if (t) tryAct(() => bSteal(gs, p.id, t.seat, now));
         return;
       }
-      const usable = p.items.filter((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'dealerLicense');
-      if (usable.length > 0 && rng() < 0.5) {
-        tryAct(() => bUseItem(gs, p.id, usable[0].id, now));
+      // 亮牌窗口仅在持有消磁枪时等待宣告（其余【对决】前道具走对决前窗口）
+      const demag = p.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify');
+      if (demag && rng() < 0.5) {
+        tryAct(() => bUseItem(gs, p.id, demag.id, now));
       } else {
         tryAct(() => bUseItem(gs, p.id, null, now));
       }
@@ -390,7 +423,8 @@ function checkInvariants(gs: BloodState): void {
     gs.market.filter((m) => m.def != null).length +
     gs.recycle.length +
     gs.players.reduce((s, p) => s + p.items.length + p.chips.length, 0) +
-    (gs.secretPending?.defId ? 1 : 0) +
+    // itemAsk 询问期间道具仍在其主人 items 中，不重复计数
+    (gs.secretPending?.defId && gs.secretPending.kind !== 'itemAsk' ? 1 : 0) +
     (gs.auction ? 1 : 0) +
     gs.seerZone.length;
   if (circulatingDefs !== 57) {

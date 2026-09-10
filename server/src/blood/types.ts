@@ -131,7 +131,9 @@ export type BloodPhase =
   | 'setup' // 初始构筑
   | 'draw'
   | 'swap'
+  | 'swapItem' // 换牌阶段结束：逐一询问 信号干扰器/皮下密信/魔术橡皮（出牌前）
   | 'play'
+  | 'revealPre' // 对决阶段前：全员暗扣后逐一询问 荷官证/广播喇叭/赌徒虹膜
   | 'reveal' // 对决宣告
   | 'settle' // 结算展示（短暂）
   | 'buy'
@@ -191,10 +193,13 @@ export interface BloodState {
       | 'pirateRob' | 'pirateDecide' | 'auctionPick' | 'auctionBid'
       | 'impDraw' | 'impRedeem' | 'facelessPick' | 'blufferDeclare'
       | 'blufferChallenge' | 'ceoGive' | 'ceoDecide' | 'agentAsk'
-      | 'agentDecide' | 'mynameSet' | 'cleanerDel';
+      | 'agentDecide' | 'mynameSet' | 'cleanerDel'
+      | 'itemAsk';
     max?: number;
     chipId?: string;
     defId?: string;
+    /** itemAsk：被询问的道具实例 id */
+    itemId?: string;
     /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 弃牌区 */
     cards?: BCard[];
     /** 共享信息等待顺序的对手队列 */
@@ -260,6 +265,12 @@ export interface BloodState {
   preDrawQueue: { seat: string; kind: 'detectivePick' | 'facelessPick' }[];
   /** 换牌阶段结束的角色互动队列（炸弹客/咒术师/将军/赌神/无业游民/霸道总裁） */
   swapEndQueue: { seat: string; kind: 'bomberClaim' | 'curseTake' | 'generalChoice' | 'godPeek' | 'vagrantDraw' | 'ceoGive' }[];
+  /** 阶段边界的道具询问队列：swapEnd=换牌结束后（信号干扰器/皮下密信/魔术橡皮），preReveal=对决前（广播喇叭/赌徒虹膜/荷官证） */
+  itemQueue: { seat: string; itemId: string; boundary: 'swapEnd' | 'preReveal' }[];
+  /** 当前开启的道具询问窗口边界（询问耗尽后：swapEnd→出牌阶段，preReveal→对决阶段） */
+  itemBoundary: 'swapEnd' | 'preReveal' | null;
+  /** 对决阶段的延迟决策队列：全员摊牌且各家当场宣告（弹簧夹层）结束后，逐一询问屏蔽器失效目标与复制芯片的复制目标 */
+  deferredDecisions: { seat: string; decision: RevealDecision }[];
   /** 结算阶段的角色互动队列（魅魔/票贩子/炸鸡店老板） */
   settleQueue: { seat: string; kind: 'succubusSteal' | 'scalperDeal' | 'fryerDel' }[];
   final: BloodFinal | null;

@@ -190,6 +190,9 @@ export function createBloodGame(
     startupQueue: [],
     preDrawQueue: [],
     swapEndQueue: [],
+    itemQueue: [],
+    itemBoundary: null,
+    deferredDecisions: [],
     settleQueue: [],
     eraserType: null,
     irisGuess: null,
@@ -442,6 +445,9 @@ export function startDrawPhase(gs: BloodState, now: number): void {
   gs.impTurns = 0;
   gs.preBuyQueue = [];
   gs.settleQueue = [];
+  gs.itemQueue = [];
+  gs.itemBoundary = null;
+  gs.deferredDecisions = [];
   gs.auction = null;
   for (const p of gs.players) {
     // 暂时失忆：本回合角色技能失效；餐车投毒：换牌次数 -N（最低 0）
@@ -774,7 +780,61 @@ function checkSwapEnd(gs: BloodState, now: number): void {
       p.swapLeft = 0;
     }
   }
+  // 换牌结束道具窗口：信号干扰器/皮下密信/魔术橡皮（出牌前）逐一询问
+  if (buildItemWindow(gs, 'swapEnd')) {
+    advanceItemWindow(gs, now);
+    return;
+  }
   startPlayPhase(gs, now);
+}
+
+/* ---------------- 阶段边界道具询问窗口 ---------------- */
+
+/** 各窗口允许询问的道具效果 */
+const ITEM_WINDOW_EFFECTS: Record<'swapEnd' | 'preReveal', BloodEffect['k'][]> = {
+  swapEnd: ['signalJamFx', 'secretNoteFx', 'eraserFx'], // 【换牌】结束时 / 【出牌】前
+  preReveal: ['dealerLicense', 'loudspeakerFx', 'irisGambleFx'], // 【对决】前
+};
+
+/** 按座位顺序（特权证起）收集玩家持有的窗口道具入队并切换到对应询问阶段；返回是否有人被询问 */
+function buildItemWindow(gs: BloodState, boundary: 'swapEnd' | 'preReveal'): boolean {
+  const kinds = ITEM_WINDOW_EFFECTS[boundary];
+  let pushed = false;
+  for (const p of orderFrom(gs, gs.privilegeSeat ?? gs.players[0].seat)) {
+    for (const item of p.items) {
+      if (!kinds.includes(BLOOD_MARKET_BY_ID.get(item.def)?.effect.k as BloodEffect['k'])) continue;
+      gs.itemQueue.push({ seat: p.id, itemId: item.id, boundary });
+      pushed = true;
+    }
+  }
+  if (pushed) {
+    gs.itemBoundary = boundary;
+    gs.phase = boundary === 'swapEnd' ? 'swapItem' : 'revealPre'; // 独立可见的阶段
+    pushLog(gs, 'hand', boundary === 'swapEnd' ? '── 换牌阶段结束 · 逐一询问道具 ──' : '── 对决阶段前 · 逐一询问道具 ──');
+  }
+  return pushed;
+}
+
+/** 窗口推进：弹出下一位持有人进入询问；队列耗尽后按边界进入出牌/对决阶段 */
+function advanceItemWindow(gs: BloodState, now: number): void {
+  if (gs.secretPending) return; // 屏障反制等子流程未决，等待其结束再推进
+  while (gs.itemQueue.length > 0) {
+    const next = gs.itemQueue.shift()!;
+    const p = gs.players.find((x) => x.id === next.seat);
+    const item = p?.items.find((i) => i.id === next.itemId);
+    if (!p || !item) continue; // 道具已不在手（竞态兜底），跳过
+    gs.secretPending = { seat: p.id, kind: 'itemAsk', itemId: item.id, defId: item.def };
+    gs.deadline = now + BLOOD_TURN_MS;
+    return;
+  }
+  // 队列耗尽：换牌结束窗口推进到出牌阶段；对决前窗口启动对决
+  if (gs.itemBoundary === 'swapEnd') {
+    gs.itemBoundary = null;
+    startPlayPhase(gs, now);
+  } else if (gs.itemBoundary === 'preReveal') {
+    gs.itemBoundary = null;
+    startReveal(gs, now);
+  }
 }
 
 /** 捣蛋鬼小回合：其他玩家换牌结束后，捣蛋鬼抽牌（自选对手）并换牌 */
@@ -969,6 +1029,11 @@ function tryStartReveal(gs: BloodState, now: number): void {
     gs.deadline = now + BLOOD_TURN_MS;
     return;
   }
+  // 对决前道具窗口：荷官证/广播喇叭/赌徒虹膜逐一询问（出牌区仍暗置）
+  if (buildItemWindow(gs, 'preReveal')) {
+    advanceItemWindow(gs, now);
+    return;
+  }
   startReveal(gs, now);
 }
 
@@ -990,7 +1055,7 @@ function startReveal(gs: BloodState, now: number): void {
 }
 
 function usableItemCount(p: BPlayer): number {
-  // 荷官证已改为出牌阶段宣告；亮牌窗口仅等待消磁枪
+  // 荷官证等【对决】前道具已改为对决前窗口逐一询问；亮牌窗口仅等待消磁枪
   return p.items.filter((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify').length;
 }
 
@@ -1056,6 +1121,7 @@ function resolveBarrier(gs: BloodState, use: boolean, now: number): void {
   }
   if (eff.after === 'market') afterMarketResolved(gs, attacker, false);
   else if (eff.after === 'reveal') nextRevealOrSettle(gs, now);
+  else if (eff.after === 'none') advanceItemWindow(gs, now); // 信号干扰器（道具窗口来源）：继续推进询问
 }
 
 /** 序列化效果的真正结算 */
@@ -1163,13 +1229,16 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
       pushLog(gs, 'action', `${p.name} 的掠夺效果无合法目标，落空`);
     }
   }
-  // 拓展芯片决策队列：弹簧夹层（±X）/ 复制芯片（选目标效果）/ 屏蔽器（选失效目标）
+  // 拓展芯片决策：弹簧夹层（±X）在自家亮牌窗口当场决策；
+  // 屏蔽器（选失效目标）与复制芯片（选复制目标）延后到全员摊牌且各家宣告结束后统一询问（deferredDecisions）
   const queue: RevealDecision[] = [];
   for (const cc of p.chips.filter((c2) => p.play.some((card) => card.id === c2.on) && !c2.off)) {
     const k = BLOOD_MARKET_BY_ID.get(cc.def)?.effect.k;
     if (k === 'springFx') queue.push({ t: 'spring', chipId: cc.id, cardId: cc.on, defId: cc.def });
-    else if (k === 'copyChip') queue.push({ t: 'copy', chipId: cc.id, cardId: cc.on, defId: cc.def });
-    else if (k === 'shieldFx') queue.push({ t: 'shield', chipId: cc.id, cardId: cc.on, defId: cc.def });
+    else if (k === 'copyChip')
+      gs.deferredDecisions.push({ seat: p.id, decision: { t: 'copy', chipId: cc.id, cardId: cc.on, defId: cc.def } });
+    else if (k === 'shieldFx')
+      gs.deferredDecisions.push({ seat: p.id, decision: { t: 'shield', chipId: cc.id, cardId: cc.on, defId: cc.def } });
   }
   if (queue.length > 0) {
     gs.secretPending = { seat: p.id, kind: 'revealDecide', queue, decision: queue[0] };
@@ -1335,9 +1404,26 @@ function nextRevealOrSettle(gs: BloodState, now: number): void {
     gs.turnSeat = next.seat;
     gs.deadline = now + BLOOD_TURN_MS;
     openRevealWindow(gs, next, now);
+  } else if (gs.deferredDecisions.length > 0) {
+    // 全员摊牌且各家当场宣告结束：逐一询问屏蔽器/复制芯片的延迟决策，之后才结算
+    startDeferredDecision(gs, now);
   } else {
     settle(gs, now);
   }
+}
+
+/** 弹出下一条延迟决策（deferredDecisions：屏蔽器失效目标 / 复制芯片复制目标） */
+function startDeferredDecision(gs: BloodState, now: number): void {
+  const next = gs.deferredDecisions.shift()!;
+  const p = gs.players.find((x) => x.id === next.seat);
+  gs.secretPending = {
+    seat: next.seat,
+    kind: 'revealDecide',
+    decision: next.decision,
+  };
+  gs.deadline = now + BLOOD_TURN_MS;
+  const label = next.decision.t === 'copy' ? '【复制芯片】开始选择复制目标' : '【屏蔽器】开始选择失效目标';
+  pushLog(gs, 'action', `🧬 ${p?.name ?? '?'} 的${label}（全员已摊牌）`);
 }
 
 export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now: number): void {
@@ -1354,81 +1440,81 @@ export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now
   gs.stealPending = null;
 }
 
-export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
-  const p = gs.players.find((x) => x.id === playerId);
-  if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
-  if (itemId != null && gs.secretPending && gs.secretPending.seat !== p.id) {
-    throw new BloodError('PENDING', '其他玩家的结算尚未完成，请稍候');
+/**
+ * 阶段边界道具询问的应答：use=true 使用当前询问的道具，false 跳过。
+ * 信号干扰器/魔术橡皮/赌徒虹膜会转入各自的子交互，其余使用后直接推进窗口。
+ */
+export function bItemAsk(gs: BloodState, playerId: string, use: boolean, now: number): void {
+  const pend = gs.secretPending;
+  if (!pend || pend.kind !== 'itemAsk' || pend.seat !== playerId) {
+    throw new BloodError('PENDING', '当前没有待回应的道具询问');
   }
-
-  // 换牌阶段：皮下密信（直接抽牌）与信号干扰器（选择目标）
-  if (gs.phase === 'swap') {
-    if (itemId == null) return;
-    if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
-    const item = p.items.find((i) => i.id === itemId);
-    if (!item) throw new BloodError('BAD_ITEM', '道具不存在');
-    const def = BLOOD_MARKET_BY_ID.get(item.def);
-    if (def?.effect.k === 'secretNoteFx') {
-      if (p.blood < 2) throw new BloodError('NO_BLOOD', '血筹不足（需 2）');
+  const p = gs.players.find((x) => x.id === playerId)!;
+  const item = p.items.find((i) => i.id === pend.itemId);
+  const def = item ? BLOOD_MARKET_BY_ID.get(item.def) : undefined;
+  if (!use) {
+    if (def) pushLog(gs, 'action', `${p.name} 不使用【${def.name}】`);
+    gs.secretPending = null;
+    advanceItemWindow(gs, now);
+    return;
+  }
+  if (!item || !def) throw new BloodError('BAD_ITEM', '道具不存在');
+  p.items = p.items.filter((i) => i.id !== item.id);
+  switch (def.effect.k) {
+    case 'signalJamFx':
+      gs.recycle.push(item.def);
+      gs.secretPending = { seat: p.id, kind: 'signalTarget' };
+      pushLog(gs, 'action', `${p.name} 使用【信号干扰器】：请选择一位玩家随机弃 1 抽 1`);
+      return; // 目标选定后由 bSecretTarget 继续推进窗口
+    case 'secretNoteFx': {
+      if (p.blood < 2) {
+        p.items.push(item); // 血筹不足退回，等待跳过
+        throw new BloodError('NO_BLOOD', '血筹不足（需 2）');
+      }
       p.blood -= 2;
       const drawn = drawN(gs, p, 3);
       p.hand.push(...drawn);
       gs.recycle.push(item.def);
-      p.items = p.items.filter((i) => i.id !== itemId);
       pushLog(gs, 'action', `${p.name} 使用【皮下密信】：支付 2 血筹，抽 3 张牌`);
+      gs.secretPending = null;
+      advanceItemWindow(gs, now);
       return;
     }
-    if (def?.effect.k === 'signalJamFx') {
+    case 'eraserFx':
+      gs.secretPending = { seat: p.id, kind: 'eraserClaim', defId: item.def };
+      pushLog(gs, 'action', `${p.name} 使用【魔术橡皮】：请宣称一种牌型`);
+      return;
+    case 'irisGambleFx':
+      gs.secretPending = { seat: p.id, kind: 'irisGuess', defId: item.def };
+      pushLog(gs, 'action', `${p.name} 使用【赌徒虹膜】：请选择竞猜目标与牌型`);
+      return;
+    case 'loudspeakerFx':
       gs.recycle.push(item.def);
-      p.items = p.items.filter((i) => i.id !== itemId);
-      gs.secretPending = { seat: p.id, kind: 'signalTarget' };
-      pushLog(gs, 'action', `${p.name} 使用【信号干扰器】：请选择一位玩家随机弃 1 抽 1`);
+      p.claimedWin = true;
+      gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
+      pushLog(gs, 'action', `${p.name} 使用【广播喇叭】：宣称本回合将夺魁！`);
+      gs.secretPending = null;
+      advanceItemWindow(gs, now);
       return;
-    }
-    throw new BloodError('BAD_TIMING', '该道具在换牌阶段无法使用');
+    case 'dealerLicense':
+      gs.recycle.push(item.def);
+      gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
+      gs.comparePipsFirst = true;
+      pushLog(gs, 'action', `${p.name} 使用【荷官证】：本次对决先比总点数，平局再比牌型（对决前宣告）`);
+      gs.secretPending = null;
+      advanceItemWindow(gs, now);
+      return;
+    default:
+      p.items.push(item);
+      throw new BloodError('BAD_TIMING', '该道具无法在当前窗口使用');
   }
+}
 
-  // 荷官证/魔术橡皮/广播喇叭/赌徒虹膜：出牌阶段（暗扣确认前）宣告——此时还看不到对手的牌
-  if (gs.phase === 'play') {
-    if (itemId == null) return;
-    if (p.locked) throw new BloodError('ALREADY_DONE', '你已确认出牌，无法再宣告');
-    const item = p.items.find((i) => i.id === itemId);
-    if (!item) throw new BloodError('BAD_ITEM', '道具不存在');
-    const def = BLOOD_MARKET_BY_ID.get(item.def);
-    switch (def?.effect.k) {
-      case 'dealerLicense': {
-        p.items = p.items.filter((i) => i.id !== itemId);
-        gs.recycle.push(item.def);
-        gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
-        gs.comparePipsFirst = true;
-        pushLog(gs, 'action', `${p.name} 使用【荷官证】：本次对决先比总点数，平局再比牌型（出牌阶段宣告）`);
-        return;
-      }
-      case 'loudspeakerFx': {
-        p.items = p.items.filter((i) => i.id !== itemId);
-        gs.recycle.push(item.def);
-        p.claimedWin = true;
-        gs.announce = { defId: item.def, buyerSeat: p.seat, at: now };
-        pushLog(gs, 'action', `${p.name} 使用【广播喇叭】：宣称本回合将夺魁！`);
-        return;
-      }
-      case 'eraserFx': {
-        p.items = p.items.filter((i) => i.id !== itemId);
-        gs.secretPending = { seat: p.id, kind: 'eraserClaim', defId: item.def };
-        pushLog(gs, 'action', `${p.name} 使用【魔术橡皮】：请宣称一种牌型`);
-        return;
-      }
-      case 'irisGambleFx': {
-        p.items = p.items.filter((i) => i.id !== itemId);
-        gs.secretPending = { seat: p.id, kind: 'irisGuess', defId: item.def };
-        pushLog(gs, 'action', `${p.name} 使用【赌徒虹膜】：请选择竞猜目标与牌型`);
-        return;
-      }
-      default:
-        throw new BloodError('BAD_TIMING', '该道具在出牌阶段无法使用');
-    }
-  }
-
+export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
+  const p = gs.players.find((x) => x.id === playerId);
+  if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
+  // 换牌结束（信号干扰器/皮下密信/魔术橡皮）与对决前（荷官证/广播喇叭/赌徒虹膜）
+  // 的道具统一在各自窗口中逐一询问（bItemAsk）；此处仅保留对决阶段的消磁枪
   if (gs.phase !== 'reveal') throw new BloodError('BAD_PHASE', '不在对决阶段');
   if (gs.stealPending) throw new BloodError('PENDING', '先选择掠夺目标');
   if (gs.turnSeat !== seatOf(gs, playerId)) throw new BloodError('NOT_YOUR_TURN', '还没轮到你宣告');
@@ -2842,7 +2928,9 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       finishDrawPhase(gs, now);
       return true;
     }
-    case 'swap': {
+    case 'swap':
+    case 'swapItem': {
+      // 换牌阶段与其结束道具窗口（swapItem）共用托管：询问超时跳过、信号目标超时托管、屏障超时
       if (gs.secretPending?.kind === 'barrierAsk') {
         pushLog(gs, 'action', '【防护屏障】询问超时，视为允许生效');
         resolveBarrier(gs, false, now);
@@ -2855,13 +2943,14 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         return true;
       }
       for (const p of gs.players) {
-        if (gs.phase !== 'swap') break;
+        if (gs.phase !== 'swap') break; // swapItem 阶段全员已停止换牌，无需强制收尾
         if (!p.swapDone && !(gs.secretPending && gs.secretPending.seat === p.id)) {
           act(() => bSwapStop(gs, p.id, now));
         }
       }
       // 自愈：超时托管统一走 checkSwapEnd（内部依次处理结束队列/捣蛋鬼小回合/阶段收尾）
       if (gs.phase === 'swap' && !gs.secretPending) checkSwapEnd(gs, now);
+      if (gs.phase === 'swapItem' && !gs.secretPending) advanceItemWindow(gs, now);
       return true;
     }
     case 'play': {
@@ -2895,7 +2984,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         afterPlayHookResolved(gs, now);
         return true;
       }
-      // 出牌阶段的宣告挂起（魔术橡皮/赌徒虹膜/职业赌徒）超时：落空弃置后继续托管
+      // 出牌阶段的宣告挂起（职业赌徒）超时：落空后继续托管
       if (gs.secretPending) {
         if (gs.secretPending.defId) gs.recycle.push(gs.secretPending.defId);
         pushLog(gs, 'action', '宣告超时，效果落空弃置');
@@ -2908,6 +2997,27 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (gs.phase === 'play' && allDone(gs, (x) => x.locked) && !gs.secretPending) {
         tryStartReveal(gs, now);
       }
+      return true;
+    }
+    case 'revealPre': {
+      // 对决阶段前的道具询问窗口托管
+      const pend = gs.secretPending;
+      if (pend?.kind === 'itemAsk') {
+        const def = BLOOD_MARKET_BY_ID.get(pend.defId ?? '');
+        pushLog(gs, 'action', `${gs.players.find((x) => x.id === pend.seat)?.name} 超时：不使用【${def?.name ?? '道具'}】`);
+        gs.secretPending = null;
+        advanceItemWindow(gs, now);
+        return true;
+      }
+      // 窗口内宣告挂起（魔术橡皮/赌徒虹膜）超时：落空弃置后继续推进窗口
+      if (pend?.kind === 'eraserClaim' || pend?.kind === 'irisGuess') {
+        if (pend.defId) gs.recycle.push(pend.defId);
+        pushLog(gs, 'action', '宣告超时，效果落空弃置');
+        gs.secretPending = null;
+        advanceItemWindow(gs, now);
+        return true;
+      }
+      if (gs.phase === 'revealPre' && !gs.secretPending) advanceItemWindow(gs, now); // 自愈
       return true;
     }
     case 'reveal': {
@@ -3033,6 +3143,26 @@ export function bloodTick(gs: BloodState, now: number): boolean {
 function resolveSwapEndOnTimeout(gs: BloodState, p: BPlayer, now: number): void {
   const pend = gs.secretPending!;
   switch (pend.kind) {
+    case 'itemAsk': {
+      const def = BLOOD_MARKET_BY_ID.get(pend.defId ?? '');
+      pushLog(gs, 'action', `${p.name} 超时：不使用【${def?.name ?? '道具'}】`);
+      gs.secretPending = null;
+      advanceItemWindow(gs, now);
+      return;
+    }
+    case 'signalTarget': {
+      // 信号干扰器目标选择超时：随机指定一位对手（bSecretTarget 内部完成结算与窗口推进）
+      const opps = gs.players.filter((o) => o.id !== p.id);
+      if (opps.length > 0) {
+        const t = opps[randomInt(0, opps.length)];
+        pushLog(gs, 'action', `${p.name} 的【信号干扰器】目标超时：托管指定 ${t.name}`);
+        bSecretTarget(gs, p.id, t.seat, now);
+      } else {
+        gs.secretPending = null;
+        advanceItemWindow(gs, now);
+      }
+      return;
+    }
     case 'bomberClaim':
       pushLog(gs, 'action', `${p.name}【炸弹客】宣告超时：本回合不发动`);
       gs.bomberX = 0;
@@ -3118,7 +3248,10 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
   if (t.id === playerId) throw new BloodError('BAD_TARGET', '目标无效');
   const finish = (): void => {
     gs.secretPending = null;
-    if (pend.kind === 'signalTarget') return; // 道具：无购买推进
+    if (pend.kind === 'signalTarget') {
+      advanceItemWindow(gs, now); // 道具窗口来源：继续询问下一位或进入下一阶段
+      return;
+    }
     afterMarketResolved(gs, p, false);
   };
   // 防护屏障：单独指定的效果先询问受害者是否抵消
@@ -3218,6 +3351,7 @@ export function bEraserClaim(gs: BloodState, playerId: string, cat: number, now:
   gs.recycle.push(pend.defId ?? 'eraser');
   gs.secretPending = null;
   pushLog(gs, 'action', `【魔术橡皮】${p.name} 宣告：本回合【${catName(cat)}】视为高牌`);
+  advanceItemWindow(gs, now);
 }
 
 /** 赌徒虹膜：竞猜一位玩家的最终牌型（结算时判定） */
@@ -3235,6 +3369,7 @@ export function bIrisGuess(gs: BloodState, playerId: string, seat: number, cat: 
   gs.recycle.push(pend.defId ?? 'irisGamble');
   gs.secretPending = null;
   pushLog(gs, 'action', `【赌徒虹膜】${p.name} 竞猜 ${t.name} 的牌型为【${catName(cat)}】`);
+  advanceItemWindow(gs, now);
 }
 
 /** 定点爆破：选定对手与点数后，随机删除其弃牌堆中一张该点数的牌 */

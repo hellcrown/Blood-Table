@@ -45,7 +45,7 @@ export function catName(cat: number): string {
   return CAT_NAMES[cat] ?? '高牌';
 }
 
-const ENUM_CAP = 200_000; // 枚举上限，超出则贪心回退
+const ENUM_CAP = 20_000; // 枚举上限（52²=2704 内精确枚举；3+ 张灵活牌超出则贪心回退，避免单次评估百毫秒级）
 
 export interface BloodHandResult {
   cat: number; // 牌型等级

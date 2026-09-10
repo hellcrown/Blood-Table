@@ -23,6 +23,7 @@ import {
   bRefreshPick,
   bInsertChip,
   bUseItem,
+  bItemAsk,
   bEraserClaim,
   bSpringUse,
   bRevealChipTarget,
@@ -482,18 +483,23 @@ describe('血色引擎 · 拓展黑市效果', () => {
     expect(buyer.removed.length).toBe(2);
   });
 
-  it('魔术橡皮：被宣告牌型结算为高牌', () => {
+  it('魔术橡皮：换牌结束后单独询问，被宣告牌型结算为高牌', () => {
     const gs = make2p();
     setupDone(gs);
+    gs.players[0].items.push({ id: 'it-eraser', def: 'eraser' });
     bSwapStop(gs, gs.players[0].id, NOW);
     bSwapStop(gs, gs.players[1].id, NOW);
+    // 全员停止换牌后进入「换牌结束」独立阶段（道具询问窗口，出牌前）
+    expect(gs.phase).toBe('swapItem');
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    expect(gs.secretPending?.defId).toBe('eraser');
     giveHand(gs, 0, [isRank(13), isRank(13), isRank(9), isRank(9), isRank(5), isRank(2)]);
     giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
-    // 甲在出牌阶段使用魔术橡皮宣告「两对」
-    gs.players[0].items.push({ id: 'it-eraser', def: 'eraser' });
-    bUseItem(gs, 'p0', 'it-eraser', NOW);
+    bItemAsk(gs, 'p0', true, NOW);
+    expect(gs.secretPending?.kind).toBe('eraserClaim');
     bEraserClaim(gs, 'p0', 2, NOW); // 2 = 两对
     expect(gs.eraserType).toBe(2);
+    expect(gs.phase).toBe('play'); // 窗口结束进入出牌阶段
     bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
     const row0 = gs.result!.rows.find((r) => r.seat === 0)!;
@@ -501,20 +507,73 @@ describe('血色引擎 · 拓展黑市效果', () => {
     expect(row0.catName).toContain('魔术橡皮');
   });
 
-  it('广播喇叭：宣称成功获人数×3血筹', () => {
+  it('广播喇叭：对决前窗口询问，宣称成功获人数×3血筹', () => {
     const gs = make2p();
     setupDone(gs);
-    bSwapStop(gs, gs.players[0].id, NOW);
-    bSwapStop(gs, gs.players[1].id, NOW);
     giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
     giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
     gs.players[0].items.push({ id: 'it-ls', def: 'loudspeaker' });
-    bUseItem(gs, 'p0', 'it-ls', NOW);
-    expect(gs.players[0].claimedWin).toBe(true);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
     bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    // 全员暗扣后进入对决前道具窗口
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    expect(gs.secretPending?.defId).toBe('loudspeaker');
+    bItemAsk(gs, 'p0', true, NOW);
     const p0 = gs.players[0];
+    expect(p0.claimedWin).toBe(true);
+    expect(gs.phase).toBe('settle'); // 窗口结束直接启动对决并结算
     expect(p0.blood).toBeGreaterThanOrEqual(6); // 2人局 ×3 = 6
+  });
+
+  it('信号干扰器：换牌结束后单独询问，目标随机弃1抽1', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[0].items.push({ id: 'it-sig', def: 'signalJam' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(gs.phase).toBe('swapItem'); // 换牌结束独立阶段
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    expect(gs.secretPending?.defId).toBe('signalJam');
+    bItemAsk(gs, 'p0', true, NOW);
+    expect(gs.secretPending?.kind).toBe('signalTarget');
+    const p1 = gs.players[1];
+    const discardBefore = p1.discard.length;
+    bSecretTarget(gs, 'p0', 1, NOW);
+    expect(p1.discard.length).toBe(discardBefore + 1); // 随机弃 1
+    expect(p1.hand.length).toBe(6); // 抽 1 补回上限
+    expect(gs.secretPending).toBeNull();
+    expect(gs.phase).toBe('play'); // 窗口结束进入出牌阶段
+  });
+
+  it('信号干扰器：跳过询问后直接进入出牌阶段', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[0].items.push({ id: 'it-sig', def: 'signalJam' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    bItemAsk(gs, 'p0', false, NOW);
+    expect(gs.secretPending).toBeNull();
+    expect(gs.players[0].items.length).toBe(1); // 跳过不消耗道具
+    expect(gs.phase).toBe('play');
+  });
+
+  it('皮下密信：换牌结束后询问支付2血筹抽3张', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[0].items.push({ id: 'it-note', def: 'secretNote' });
+    gs.players[0].blood += 5;
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    const handBefore = gs.players[0].hand.length;
+    const bloodBefore = gs.players[0].blood;
+    bItemAsk(gs, 'p0', true, NOW);
+    expect(gs.players[0].hand.length).toBe(handBefore + 3);
+    expect(gs.players[0].blood).toBe(bloodBefore - 2);
+    expect(gs.phase).toBe('play');
   });
 
   it('暂时失忆使赌场荷官+20失效', () => {
@@ -580,27 +639,54 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, 'p1', p1.hand.slice(0, 5).map((c) => c.id), NOW);
     const blood0 = p0.blood;
-    // 甲四条K必胜，复制乙的镀层（胜）
+    // 甲四条K必胜，复制乙的镀层（胜）——复制目标选择已延迟到全员摊牌后（自动进入该询问）
     bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'coatWin', NOW);
-    bSkipDecision(gs, 'p0', NOW);
-    expect(gs.phase).toBe('settle');
+    expect(gs.phase).toBe('settle'); // 决策完成自动推进（copyQueue 已空 → 结算）
     expect(p0.blood).toBeGreaterThanOrEqual(blood0 + 4); // 复制的镀层（胜）发动
+  });
+
+  it('复制芯片时序：全员摊牌且各家宣告结束后才询问屏蔽/复制目标', () => {
+    const gs = reachReveal();
+    const p0 = gs.players[0];
+    const p1 = gs.players[1];
+    p0.chips.push({ id: 'ch-cp', def: 'copyChip', on: p0.hand[0].id });
+    p1.chips.push({ id: 'ch-sh', def: 'shield', on: p1.hand[0].id });
+    gs.privilegeSeat = 0; // 固定亮牌顺序 p0 → p1，延迟队列按此顺序收集
+    bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', p1.hand.slice(0, 5).map((c) => c.id), NOW);
+    // 全员摊牌：进入对决阶段，两家窗口均无当场决策；延迟队列先甲的复制、再乙的屏蔽
+    expect(gs.phase).toBe('reveal');
+    expect(gs.revealed.length).toBe(2); // 所有人牌面已公开
+    expect(gs.secretPending?.seat).toBe('p0');
+    expect(gs.secretPending?.decision?.t).toBe('copy');
+    // 甲复制乙的屏蔽器：复制决策会追加一条屏蔽目标选择（复制出的屏蔽器需选目标）
+    bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'shield', NOW);
+    expect(gs.secretPending?.decision?.t).toBe('shield');
+    bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'shield', NOW); // 用复制出的屏蔽器失效乙的屏蔽器本身
+    bSkipDecision(gs, 'p0', NOW); // 队列指针收尾推进
+    // 再轮到乙自己的屏蔽器（其芯片已失效，跳过不影响）
+    expect(gs.secretPending?.seat).toBe('p1');
+    bSkipDecision(gs, 'p1', NOW);
+    expect(gs.phase).toBe('settle'); // 延迟决策全部结束 → 结算
   });
 
   it('屏蔽器：令对手芯片失效，评估下降', () => {
     const gs = reachReveal();
     const p0 = gs.players[0];
     const p1 = gs.players[1];
-    // 乙的出牌牌挂校准器+1；甲挂屏蔽器
+    // 乙的出牌牌挂校准器+1；甲挂屏蔽器（延后到全员摊牌后询问）
     p1.chips.push({ id: 'ch-cal', def: 'calib1', on: p1.hand[0].id });
     p0.chips.push({ id: 'ch-sh', def: 'shield', on: p0.hand[0].id });
     bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, 'p1', p1.hand.slice(0, 5).map((c) => c.id), NOW);
+    expect(gs.secretPending?.seat).toBe('p0'); // 全员摊牌后轮到甲的屏蔽器
     const pips1 = evalForPlayer(p1).pips;
     bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'calib1', NOW);
-    expect(evalForPlayer(p1).pips).toBe(pips1 - 1); // +1 被失效
+    // 延迟决策解析后自动推进结算；+1 被失效体现在结算点数上
+    expect(gs.phase).toBe('settle');
+    const row1 = gs.result!.rows.find((r) => r.seat === 1)!;
+    expect(row1.pips).toBe(pips1 - 1);
     expect(p1.chips.find((c) => c.id === 'ch-cal')!.off).toBe(true);
-    bSkipDecision(gs, 'p0', NOW);
   });
 
   it('防护屏障：可抵消定点爆破；无屏障则生效', () => {
@@ -861,18 +947,60 @@ describe('血色引擎 · 荷官证时点与投降', () => {
     return gs;
   }
 
-  it('荷官证：出牌阶段宣告生效；亮牌阶段不可用', () => {
-    const gs = reachPlay();
+  it('荷官证：对决前窗口逐一询问，生效后先比总点数', () => {
+    const gs = make2p();
+    setupDone(gs);
     gs.players[0].items.push({ id: 'it1', def: 'dealerLic' });
-    bUseItem(gs, 'p0', 'it1', NOW);
-    expect(gs.comparePipsFirst).toBe(true);
-    expect(gs.players[0].items.length).toBe(0);
-    // 双方出牌后进入对决，昭告已不可再用道具
+    gs.players[1].items.push({ id: 'it2', def: 'dealerLic' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
     bPlay(gs, gs.players[0].id, gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, gs.players[1].id, gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
-    gs.players[1].items.push({ id: 'it2', def: 'dealerLic' });
-    expect(() => bUseItem(gs, 'p1', 'it2', NOW)).toThrow();
+    // 全员暗扣后进入「对决阶段前」独立窗口，按特权证起的座位顺序逐一询问；窗口内禁止直接使用道具
+    expect(gs.phase).toBe('revealPre');
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    const firstSeat = gs.secretPending!.seat;
+    const firstItem = gs.players.find((x) => x.id === firstSeat)!.items[0].id;
+    expect(() => bUseItem(gs, firstSeat, firstItem, NOW)).toThrow();
+    bItemAsk(gs, firstSeat, true, NOW);
+    expect(gs.comparePipsFirst).toBe(true);
+    expect(gs.players.reduce((s, x) => s + x.items.length, 0)).toBe(1); // 甲已消耗，剩乙的
+    // 轮到另一位
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    const secondSeat = gs.secretPending!.seat;
+    expect(secondSeat).not.toBe(firstSeat);
+    bItemAsk(gs, secondSeat, false, NOW);
+    expect(gs.phase).toBe('settle'); // 窗口结束启动对决（无道具自动推进到结算展示）
     confirmSd(gs);
+  });
+
+  it('道具询问超时：自动跳过并推进到出牌阶段', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[1].items.push({ id: 'it-note', def: 'secretNote' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(gs.secretPending?.kind).toBe('itemAsk');
+    expect(gs.secretPending?.seat).toBe('p1');
+    bloodTick(gs, NOW + 60_001); // 超过 60s 询问时限
+    expect(gs.secretPending).toBeNull();
+    expect(gs.phase).toBe('play');
+  });
+
+  it('信号干扰器目标超时：托管随机指定对手后推进', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[0].items.push({ id: 'it-sig', def: 'signalJam' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    bItemAsk(gs, 'p0', true, NOW);
+    expect(gs.secretPending?.kind).toBe('signalTarget');
+    bloodTick(gs, NOW + 60_001);
+    expect(gs.secretPending).toBeNull();
+    expect(gs.phase).toBe('play');
+    expect(gs.players[1].discard.length).toBeGreaterThan(0); // 已对乙生效
   });
 
   it('投降：本局判负，对方直接获胜', () => {

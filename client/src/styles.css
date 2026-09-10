@@ -1437,6 +1437,24 @@ body {
   width: min(680px, calc(100% - 40px));
 }
 
+/* 插入芯片二次确认框 */
+.insert-confirm {
+  width: min(520px, calc(100% - 40px));
+}
+
+.insert-confirm-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+@media (max-width: 640px) {
+  .insert-confirm-body {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
 .zone-grid {
   display: flex;
   flex-wrap: wrap;
