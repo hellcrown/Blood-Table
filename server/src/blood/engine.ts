@@ -365,7 +365,7 @@ function drawMarketSlot(gs: BloodState): MarketSlot {
 function pushLog(gs: BloodState, kind: LogLine['kind'], text: string): LogLine {
   const line = { seq: ++gs.logSeq, kind, text };
   gs.log.push(line);
-  if (gs.log.length > 150) gs.log.splice(0, gs.log.length - 150);
+  if (gs.log.length > 2000) gs.log.splice(0, gs.log.length - 2000); // 保留完整牌局记录（仅防极端对局内存膨胀）
   return line;
 }
 

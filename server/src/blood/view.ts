@@ -311,7 +311,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
         }
       : null,
     final: gs.final,
-    log: gs.log.slice(-40),
+    log: gs.log, // 全量牌局记录（服务端仅防膨胀截断）
     logSeq: gs.logSeq,
   me: me
     ? {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { bloodTick, createBloodGame } from '../src/blood/engine';
+import { bloodTick, bSwapStop, createBloodGame } from '../src/blood/engine';
 import { promptFor } from '../src/blood/view';
 import { botAct, createBrain, updateBrains, deriveStrategy, curStrategy, worstDiscardCards, guessOppStrategy, strongestThreat, type BotBrain } from '../src/blood/botAI';
 import type { BCard, BPlayer, BloodState } from '../src/blood/types';
@@ -447,5 +447,79 @@ describe('血色机器人 · 对手策略猜测', () => {
     brain.seen.set(1, new Set([seenId(1, 5, 'd'), seenId(1, 5, 's'), seenId(1, 5, 'c')])); // 对手凑 5
     botAct(brain, gs, 'p0', NOW);
     expect(gs.eraserType).toBe(7); // 宣告四条，压其成型牌型
+  });
+});
+
+describe('血色机器人 · 换牌节奏', () => {
+  /** 建立一局并推进到 swap（强制角色） */
+  function toSwapC(c0: string, c1: string): BloodState {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    gs.players[0].charOptions = [c0, 'dealer'];
+    gs.players[1].charOptions = [c1, 'clerk'];
+    driveBots(gs, ['p0', 'p1'], 'swap');
+    return gs;
+  }
+
+  /** 从牌池贪心构造一手"高牌散牌"（点数互异、无五连、同花色≤3） */
+  function pickHighCardHand(pool: BCard[]): BCard[] {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const hand: BCard[] = [];
+      const ranks = new Set<number>();
+      const suits = new Map<string, number>();
+      const order = pool.slice().sort(() => Math.random() - 0.5);
+      for (const c of order) {
+        if (c.r === 0 || ranks.has(c.r)) continue;
+        if ((suits.get(c.s!) ?? 0) >= 3) continue;
+        hand.push(c);
+        ranks.add(c.r);
+        suits.set(c.s!, (suits.get(c.s!) ?? 0) + 1);
+        if (hand.length === 6) break;
+      }
+      const rs = [...ranks].sort((a, b) => a - b);
+      let run = 1;
+      let ok = hand.length === 6;
+      for (let i = 1; i < rs.length && ok; i++) {
+        run = rs[i] === rs[i - 1] + 1 ? run + 1 : 1;
+        if (run >= 5) ok = false;
+      }
+      if (ok) return hand;
+    }
+    throw new Error('无法构造高牌散牌手牌');
+  }
+
+  it('换牌：成手（三条）立即停牌，未用次数兑换血筹', () => {
+    const gs = toSwapC('clerk', 'clerk');
+    const p0 = gs.players[0];
+    const pool = [...p0.draw, ...p0.hand, ...p0.discard];
+    const threes = pool.filter((c) => c.r === 9).slice(0, 3);
+    expect(threes.length).toBe(3);
+    const filler = pool.filter((c) => c.r !== 9 && !threes.includes(c)).slice(0, 3);
+    p0.hand = [...threes, ...filler];
+    p0.draw = pool.filter((c) => !p0.hand.includes(c));
+    p0.discard = [];
+    const swapLeft = p0.swapLeft;
+    const bloodBefore = p0.blood;
+    botAct(createBrain(), gs, p0.id, NOW);
+    expect(p0.swapDone).toBe(true); // 成手停牌，不再浪费次数
+    expect(p0.swapLeft).toBe(swapLeft);
+    // 对手也停 → 换牌阶段收尾，未用次数 1:1 兑换血筹
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(p0.blood).toBe(bloodBefore + swapLeft);
+  });
+
+  it('换牌：弱牌（高牌）弃满上限重铸手牌', () => {
+    const gs = toSwapC('clerk', 'clerk');
+    const p0 = gs.players[0];
+    const pool = [...p0.draw, ...p0.hand, ...p0.discard];
+    const hand = pickHighCardHand(pool);
+    p0.hand = hand;
+    p0.draw = pool.filter((c) => !hand.includes(c));
+    p0.discard = [];
+    const swapLeft = p0.swapLeft;
+    botAct(createBrain(), gs, p0.id, NOW);
+    expect(p0.swapDone).toBe(false); // 弱牌继续换
+    expect(p0.discard.length).toBe(3); // 一次弃满 3 张
+    expect(p0.hand.length).toBe(6); // 抽至上限
+    expect(p0.swapLeft).toBe(swapLeft - 1);
   });
 });

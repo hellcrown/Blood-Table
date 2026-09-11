@@ -948,7 +948,6 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
 
 /* ---- 换牌决策：保留最优 5 张，弃孤立弱牌 ---- */
 function actSwap(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boolean {
-  void brain;
   const ch = blood.effChar(p);
   // 咒术师：有【5】先藏（抽1+1血筹）
   if (ch === 'curse') {
@@ -965,11 +964,21 @@ function actSwap(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bool
   }
   const isTarot = ch === 'tarot';
   const maxDrop = Math.min(isTarot ? 2 : charSwapMax(ch), p.hand.length);
-  // 按长线策略选保留的 5 张：弃掉对策略无贡献的牌，往目标牌型凑
-  const keep = new Set(bestKeep(gs, p, 5, curStrategy(brain, p)).map((c) => c.id));
-  const ranked = [...p.hand].sort((a, b) => a.r - b.r);
-  let drop = ranked.filter((c) => !keep.has(c.id)).slice(0, maxDrop);
-  if (drop.length === 0) drop = ranked.slice(0, Math.min(maxDrop, p.hand.length));
+  const keep = bestKeep(gs, p, 5, curStrategy(brain, p));
+  const ev = evalPlay(gs, p, keep);
+  // 成手（三条及以上，或两对且引点不低）：停牌换取未用次数的血筹，不为边际提升浪费次数
+  const strong = ev.cat >= 3 || (ev.cat === 2 && ev.pips >= 40);
+  if (strong) {
+    blood.bSwapStop(gs, p.id, now);
+    return true;
+  }
+  const ranked = [...p.hand].sort((a, b) => a.r - b.r); // 低→高
+  // 弱牌（高牌/一对）弃满上限加速重铸；两对只弃最优五张之外的那张
+  const dropCount = ev.cat <= 1 ? maxDrop : 1;
+  const keepIds = new Set(keep.map((c) => c.id));
+  const junk = ranked.filter((c) => !keepIds.has(c.id));
+  const extras = ranked.filter((c) => keepIds.has(c.id)).slice(0, Math.max(0, dropCount - junk.length));
+  const drop = [...junk, ...extras].slice(0, dropCount);
   if (drop.length === 0) {
     blood.bSwapStop(gs, p.id, now);
     return true;
