@@ -396,7 +396,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       case 'refreshPick':
         return `再来一批：点选至多 ${view.prompt.max ?? 2} 张黑市牌换掉，之后可立即再买一次`;
       case 'remove':
-        return '删牌：第 1 张免费，之后每张 2 血筹（点开弃牌区选择）';
+        return `删牌：免费删 ${view.prompt.free ?? 1} 张，之后每张 ${view.prompt.cost ?? 2} 血筹（点开弃牌区选择）`;
       case 'reorg':
         return '重整：二选一';
       case 'poisonTarget':
@@ -504,17 +504,39 @@ export function BloodTable({ view }: { view: BloodView }) {
   const handSetSel = view.prompt.k === 'setup' ? setSelSetup : view.prompt.k === 'play' ? setSelPlay : setSelSwap;
   const handMax = view.prompt.k === 'setup' ? 4 : view.prompt.k === 'play' ? 5 : 3;
 
+  // 与引擎 isChipInsertable 同规则：弃牌区目标牌能否插入指定芯片
+  const chipInsertable = (c: BloodCardView, defId: string): boolean => {
+    const def = BLOOD_MARKET_BY_ID.get(defId);
+    if (!def) return false;
+    if (c.chipIds.length > 0) return false;
+    if (def.noJoker && (c.s == null || c.r === 0)) return false;
+    if (def.effect.k === 'rankMod') {
+      const v = c.r + def.effect.mod;
+      if (v < 2 || v > 14) return false;
+    }
+    return true;
+  };
+  // 当前待插入的芯片（购买选目标 / 免费芯片待插入）
+  const activeChipDefId = chipBuying?.defId ?? (view.prompt.k === 'insertChip' ? view.prompt.defId : undefined);
+
   // 芯片插入模式下弃牌区点击
   const onDiscardClick = (c: BloodCardView) => {
     if (chipBuying) {
-      if (c.chipIds.length > 0) return;
+      // 不合法目标（已带芯片 / JOKER / 点数越界）：打开牌面详情而不是发送
+      if (!chipInsertable(c, chipBuying.defId)) {
+        setDetail(c);
+        return;
+      }
       // 先弹确认框，确认后才发送购买+插入
       setInsertConfirm({ cardId: c.id, defId: chipBuying.defId, buySlot: chipBuying.slot });
       return;
     }
     // 待插入芯片状态（如货箱盲掏免费获得的芯片）：点选目标牌后弹确认框
     if (view.prompt.k === 'insertChip') {
-      if (c.chipIds.length > 0) return;
+      if (!chipInsertable(c, view.prompt.defId ?? '')) {
+        setDetail(c);
+        return;
+      }
       setInsertConfirm({ cardId: c.id, defId: view.prompt.defId ?? '' });
       return;
     }
@@ -1158,7 +1180,8 @@ export function BloodTable({ view }: { view: BloodView }) {
                         setSelRemove([]);
                       }}
                     >
-                      删除 {selRemove.length} 张（费用 {Math.max(0, selRemove.length - 1) * 2}🩸）
+                      删除 {selRemove.length} 张（费用{' '}
+                      {Math.max(0, selRemove.length - (view.prompt.free ?? 1)) * (view.prompt.cost ?? 2)}🩸）
                     </button>
                     <button className="btn" onClick={() => send({ t: 'bRemoveDone' })}>
                       结束（不删牌）
@@ -1801,7 +1824,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <span key={c.id} className="act-row wrap">
                           <span className="hint">{cardLabel(c)} →</span>
                           <select
-                            value={blufferDecl[c.id]?.r ?? c.r}
+                            value={blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r)}
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
@@ -1820,7 +1843,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
-                                [c.id]: { r: blufferDecl[c.id]?.r ?? c.r, s: e.target.value },
+                                [c.id]: { r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r), s: e.target.value },
                               }))
                             }
                           >
@@ -1840,7 +1863,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                             t: 'bBlufferDeclare',
                             declared: (view.me.playCards ?? []).map((c) => ({
                               id: c.id,
-                              r: blufferDecl[c.id]?.r ?? c.r,
+                              r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r),
                               s: (blufferDecl[c.id]?.s ?? c.s ?? 's') as BloodCardView['s'],
                             })),
                           })
@@ -2103,7 +2126,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                   const dimmed =
                     (chipBuying != null && c.chipIds.length > 0) ||
                     (view.prompt.k === 'pullChip' && c.chipIds.length === 0) ||
-                    (view.prompt.k === 'pinpointVictim' && effRankOf(c).r !== (view.prompt.rank ?? 0));
+                    (view.prompt.k === 'pinpointVictim' && effRankOf(c).r !== (view.prompt.rank ?? 0)) ||
+                    (zoneModal.kind === 'discard' &&
+                      !!activeChipDefId &&
+                      (view.prompt.k === 'insertChip' || !!chipBuying) &&
+                      !chipInsertable(c, activeChipDefId));
                   return (
                     <div key={c.id} className="zone-cell">
                       <BCard
@@ -2150,7 +2177,8 @@ export function BloodTable({ view }: { view: BloodView }) {
                     setZoneModal(null);
                   }}
                 >
-                  确认删除 {selRemove.length} 张（费用 {Math.max(0, selRemove.length - 1) * 2}🩸）
+                  确认删除 {selRemove.length} 张（费用{' '}
+                  {Math.max(0, selRemove.length - (view.prompt.free ?? 1)) * (view.prompt.cost ?? 2)}🩸）
                 </button>
               )}
               {chipBuying && zoneModal.kind === 'discard' && (

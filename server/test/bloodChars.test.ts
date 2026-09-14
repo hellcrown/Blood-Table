@@ -879,3 +879,29 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(gs.recycle).toContain('calib1');
   });
 });
+
+describe('血色引擎 · 黑客删牌免费额度', () => {
+  it('黑客：删牌阶段免费删2张（第3张起每张2血筹）', () => {
+    const gs = makeGame('hacker', 'clerk');
+    driveTo(gs, 'remove');
+    const p0 = gs.players[0];
+    while (p0.discard.length < 3) p0.discard.push(p0.draw.pop()!);
+    p0.blood += 10;
+    const blood = p0.blood;
+    const removedBefore = p0.removed.length; // 黑客初始构筑已删 8 张
+    // 一次删 2 张：全额免费
+    bRemove(gs, p0.id, p0.discard.slice(0, 2).map((c) => c.id), NOW);
+    expect(p0.blood).toBe(blood);
+    expect(p0.removeDone).toBe(true);
+    expect(p0.removed.length).toBe(removedBefore + 2);
+    // 对照：一次删 3 张（新开一局）→ 第 3 张收费 2 血筹
+    const gs2 = makeGame('hacker', 'clerk');
+    driveTo(gs2, 'remove');
+    const q = gs2.players[0];
+    while (q.discard.length < 3) q.discard.push(q.draw.pop()!);
+    q.blood += 10;
+    const b2 = q.blood;
+    bRemove(gs2, q.id, q.discard.slice(0, 3).map((c) => c.id), NOW);
+    expect(q.blood).toBe(b2 - 2);
+  });
+});

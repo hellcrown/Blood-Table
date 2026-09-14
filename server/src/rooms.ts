@@ -114,6 +114,7 @@ export class RoomManager {
       this.dispatch(ws, msg);
     } catch (e) {
       if (e instanceof GameError) send(ws, { t: 'error', code: e.code, msg: e.message });
+      else if (e instanceof blood.BloodError) send(ws, { t: 'error', code: e.code, msg: e.message });
       else {
         console.error('[room] 消息处理异常:', e);
         send(ws, { t: 'error', code: 'INTERNAL', msg: '服务器内部错误' });

@@ -24,6 +24,8 @@ import {
   bInsertChip,
   bUseItem,
   bItemAsk,
+  bBlufferDeclare,
+  bInsertChip,
   bEraserClaim,
   bSpringUse,
   bRevealChipTarget,
@@ -1083,5 +1085,61 @@ describe('血色引擎 · 抢跑与连胜（速攻计分）', () => {
     expect(again.champStreak).toBe(0);
     expect(again.lastChampSeat).toBeNull();
     expect(again.target).toBe(8); // 重开保留自定义目标（原 5 已被钳制为 8）
+  });
+});
+
+
+describe('血色引擎 · JOKER 边界校验', () => {
+  /** 布置一张 JOKER 到弃牌区并挂 insertChip 挂起 */
+  function setupInsertJoker(defId: string): { gs: BloodState; jokerId: string } {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    const p0 = gs.players[0];
+    const pool = [...p0.draw, ...p0.hand, ...p0.discard];
+    const joker = pool.find((c) => c.r === 0)!;
+    p0.draw = p0.draw.filter((c) => c.id !== joker.id);
+    p0.hand = p0.hand.filter((c) => c.id !== joker.id);
+    p0.discard = p0.discard.filter((c) => c.id !== joker.id);
+    p0.discard.push(joker);
+    gs.phase = 'buy';
+    gs.secretPending = { seat: p0.id, kind: 'insertChip', defId, chipId: 'ch-t' };
+    return { gs, jokerId: joker.id };
+  }
+
+  it('noJoker 芯片插入 JOKER：拒绝', () => {
+    const { gs, jokerId } = setupInsertJoker('twinLens');
+    expect(() => bInsertChip(gs, 'p0', jokerId, NOW)).toThrow('该芯片不可插入JOKER中');
+  });
+
+  it('点数芯片插入 JOKER：点数越界拒绝', () => {
+    const { gs, jokerId } = setupInsertJoker('limiter1');
+    expect(() => bInsertChip(gs, 'p0', jokerId, NOW)).toThrow('点数超出 2-14');
+  });
+
+  it('花色芯片插入 JOKER：允许（与服务端规则一致）', () => {
+    const { gs, jokerId } = setupInsertJoker('redChip');
+    bInsertChip(gs, 'p0', jokerId, NOW);
+    expect(gs.players[0].chips.some((ch) => ch.on === jokerId && ch.def === 'redChip')).toBe(true);
+  });
+
+  it('瞎掰王：JOKER 可宣告为任意合法牌面，r=0 拒绝', () => {
+    const gs = make2p();
+    gs.players[0].charId = 'bluffer';
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    const p0 = gs.players[0];
+    giveHand(gs, 0, [isRank(13), isRank(13), (c) => c.r === 0, isRank(12), isRank(5)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    expect(gs.secretPending?.kind).toBe('blufferDeclare');
+    const declared = p0.play.map((c) => ({ id: c.id, r: c.r === 0 ? 0 : c.r, s: c.s ?? 's' }));
+    expect(() => bBlufferDeclare(gs, 'p0', declared, NOW)).toThrow('宣告点数须为 2-14');
+    const legal = p0.play.map((c) => ({ id: c.id, r: c.r === 0 ? 14 : c.r, s: c.s ?? 's' }));
+    bBlufferDeclare(gs, 'p0', legal, NOW);
+    expect(gs.bluffer?.declared.length).toBe(p0.play.length);
   });
 });

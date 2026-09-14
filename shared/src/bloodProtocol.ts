@@ -140,6 +140,8 @@ export interface BloodMyPrompt {
   /** setup: 最多可删除张数；deleteUpTo/refreshPick: 上限；remove: 额外删除单价 */
   max?: number;
   cost?: number;
+  /** remove: 免费删除张数（黑客2/默认1/飞车党与双生子兄0，皇叔0且单价1） */
+  free?: number;
   defId?: string; // insertChip: 待插入芯片
   /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 自己弃牌区 */
   cards?: { id: string; r: number; s: string | null }[];
