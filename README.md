@@ -73,14 +73,14 @@ cd Blood-Table && bash deploy.sh
 ```
 shared/src/
   protocol.ts             前后端共享的 WS 消息与类型
-  bloodCards.ts           黑市牌定义（24 种 57 张，数据驱动）
+  bloodCards.ts           黑市牌定义（基础 25 种 57 张，拓展黑市另 27 种 55 张，数据驱动）
   bloodEval.ts            血色对决评估器（前后端共用，出牌实时牌型提示）
 server/src/
   blood/                  血色模式引擎（8 阶段状态机/视图/超时托管）
   game/                   经典德扑引擎
   rooms.ts                房间、会话、重连、广播、计时
   index.ts                HTTP + WebSocket 服务、静态托管、心跳
-  test/                   单元测试 + 随机整场模拟 + WS 端到端冒烟
+server/test/              单元测试 + 随机整场模拟 + WS 端到端冒烟
 client/src/
   net/socket.ts           WS 客户端、自动重连、token 管理
   pages/Lobby|Room|Table|BloodTable
@@ -92,7 +92,7 @@ client/src/
 ## 测试
 
 ```bash
-npm test           # 59 个用例：德扑回归 34 + 血色评估器 19 + 血色引擎流程 5 + 随机整场模拟
+npm test           # 163 个用例：德扑回归 34 + 血色评估器 19 + 血色引擎流程 42 + 角色技能 37 + 机器人 26 + 血色随机整场模拟 5
 ```
 
 端到端脚本（先启动服务器）：
@@ -106,7 +106,7 @@ cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 
 - 对局状态在内存中，服务器进程重启后进行中的对局会丢失
 - 浏览器后台标签页可能被系统挂起导致连接中断，回到前台刷新页面即可恢复
-- 血色模式角色技能已全部自动化；观战/AI 补位未做
+- 血色模式角色技能已全部自动化；观战未做（AI 机器人补位已支持）
 
 ## 云服务器部署
 
