@@ -523,3 +523,48 @@ describe('血色机器人 · 换牌节奏', () => {
     expect(p0.swapLeft).toBe(swapLeft - 1);
   });
 });
+
+describe('血色机器人 · 芯片插入目标', () => {
+  function toSwapX(): BloodState {
+    const gs = createBloodGame(2, makePlayers(2), NOW);
+    gs.players[0].charOptions = ['clerk', 'dealer'];
+    gs.players[1].charOptions = ['clerk', 'clerk'];
+    driveBots(gs, ['p0', 'p1'], 'swap');
+    return gs;
+  }
+
+  it('黑色芯片：弃牌区有黑有红时选红牌插入', () => {
+    const gs = toSwapX();
+    gs.phase = 'buy';
+    const p0 = gs.players[0];
+    const pool = [...p0.draw, ...p0.hand, ...p0.discard];
+    const blackCard = pool.find((c) => c.s === 's' || c.s === 'c')!;
+    const redCard = pool.find((c) => c.s === 'h' || c.s === 'd')!;
+    expect(blackCard && redCard).toBeTruthy();
+    p0.discard = [blackCard, redCard];
+    p0.hand = [];
+    p0.draw = pool.filter((c) => c !== blackCard && c !== redCard);
+    gs.secretPending = { seat: p0.id, kind: 'insertChip', defId: 'blackChip', chipId: 'ch-b' };
+    botAct(createBrain(), gs, p0.id, NOW);
+    const chip = p0.chips.find((ch) => ch.def === 'blackChip');
+    expect(chip).toBeTruthy();
+    const host = p0.discard.find((c) => c.id === chip!.on)!;
+    expect(host.s === 'h' || host.s === 'd').toBe(true); // 插在红牌上（黑色牌插了等于白插）
+  });
+
+  it('黑色芯片：弃牌区全是黑牌 → 无有效目标，弃置入回收站', () => {
+    const gs = toSwapX();
+    gs.phase = 'buy';
+    const p0 = gs.players[0];
+    const pool = [...p0.draw, ...p0.hand, ...p0.discard];
+    const blacks = pool.filter((c) => c.s === 's' || c.s === 'c').slice(0, 2);
+    expect(blacks.length).toBe(2);
+    p0.discard = blacks;
+    p0.hand = [];
+    p0.draw = pool.filter((c) => !blacks.includes(c));
+    gs.secretPending = { seat: p0.id, kind: 'insertChip', defId: 'blackChip', chipId: 'ch-b' };
+    botAct(createBrain(), gs, p0.id, NOW);
+    expect(p0.chips.some((ch) => ch.def === 'blackChip')).toBe(false);
+    expect(gs.recycle).toContain('blackChip');
+  });
+});

@@ -446,7 +446,7 @@ function stratKeepWeight(c: BCard, strat: Strat): number {
   }
 }
 
-/** 芯片可插入的弃牌区目标（无芯片、点数合法、非 JOKER 限制）；有策略时优先服务策略目标 */
+/** 芯片可插入的弃牌区目标（无芯片、点数合法、非 JOKER 限制、排除零增益目标）；有策略时优先服务策略目标 */
 function insertableTarget(gs: BloodState, p: BPlayer, defId: string, strat?: Strat): BCard | null {
   const def = BLOOD_MARKET_BY_ID.get(defId);
   if (!def) return null;
@@ -457,6 +457,10 @@ function insertableTarget(gs: BloodState, p: BPlayer, defId: string, strat?: Str
       const v = c.r + def.effect.mod;
       if (v < 2 || v > 14) return false;
     }
+    // 零增益排除：JOKER 本就可当任意点数花色，灵活性芯片插上毫无意义（点数修正还会锁死 JOKER）
+    if (c.s == null && ['suit', 'suitWild', 'rankWild', 'wild', 'rankMod'].includes(def.effect.k)) return false;
+    // 花色芯片不插同色牌：黑色芯片（♠♣）插黑桃/梅花、红色芯片（♦♥）插方块/红桃都毫无变化
+    if (def.effect.k === 'suit' && c.s != null && def.effect.suits.includes(c.s)) return false;
     return true;
   });
   if (candidates.length === 0) return null;
