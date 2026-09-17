@@ -145,6 +145,7 @@ export type C2S =
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
+  | { t: 'kickPlayer'; seat: number }
   | { t: 'act'; action: PlayerAction }
   | { t: 'nextHand' }
   | { t: 'rematch' }

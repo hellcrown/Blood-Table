@@ -125,6 +125,15 @@ export function Room({ view }: { view: TableView }) {
                     {sv.isHost && <span className="tag host">房主</span>}
                     {!sv.connected && <span className="tag off">已断线</span>}
                   </div>
+                  {isHost && sv.id !== net.playerId && (
+                    <button
+                      className="btn tiny ghost kick-btn"
+                      title="请离该玩家"
+                      onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
+                    >
+                      请出
+                    </button>
+                  )}
                 </>
               ) : (
                 <button

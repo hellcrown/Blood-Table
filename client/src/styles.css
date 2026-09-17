@@ -3172,3 +3172,9 @@ body {
 .act-row.wrap {
   flex-wrap: wrap;
 }
+
+/* 座位卡上的请出按钮 */
+.kick-btn {
+  margin-top: 6px;
+  width: 100%;
+}

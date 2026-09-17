@@ -25,7 +25,6 @@ import {
   bUseItem,
   bItemAsk,
   bBlufferDeclare,
-  bInsertChip,
   bEraserClaim,
   bSpringUse,
   bRevealChipTarget,

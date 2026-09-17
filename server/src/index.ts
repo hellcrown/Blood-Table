@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -215,8 +216,39 @@ const server = http.createServer((req, res) => {
   serveStatic(url.pathname, res);
 });
 
-const wss = new WebSocketServer({ server, path: '/ws' });
-wss.on('connection', (ws) => manager.handleConnection(ws));
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+
+// 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
+const MAX_TOTAL_CONNS = 200;
+const MAX_CONNS_PER_IP = 10;
+const ipConns = new Map<string, number>();
+const ipNewConn = new IpTable(
+  () => new SlidingWindow(60_000, 15),
+  (w, now) => w.idle(now),
+);
+setInterval(() => ipNewConn.prune(), 5 * 60_000).unref();
+
+wss.on('connection', (ws, req) => {
+  const ip = req.socket.remoteAddress ?? '';
+  (ws as unknown as { ip?: string }).ip = ip;
+  // 新建连接频率超限：直接拒绝
+  if (!ipNewConn.get(ip).allow()) {
+    ws.close(4008, 'rate limited');
+    return;
+  }
+  // 总并发 / 单 IP 并发超限：直接拒绝
+  if (wss.clients.size > MAX_TOTAL_CONNS || (ipConns.get(ip) ?? 0) >= MAX_CONNS_PER_IP) {
+    ws.close(4008, 'too many connections');
+    return;
+  }
+  ipConns.set(ip, (ipConns.get(ip) ?? 0) + 1);
+  ws.on('close', () => {
+    const left = (ipConns.get(ip) ?? 1) - 1;
+    if (left <= 0) ipConns.delete(ip);
+    else ipConns.set(ip, left);
+  });
+  manager.handleConnection(ws);
+});
 
 // 心跳：清掉死连接
 setInterval(() => {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { bloodTick, bSwapStop, createBloodGame } from '../src/blood/engine';
 import { promptFor } from '../src/blood/view';
 import { botAct, createBrain, updateBrains, deriveStrategy, curStrategy, worstDiscardCards, guessOppStrategy, strongestThreat, type BotBrain } from '../src/blood/botAI';
+import { SlidingWindow, TokenBucket } from '../src/net/limits';
 import type { BCard, BPlayer, BloodState } from '../src/blood/types';
 
 const NOW = 1000;
@@ -178,7 +179,7 @@ describe('血色机器人 · AI 行为', () => {
 import { RoomManager } from '../src/rooms';
 
 function stubWs() {
-  return { readyState: 0, OPEN: 0, send: () => {}, on: () => {} } as never;
+  return { readyState: 0, OPEN: 0, send: () => {}, on: () => {}, close: () => {} } as never;
 }
 
 describe('血色机器人 · 房间管理', () => {
@@ -566,5 +567,148 @@ describe('血色机器人 · 芯片插入目标', () => {
     botAct(createBrain(), gs, p0.id, NOW);
     expect(p0.chips.some((ch) => ch.def === 'blackChip')).toBe(false);
     expect(gs.recycle).toContain('blackChip');
+  });
+});
+
+describe('血色机器人 · 公开服务器防护', () => {
+  function stubWsIp(ip: string) {
+    return { readyState: 0, OPEN: 0, send: () => {}, on: () => {}, close: () => {}, ip } as never;
+  }
+
+  it('换房泄漏修复：同一连接重复建房后，旧房间标记断线并可被回收', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = (m.rooms as unknown as Map<string, TestRoom>);
+    const ws = stubWsIp('1.1.1.1');
+    m.handleCreate(ws, { t: 'create', name: '甲', maxPlayers: 4, mode: 'blood' });
+    const roomA = [...rooms.values()][0];
+    const onlineInA = () =>
+      [...roomA.sessions.values()].filter((s) => (s as unknown as { connected: boolean }).connected && !(s as unknown as { bot?: boolean }).bot).length;
+    expect(onlineInA()).toBe(1);
+    // 同一连接再建一房 → 旧房间失去唯一在线者，立即删除（泄漏已堵死）
+    m.handleCreate(ws, { t: 'create', name: '甲', maxPlayers: 4, mode: 'blood' });
+    expect(onlineInA()).toBe(0);
+    expect(rooms.has(roomA.code)).toBe(false);
+    expect(rooms.size).toBe(1); // 只剩新房
+    // 快进 6 分钟：新房有在线者，不受空房回收影响
+    vi.setSystemTime(new Date(NOW + 6 * 60_000));
+    mgr.tickAll();
+    expect(rooms.size).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('建房配额：单 IP 最多同时 3 间', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = m.rooms as unknown as Map<string, unknown>;
+    // 同 IP 三条并发连接各建一间
+    for (let i = 0; i < 3; i++) {
+      m.handleCreate(stubWsIp('9.9.9.9'), { t: 'create', name: '甲', maxPlayers: 2, mode: 'blood' });
+    }
+    expect(rooms.size).toBe(3);
+    // 第 4 条连接再建 → 触发单 IP 上限
+    expect(() =>
+      m.handleCreate(stubWsIp('9.9.9.9'), { t: 'create', name: '甲', maxPlayers: 2, mode: 'blood' }),
+    ).toThrow('每个 IP 同时最多创建 3 个房间');
+    expect(rooms.size).toBe(3);
+  });
+
+  it('房间总数上限 64', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = m.rooms as unknown as Map<string, { ownerIp: string }>;
+    for (let i = 0; i < 64; i++) {
+      rooms.set(`SEED${i}`, { ownerIp: `seed-${i}` });
+    }
+    const ws = stubWsIp('8.8.8.8');
+    expect(() => m.handleCreate(ws, { t: 'create', name: '乙', maxPlayers: 2, mode: 'blood' })).toThrow(
+      '房间数已达上限',
+    );
+  });
+
+  it('昵称清洗与重名后缀', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = m.rooms as unknown as Map<string, TestRoom>;
+    const ws = stubWsIp('3.3.3.3');
+    // 控制字符与零宽字符被剥离
+    m.handleCreate(ws, { t: 'create', name: '甲\u200b\u0001乙', maxPlayers: 4, mode: 'blood' });
+    let room = [...rooms.values()][0];
+    const first = [...room.sessions.values()][0] as unknown as { name: string };
+    expect(first.name).toBe('甲乙');
+    // 同房间重名：自动加 #2 后缀
+    const ws2 = stubWsIp('4.4.4.4');
+    (ws2 as { ip?: string }).ip = '4.4.4.4';
+    (m.handleJoin as (w: unknown, msg: unknown) => void)(ws2, { t: 'join', code: room.code, name: '甲乙' });
+    room = [...rooms.values()][0];
+    const names = [...room.sessions.values()].map((s) => (s as unknown as { name: string }).name);
+    expect(names.filter((n) => n === '甲乙').length).toBe(1);
+    expect(names.some((n) => n === '甲乙#2')).toBe(true);
+  });
+
+  it('房主请离真人玩家：目标断开回大厅；非房主操作被拒', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = m.rooms as unknown as Map<string, TestRoom>;
+    const wsHost = stubWsIp('5.5.5.5');
+    m.handleCreate(wsHost, { t: 'create', name: '甲', maxPlayers: 4, mode: 'blood' });
+    let room = [...rooms.values()][0];
+    const host = [...room.sessions.values()][0] as unknown as { id: string; seat: number };
+    const wsGuest = stubWsIp('6.6.6.6');
+    const closed: number[] = [];
+    (wsGuest as unknown as { close: (c?: number, r?: string) => void }).close = (c?: number) => {
+      closed.push(c ?? 0);
+    };
+    (m.handleJoin as (w: unknown, msg: unknown) => void)(wsGuest, { t: 'join', code: room.code, name: '乙' });
+    const guest = [...room.sessions.values()].find((s) => s.id !== host.id) as unknown as {
+      id: string;
+      seat: number;
+    };
+    // 非房主请离 → 拒绝
+    expect(() =>
+      (m.handleKickPlayer as (r: unknown, s: unknown, msg: unknown) => void)(
+        room,
+        guest,
+        { t: 'kickPlayer', seat: host.seat },
+      ),
+    ).toThrow('只有房主可以请离玩家');
+    // 房主请离 → 目标连接以 4003 关闭、会话断线
+    (m.handleKickPlayer as (r: unknown, s: unknown, msg: unknown) => void)(
+      room,
+      host,
+      { t: 'kickPlayer', seat: guest.seat },
+    );
+    expect(closed).toContain(4003);
+    expect(guest.connected).toBe(false);
+    void room;
+  });
+});
+
+describe('限流原语', () => {
+  it('SlidingWindow：窗口内限次、窗口滑过恢复', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const w = new SlidingWindow(60_000, 3);
+    expect(w.allow()).toBe(true);
+    expect(w.allow()).toBe(true);
+    expect(w.allow()).toBe(true);
+    expect(w.allow()).toBe(false);
+    vi.setSystemTime(new Date(NOW + 61_000));
+    expect(w.allow()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('TokenBucket：突发受容量限制、持续速率恢复、洪泛检测', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const b = new TokenBucket(6, 5);
+    for (let i = 0; i < 5; i++) expect(b.take()).toBe(true); // 突发 5 发
+    expect(b.take()).toBe(false); // 突发耗尽
+    vi.setSystemTime(new Date(NOW + 1000));
+    for (let i = 0; i < 5; i++) expect(b.take()).toBe(true); // 1 秒回 5 个（受容量钳制）
+    expect(b.take()).toBe(false);
+    vi.useRealTimers();
   });
 });

@@ -32,6 +32,9 @@ pm2 delete blood-table >/dev/null 2>&1 || true
 PORT="$PORT" ADMIN_KEY="$ADMIN_KEY_VALUE" pm2 start npm --name blood-table -- start
 pm2 save
 
+# 5. 日志轮转（防止 pm2 日志无限膨胀）
+npx --yes pm2-logrotate@latest 2>/dev/null || true
+
 echo ""
 echo "✅ 部署完成：http://<服务器IP>:$PORT"
 echo "   - 别忘了在云控制台「安全组」放行 TCP $PORT"

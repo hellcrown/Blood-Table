@@ -8,12 +8,23 @@ import { buildBloodView, promptFor } from './blood/view';
 import { botAct, createBrain, updateBrains, type BotBrain } from './blood/botAI';
 import type { BloodState } from './blood/types';
 import { GameError, RESULT_MS, type GState } from './game/types';
+import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_IDLE_MS = 5 * 60_000; // 全员断线 5 分钟后删除房间（保留重连机会）
 const MAX_ALLBOT_ROOMS = 10; // 全机器人房间数量上限（超出后 bot 停止行动，等待空房回收）
 const BETTING_PHASES = new Set(['preflop', 'flop', 'turn', 'river']);
+const MAX_ROOMS = 64; // 房间总数上限（防脚本刷房耗内存）
+const MAX_ROOMS_PER_IP = 3; // 单 IP 同时拥有的房间上限
+const MAX_JOIN_PER_MIN = 30; // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
+
+declare module 'ws' {
+  interface WebSocket {
+    /** 客户端 IP（握手时记录，用于连接/建房配额） */
+    ip?: string;
+  }
+}
 
 export interface Session {
   id: string;
@@ -31,6 +42,8 @@ export interface Session {
 export interface Room {
   code: string;
   hostId: string;
+  /** 创建者 IP（建房配额用） */
+  ownerIp: string;
   maxPlayers: number;
   mode: GameMode;
   settings: { sb: number; bb: number; startChips: number };
@@ -70,14 +83,37 @@ function makeCode(): string {
 }
 
 function cleanName(raw: unknown, fallbackSeed: number): string {
-  const s = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ').slice(0, 12) : '';
+  const s =
+    typeof raw === 'string'
+      ? raw
+          .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029\ufeff]/g, '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 12)
+      : '';
   return s || `玩家${fallbackSeed % 100}`;
+}
+
+/** 每连接消息令牌桶（持续 ~6条/秒，突发 30；正常游戏远低于此） */
+const msgBuckets = new WeakMap<WebSocket, TokenBucket>();
+function takeMessageSlot(ws: WebSocket): boolean {
+  let bucket = msgBuckets.get(ws);
+  if (!bucket) {
+    bucket = new TokenBucket(6, 30);
+    msgBuckets.set(ws, bucket);
+  }
+  return bucket.take();
 }
 
 export class RoomManager {
   private rooms = new Map<string, Room>();
   private tokenIndex = new Map<string, { room: Room; sessionId: string }>();
   private bindings = new WeakMap<WebSocket, { room: Room; session: Session }>();
+  /** 单 IP 加入/建房尝试限流（防房间码枚举） */
+  private joinAttempts = new IpTable(
+    () => new SlidingWindow(60_000, MAX_JOIN_PER_MIN),
+    (w, now) => w.idle(now),
+  );
 
   /* ---------------- 连接管理 ---------------- */
 
@@ -103,6 +139,16 @@ export class RoomManager {
   }
 
   private onMessage(ws: WebSocket, raw: RawData): void {
+    if (!takeMessageSlot(ws)) {
+      if (msgBuckets.get(ws)?.flooded()) {
+        try {
+          ws.close(4009, 'flood');
+        } catch {
+          /* 忽略 */
+        }
+      }
+      return; // 超速消息直接丢弃
+    }
     let msg: C2S;
     try {
       msg = JSON.parse(String(raw)) as C2S;
@@ -161,6 +207,9 @@ export class RoomManager {
         return;
       case 'kickBot':
         this.handleKickBot(room, session, msg);
+        return;
+      case 'kickPlayer':
+        this.handleKickPlayer(room, session, msg);
         return;
       case 'act':
         this.handleAct(room, session, msg);
@@ -413,9 +462,26 @@ export class RoomManager {
 
   /* ---------------- 入房 ---------------- */
 
+  /** 同一连接换房/重入前，先对旧绑定执行离开清理（否则旧房间永远"在线"，无法被空房回收） */
+  private detachBinding(ws: WebSocket): void {
+    const old = this.bindings.get(ws);
+    if (!old) return;
+    this.bindings.delete(ws);
+    const { room, session } = old;
+    if (session.ws === ws) session.ws = null; // 先摘除连接，避免离场清理误关当前连接
+    this.handleLeave(room, session);
+  }
+
   private handleCreate(ws: WebSocket, msg: Extract<C2S, { t: 'create' }>): void {
+    const ip = ws.ip ?? '';
+    if (this.rooms.size >= MAX_ROOMS) throw new GameError('ROOM_LIMIT', '房间数已达上限，请稍后再试');
+    const owned = [...this.rooms.values()].filter((r) => r.ownerIp === ip).length;
+    if (owned >= MAX_ROOMS_PER_IP) {
+      throw new GameError('ROOM_LIMIT', '每个 IP 同时最多创建 3 个房间，请先解散旧房间');
+    }
+    this.detachBinding(ws);
     const mode: GameMode = msg.mode === 'blood' ? 'blood' : 'classic';
-    const room = this.createRoom(msg.maxPlayers, mode);
+    const room = this.createRoom(msg.maxPlayers, mode, ip);
     const session = this.addSession(room, msg.name);
     this.bind(ws, room, session);
     send(ws, { t: 'hello', token: session.token, playerId: session.id });
@@ -423,10 +489,15 @@ export class RoomManager {
   }
 
   private handleJoin(ws: WebSocket, msg: Extract<C2S, { t: 'join' }>): void {
+    const ip = ws.ip ?? '';
+    if (!this.joinAttempts.get(ip).allow()) {
+      throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
+    }
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
     if (room.sessions.size >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
+    this.detachBinding(ws);
     const session = this.addSession(room, msg.name);
     this.bind(ws, room, session);
     send(ws, { t: 'hello', token: session.token, playerId: session.id });
@@ -463,13 +534,14 @@ export class RoomManager {
     this.bindings.set(ws, { room, session });
   }
 
-  private createRoom(maxPlayersRaw: number, mode: GameMode = 'classic'): Room {
+  private createRoom(maxPlayersRaw: number, mode: GameMode = 'classic', ownerIp = ''): Room {
     const maxPlayers = Math.min(4, Math.max(2, Math.floor(Number(maxPlayersRaw) || 4)));
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
     const room: Room = {
       code,
       hostId: '',
+      ownerIp,
       maxPlayers,
       mode,
       settings: { sb: 5, bb: 10, startChips: 1000 },
@@ -491,10 +563,17 @@ export class RoomManager {
     const taken = new Set([...room.sessions.values()].map((s) => s.seat));
     let seat = 0;
     while (taken.has(seat)) seat++;
+    let name = cleanName(nameRaw, room.sessions.size + 1);
+    const names = new Set([...room.sessions.values()].map((s) => s.name));
+    if (names.has(name)) {
+      let i = 2;
+      while (names.has(`${name.slice(0, 10)}#${i}`)) i++;
+      name = `${name.slice(0, 10)}#${i}`;
+    }
     const session: Session = {
       id: makeId(),
       token: randomBytes(16).toString('hex'),
-      name: cleanName(nameRaw, room.sessions.size + 1),
+      name,
       seat,
       connected: true,
       ws: null,
@@ -671,6 +750,33 @@ export class RoomManager {
     room.botBrains.set(bot.id, createBrain());
     room.botNextAct.set(bot.id, 0);
     this.broadcast(room);
+  }
+
+  /** 房主请离真人玩家：按离开流程清理并强制断开（对局中断线由超时托管兜底） */
+  private handleKickPlayer(room: Room, session: Session, msg: Extract<C2S, { t: 'kickPlayer' }>): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以请离玩家');
+    const seat = Math.floor(msg.seat);
+    const target = [...room.sessions.values()].find((s) => s.seat === seat && s.id !== session.id);
+    if (!target) throw new GameError('BAD_SEAT', '该座位没有可请离的玩家');
+    if (target.bot) {
+      // bot 座位：未开局时直接移除（对局中仍走「移除机器人」的限制）
+      if (room.game) throw new GameError('IN_GAME', '对局进行中不能移除机器人');
+      this.removeSession(room, target);
+      this.broadcast(room);
+      return;
+    }
+    send(target.ws, { t: 'error', code: 'KICKED', msg: '你已被房主请出房间' });
+    this.handleLeave(room, target);
+    if (target.ws) {
+      try {
+        target.ws.close(4003, 'kicked');
+      } catch {
+        /* 忽略 */
+      }
+      this.bindings.delete(target.ws);
+      target.ws = null;
+    }
+    target.connected = false;
   }
 
   private handleKickBot(room: Room, session: Session, msg: Extract<C2S, { t: 'kickBot' }>): void {
