@@ -20,7 +20,9 @@ export function buildView(room: Room, viewerId: string | null): TableView {
 
   const g = room.game as GState | null;
   if (!g) {
-    const players: SeatView[] = [...room.sessions.values()]
+    // 观战者不作为座位玩家展示
+    const seatedSessions = [...room.sessions.values()].filter((s) => !s.spectator);
+    const players: SeatView[] = seatedSessions
       .sort((a, b) => a.seat - b.seat)
       .map((s) => ({
         id: s.id,

@@ -208,10 +208,17 @@ export function BloodTable({ view }: { view: BloodView }) {
       return rel(a.seat) - rel(b.seat);
     });
   // 环绕布局方位：下家→左、对家→上、上家→右（2 人局对家在上）*/
-  const oppRingArea = (oppSeat: number, v: BloodView): 'ring-left' | 'ring-top' | 'ring-right' => {
+  // 观战中：自己不是对局玩家（me.seat === -1），只收视图
+  const spectating = view.me.seat < 0;
+  const oppRingArea = (oppSeat: number, v: BloodView): string => {
     const nn = v.players.length;
+    if (v.me.seat < 0) {
+      // 观战者：四个方位全用来展示玩家（含底部）
+      const rel = (oppSeat + 1) % nn;
+      return rel === 1 ? 'ring-left' : rel === 2 ? 'ring-top' : rel === 3 ? 'ring-right' : 'ring-bottom';
+    }
     const rel = (oppSeat - v.me.seat + nn) % nn;
-    if (nn >= 4) return rel === 1 ? 'ring-left' : rel === 2 ? 'ring-top' : 'ring-right';
+    if (nn >= 4) return rel === 1 ? 'ring-left' : rel === 2 ? 'ring-top' : rel === 3 ? 'ring-right' : 'ring-right';
     if (nn === 3) return rel === 1 ? 'ring-left' : 'ring-top';
     return 'ring-top';
   };
@@ -755,6 +762,11 @@ export function BloodTable({ view }: { view: BloodView }) {
         )}
 
         <div className="blood-area table-ring">
+          {spectating && (
+            <div className="spectate-banner" style={{ gridArea: 'top' }}>
+              🔭 观战中 —— 对局结束后点击空座位可随时加入
+            </div>
+          )}
           {opponents.map((opp) => (
             <div
               key={opp.seat}
@@ -955,6 +967,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             )}
           </div>
 
+          {!spectating && (
           <div className={`bp-panel mine ring-bottom seat-${view.me.seat % 4} self ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
             <div className="bp-head">
               <span className="bp-name">
@@ -2122,6 +2135,7 @@ export function BloodTable({ view }: { view: BloodView }) {
               )}
             </div>
           </div>
+        )}
         </div>
       </div>
 

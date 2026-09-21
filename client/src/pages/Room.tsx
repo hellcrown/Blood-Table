@@ -60,6 +60,8 @@ export function Room({ view }: { view: TableView }) {
   const seats: (SeatView | null)[] = Array.from({ length: view.maxPlayers }, (_, i) =>
     view.players.find((p) => p.seat === i) ?? null,
   );
+  // 观战中：自己不在已入座玩家列表（点击空座位即可入座转为玩家）
+  const spectating = !view.players.some((p) => p.id === net.playerId);
 
   const renderSeatCell = (i: number) => {
     const sv = seats[i];
@@ -146,6 +148,12 @@ export function Room({ view }: { view: TableView }) {
       </header>
 
       <div className="room-body">
+        {spectating && (
+          <div className="spectate-banner">
+            🔭 观战中 —— 点击下方空座位即可入座成为玩家
+          </div>
+        )}
+
         <div className="invite-box">
           <div className="box-title">邀请好友</div>
           <div className="invite-row">

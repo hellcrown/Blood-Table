@@ -40,6 +40,10 @@ export function Lobby({ connected }: { connected: boolean }) {
     net.saveName(name.trim());
     net.send({ t: 'join', name: name.trim(), code: code.trim().toUpperCase() });
   };
+  const spectate = () => {
+    net.saveName(name.trim());
+    net.send({ t: 'spectate', name: name.trim(), code: code.trim().toUpperCase() });
+  };
 
   return (
     <div className="lobby">
@@ -96,6 +100,14 @@ export function Lobby({ connected }: { connected: boolean }) {
               />
               <button className="btn" disabled={!nameOk || code.length !== 4 || !connected} onClick={join}>
                 加入
+              </button>
+              <button
+                className="btn"
+                disabled={!nameOk || code.length !== 4 || !connected}
+                title="进入房间观看对局，不参与游戏；点击空座位可随时加入"
+                onClick={spectate}
+              >
+                观战
               </button>
             </div>
           </div>

@@ -18,7 +18,8 @@ const BETTING_PHASES = new Set(['preflop', 'flop', 'turn', 'river']);
 const MAX_ROOMS = 64; // 房间总数上限（防脚本刷房耗内存）
 const MAX_ROOMS_PER_IP = 3; // 单 IP 同时拥有的房间上限
 const MAX_JOIN_PER_MIN = 30;
-const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买 // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
+const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买
+const MAX_SPECTATORS = 10; // 单房间观战人数上限 // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买 // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
 
 declare module 'ws' {
   interface WebSocket {
@@ -38,6 +39,8 @@ export interface Session {
   lastEventSeq: number;
   /** 服务端机器人（不占用 WebSocket 连接，广播时跳过序列化） */
   bot?: boolean;
+  /** 观战者：不占座位、只收视图（seat 恒为 -1） */
+  spectator?: boolean;
 }
 
 export interface Room {
@@ -182,6 +185,9 @@ export class RoomManager {
       case 'join':
         this.handleJoin(ws, msg);
         return;
+      case 'spectate':
+        this.handleSpectate(ws, msg);
+        return;
       case 'rejoin':
         this.handleRejoin(ws, msg);
         return;
@@ -234,6 +240,10 @@ export class RoomManager {
   /* ---------------- 血色模式 ---------------- */
 
   private handleBlood(room: Room, session: Session, msg: C2S): void {
+    if (session.spectator) {
+      send(session.ws, { t: 'error', code: 'SPECTATING', msg: '观战中不能执行玩家操作' });
+      return;
+    }
     if (!msg.t.startsWith('b')) {
       send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
       return;
@@ -484,6 +494,20 @@ export class RoomManager {
     this.handleLeave(room, session);
   }
 
+  /** 观战加入：不占座位、不参与操作，仅接收对局视图 */
+  private handleSpectate(ws: WebSocket, msg: Extract<C2S, { t: 'spectate' }>): void {
+    const code = String(msg.code ?? '').trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
+    const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
+    if (spectatorCount >= MAX_SPECTATORS) throw new GameError('ROOM_LIMIT', '观战人数已达上限');
+    this.detachBinding(ws);
+    const session = this.addSession(room, msg.name, true);
+    this.bind(ws, room, session);
+    send(ws, { t: 'hello', token: session.token, playerId: session.id });
+    this.broadcast(room);
+  }
+
   private handleCreate(ws: WebSocket, msg: Extract<C2S, { t: 'create' }>): void {
     const ip = ws.ip ?? '';
     if (this.rooms.size >= MAX_ROOMS) throw new GameError('ROOM_LIMIT', '房间数已达上限，请稍后再试');
@@ -508,7 +532,8 @@ export class RoomManager {
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
-    if (room.sessions.size >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
+    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
     this.detachBinding(ws);
     const session = this.addSession(room, msg.name);
     this.bind(ws, room, session);
@@ -535,7 +560,7 @@ export class RoomManager {
     session.ws = ws;
     session.connected = true;
     room.pendingRemove.delete(session.id);
-    if (!room.hostId) room.hostId = session.id; // 房主空缺（原房主离开后只剩 bot）时由重连者接任
+    if (!room.hostId && !session.spectator) room.hostId = session.id; // 房主空缺（原房主离开后只剩 bot）时由重连者接任
     this.bind(ws, room, session);
     send(ws, { t: 'hello', token: session.token, playerId: session.id });
     this.broadcast(room);
@@ -572,16 +597,19 @@ export class RoomManager {
     return room;
   }
 
-  private addSession(room: Room, nameRaw: unknown): Session {
-    const taken = new Set([...room.sessions.values()].map((s) => s.seat));
-    let seat = 0;
-    while (taken.has(seat)) seat++;
+  private addSession(room: Room, nameRaw: unknown, spectator = false): Session {
     let name = cleanName(nameRaw, room.sessions.size + 1);
     const names = new Set([...room.sessions.values()].map((s) => s.name));
     if (names.has(name)) {
       let i = 2;
       while (names.has(`${name.slice(0, 10)}#${i}`)) i++;
       name = `${name.slice(0, 10)}#${i}`;
+    }
+    let seat = -1;
+    if (!spectator) {
+      const taken = new Set([...room.sessions.values()].map((s) => s.seat).filter((s) => s >= 0));
+      seat = 0;
+      while (taken.has(seat)) seat++;
     }
     const session: Session = {
       id: makeId(),
@@ -591,10 +619,11 @@ export class RoomManager {
       connected: true,
       ws: null,
       lastEventSeq: room.game?.logSeq ?? 0,
+      ...(spectator ? { spectator: true } : {}),
     };
     room.sessions.set(session.id, session);
     this.tokenIndex.set(session.token, { room, sessionId: session.id });
-    if (!room.hostId) room.hostId = session.id;
+    if (!room.hostId && !spectator) room.hostId = session.id;
     return session;
   }
 
@@ -629,7 +658,7 @@ export class RoomManager {
     room.pendingRemove.delete(session.id);
     if (room.hostId === session.id) {
       // 房主转移永不交给机器人；只剩 bot 时置空，由下一位加入的真人接任
-      const next = [...room.sessions.values()].find((s) => s.connected && !s.bot);
+      const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && !s.spectator);
       room.hostId = next?.id ?? '';
     }
   }
@@ -637,6 +666,15 @@ export class RoomManager {
   /* ---------------- 房间内操作 ---------------- */
 
   private handleLeave(room: Room, session: Session): void {
+    if (session.spectator) {
+      this.removeSession(room, session);
+      if (room.sessions.size === 0) {
+        this.rooms.delete(room.code);
+        return;
+      }
+      this.broadcast(room);
+      return;
+    }
     const g = room.game;
     // 血色模式：直接离场标记断线（回合由超时托管兜底），终局/构筑前由 GC 清理
     if (room.mode === 'blood' && g) {
@@ -651,7 +689,7 @@ export class RoomManager {
         session.ws = null;
       }
       if (room.hostId === session.id) {
-        const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && s.id !== session.id);
+        const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && !s.spectator && s.id !== session.id);
         // 只剩机器人时不转移（置空），原房主重连即恢复身份，新玩家加入自动接任
         room.hostId = next?.id ?? '';
       }
@@ -690,6 +728,7 @@ export class RoomManager {
     if (room.mode === 'blood') {
       if (room.game) return;
       const players = [...room.sessions.values()]
+        .filter((s) => !s.spectator)
         .sort((a, b) => a.seat - b.seat)
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
       room.botBrains.clear(); // 记忆只在单局内有效（不做跨局学习）
@@ -700,6 +739,7 @@ export class RoomManager {
     } else {
       if (!room.game) {
         const players = [...room.sessions.values()]
+          .filter((s) => !s.spectator)
           .sort((a, b) => a.seat - b.seat)
           .map((s) => ({ id: s.id, name: s.name, seat: s.seat, chips: room.settings.startChips }));
         room.game = engine.createGame(room.settings, room.maxPlayers, players);
@@ -754,7 +794,8 @@ export class RoomManager {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以添加机器人');
     if (room.mode !== 'blood') throw new GameError('BAD_MODE', '机器人仅支持血色模式');
     if (room.game) throw new GameError('IN_GAME', '对局进行中不能添加机器人');
-    if (room.sessions.size >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
+    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
     const botNo = [...room.sessions.values()].filter((s) => s.bot).length + 1;
     const taken = new Set([...room.sessions.values()].map((s) => s.seat));
     let seat = 0;
@@ -851,7 +892,16 @@ export class RoomManager {
 
   private handleSit(room: Room, session: Session, msg: Extract<C2S, { t: 'sit' }>): void {
     const g = room.game;
-    if (g && g.phase !== 'waiting') throw new GameError('IN_GAME', '对局进行中不能换座位');
+    if (g && g.phase !== 'waiting') {
+      throw new GameError(
+        'IN_GAME',
+        session.spectator ? '对局进行中暂不能入座，请等待下一局开始' : '对局进行中不能换座位',
+      );
+    }
+    if (session.spectator) {
+      session.spectator = false; // 观战转玩家
+      if (!room.hostId) room.hostId = session.id;
+    }
     const seat = Math.floor(msg.seat);
     if (!Number.isInteger(seat) || seat < 0 || seat >= room.maxPlayers) {
       throw new GameError('BAD_SEAT', '座位号无效');

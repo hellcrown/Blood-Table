@@ -3436,3 +3436,13 @@ body {
   border-style: solid;
   border-width: 2px;
 }
+/* 观战横幅 */
+.spectate-banner {
+  border: 1px solid var(--gold-dim);
+  background: rgba(90, 68, 26, 0.25);
+  color: var(--gold);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
