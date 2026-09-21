@@ -241,8 +241,7 @@ export class RoomManager {
 
   private handleBlood(room: Room, session: Session, msg: C2S): void {
     if (session.spectator) {
-      send(session.ws, { t: 'error', code: 'SPECTATING', msg: '观战中不能执行玩家操作' });
-      return;
+      throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
     }
     if (!msg.t.startsWith('b')) {
       send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
@@ -723,7 +722,8 @@ export class RoomManager {
 
   private handleStart(room: Room, session: Session): void {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以开始游戏');
-    if (room.sessions.size < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家');
+    const seatedPlayers = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seatedPlayers < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家');
     const now = Date.now();
     if (room.mode === 'blood') {
       if (room.game) return;

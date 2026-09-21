@@ -623,6 +623,47 @@ describe('血色机器人 · 公开服务器防护', () => {
     expect(rooms.size).toBe(3);
   });
 
+  it('观战：不占座位、开局被排除、可入座转玩家、离开即移除', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = m.rooms as unknown as Map<string, TestRoom>;
+    const wsHost = stubWsIp('11.0.0.1');
+    m.handleCreate(wsHost, { t: 'create', name: '甲', maxPlayers: 4, mode: 'blood' });
+    const room = [...rooms.values()][0];
+    const host = [...room.sessions.values()][0] as unknown as { id: string; seat: number };
+    const ws2 = stubWsIp('11.0.0.2');
+    (m.handleJoin as (w: unknown, msg: unknown) => void)(ws2, { t: 'join', code: room.code, name: '乙' });
+    // 观战加入
+    const ws3 = stubWsIp('11.0.0.3');
+    (m.handleSpectate as (w: unknown, msg: unknown) => void)(ws3, { t: 'spectate', code: room.code, name: '围观群众' });
+    const spec = [...room.sessions.values()].find((s) => s.spectator)! as unknown as {
+      id: string;
+      seat: number;
+      spectator: boolean;
+    };
+    expect(spec.spectator).toBe(true);
+    expect(spec.seat).toBe(-1); // 不占座位
+    expect([...room.sessions.values()].filter((s) => !s.spectator).length).toBe(2); // 不计入玩家名额
+    expect(room.hostId).not.toBe(spec.id); // 不会成为房主
+    // 开局：观战者被排除在对局之外
+    (m.handleStart as (r: unknown, s: unknown) => void)(room, host);
+    expect(room.game!.players.length).toBe(2);
+    expect(room.game!.players.some((p) => p.id === spec.id)).toBe(false);
+    // 观战者尝试执行玩家操作被拦截
+    expect(() =>
+      (m.handleBlood as (r: unknown, s: unknown, msg: unknown) => void)(room, spec, {
+        t: 'bResign',
+      }),
+    ).toThrow();
+    // 对局中不能入座
+    expect(() =>
+      (m.handleSit as (r: unknown, s: unknown, msg: unknown) => void)(room, spec, { t: 'sit', seat: 3 }),
+    ).toThrow();
+    // 观战者离开即从房间移除
+    (m.handleLeave as (r: unknown, s: unknown, msg: unknown) => void)(room, spec);
+    expect([...room.sessions.values()].some((s) => s.spectator)).toBe(false);
+  });
+
   it('换座位：已入座玩家点击空座位即可移动过去', () => {
     const mgr = new RoomManager();
     const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
