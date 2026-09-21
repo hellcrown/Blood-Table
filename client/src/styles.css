@@ -3379,3 +3379,60 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+
+
+/* ===== 玩家分区配色：每个座位专属描边与底色，分区一目了然 ===== */
+.bp-panel {
+  border-width: 2px;
+}
+.bp-panel.seat-0 {
+  border-color: #d96a5a;
+  background: linear-gradient(180deg, rgba(120, 40, 32, 0.4), rgba(20, 6, 9, 0.8));
+}
+.bp-panel.seat-1 {
+  border-color: #5a8fd9;
+  background: linear-gradient(180deg, rgba(34, 58, 110, 0.4), rgba(8, 10, 20, 0.8));
+}
+.bp-panel.seat-2 {
+  border-color: #4faf7e;
+  background: linear-gradient(180deg, rgba(24, 90, 60, 0.4), rgba(6, 18, 12, 0.8));
+}
+.bp-panel.seat-3 {
+  border-color: #a97ad9;
+  background: linear-gradient(180deg, rgba(80, 44, 120, 0.4), rgba(16, 8, 24, 0.8));
+}
+.bp-panel.mine {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(90, 68, 26, 0.35), rgba(22, 14, 4, 0.85));
+}
+.bp-panel.mine .bp-name {
+  color: var(--gold);
+}
+/* 座位色随名字显示，方便认人 */
+.bp-panel.seat-0 .bp-name { color: #e8897a; }
+.bp-panel.seat-1 .bp-name { color: #82aae8; }
+.bp-panel.seat-2 .bp-name { color: #7cc9a2; }
+.bp-panel.seat-3 .bp-name { color: #bfa0e8; }
+/* 行动中高亮保持金色脉冲，压过座位色 */
+.bp-panel.to-act {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(216, 169, 78, 0.35), 0 0 22px rgba(216, 169, 78, 0.22);
+}
+
+/* 房间座位卡同色描边（与对局面板一致） */
+.seat-cell.seat-0 {
+  border-color: #d96a5a;
+}
+.seat-cell.seat-1 {
+  border-color: #5a8fd9;
+}
+.seat-cell.seat-2 {
+  border-color: #4faf7e;
+}
+.seat-cell.seat-3 {
+  border-color: #a97ad9;
+}
+.seat-cell.taken {
+  border-style: solid;
+  border-width: 2px;
+}

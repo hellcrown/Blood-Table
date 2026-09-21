@@ -66,7 +66,7 @@ export function Room({ view }: { view: TableView }) {
     const empty = !sv;
     return (
       <div
-        className={`seat-cell ${sv ? 'taken' : 'empty'} ${empty ? 'clickable' : ''}`}
+        className={`seat-cell seat-${i % 4} ${sv ? 'taken' : 'empty'} ${empty ? 'clickable' : ''}`}
         title={empty ? '点击坐到这里' : undefined}
         onClick={() => {
           if (empty) net.send({ t: 'sit', seat: i });
@@ -191,7 +191,7 @@ export function Room({ view }: { view: TableView }) {
         ) : (
           <div className="seat-grid" style={{ gridTemplateColumns: `repeat(${Math.ceil(view.maxPlayers / 2)}, 1fr)` }}>
             {seats.map((sv, i) => (
-              <div key={i} className={`seat-cell ${sv ? 'taken' : 'empty'}`}>
+              <div key={i} className={`seat-cell seat-${i % 4} ${sv ? 'taken' : 'empty'}`}>
                 {sv ? (
                   <>
                     <div className="seat-name">

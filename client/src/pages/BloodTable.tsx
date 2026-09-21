@@ -758,7 +758,7 @@ export function BloodTable({ view }: { view: BloodView }) {
           {opponents.map((opp) => (
             <div
               key={opp.seat}
-              className={`bp-panel ${oppRingArea(opp.seat, view)} ${view.turnSeat === opp.seat ? 'to-act' : ''}`}
+              className={`bp-panel seat-${opp.seat % 4} ${oppRingArea(opp.seat, view)} ${view.turnSeat === opp.seat ? 'to-act' : ''}`}
             >
               <div className="bp-head">
                 <span className="bp-name">
@@ -955,7 +955,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             )}
           </div>
 
-          <div className={`bp-panel mine ring-bottom ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
+          <div className={`bp-panel mine ring-bottom seat-${view.me.seat % 4} self ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
             <div className="bp-head">
               <span className="bp-name">
                 {me.name}
