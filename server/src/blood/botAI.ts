@@ -583,7 +583,7 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
           use = evalPlay(gs, p, best).pips >= 38;
           break;
         default:
-          use = true; // 信号干扰器：直接使用（目标在选择步骤决定）
+          use = true; // 信号干扰器/赌徒虹膜：直接使用（目标与竞猜在后续步骤决定）
       }
       blood.bItemAsk(gs, p.id, use, now);
       return true;

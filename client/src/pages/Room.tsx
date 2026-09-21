@@ -29,6 +29,8 @@ export function Room({ view }: { view: TableView }) {
   const isHost = view.hostId === net.playerId;
   const [settings, setSettings] = useState<RoomSettings>(view.settings);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  // 目标票数本地草稿：输入中不实时上报，失焦时钳制并提交
+  const [targetTicketsInput, setTargetTicketsInput] = useState(String(view.targetTickets || ''));
 
   useEffect(() => {
     setSettings(view.settings);
@@ -255,10 +257,17 @@ export function Room({ view }: { view: TableView }) {
                   type="number"
                   min={8}
                   max={30}
-                  value={view.targetTickets || ''}
+                  value={targetTicketsInput}
                   placeholder="默认"
                   disabled={!isHost}
-                  onChange={(e) => update({ targetTickets: Number(e.target.value) || 0 })}
+                  onChange={(e) => setTargetTicketsInput(e.target.value)}
+                  onBlur={() => {
+                    if (!isHost) return;
+                    const n = Math.round(Number(targetTicketsInput) || 0);
+                    const clamped = Math.min(30, Math.max(0, n));
+                    setTargetTicketsInput(String(clamped || ''));
+                    if (clamped !== (view.targetTickets ?? 0)) update({ targetTickets: clamped });
+                  }}
                 />
                 <span className="hint">{view.targetTickets ? `${view.targetTickets} 票` : '按人数默认'}</span>
               </label>

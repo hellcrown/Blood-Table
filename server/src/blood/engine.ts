@@ -221,14 +221,8 @@ export function createBloodGame(
   };
   for (let i = 0; i < 5; i++) gs.market.push(drawMarketSlot(gs));
 
-  // 掷骰决定临时特权证（点数最高者，平局随机取一）；江东之主始终持有特权证
-  const sunwu = bps.find((p) => p.charId === 'sunwu');
-  if (sunwu) {
-    gs.privilegeSeat = sunwu.seat;
-    sunwu.privilege = true;
-    for (const p of bps) p.blood = p.privilege ? 2 : 3;
-    pushLog(gs, 'sys', `${sunwu.name}【江东之主】始终拥有【临时特权证】（2血筹，其余3血筹）`);
-  } else {
+  // 掷骰决定临时特权证（点数最高者，平局随机取一）；江东之主的特权在选将后另行授予
+  {
     const rolls = bps.map((p) => ({ p, roll: randomInt(1, 7) }));
     const maxRoll = Math.max(...rolls.map((r) => r.roll));
     const winners = rolls.filter((r) => r.roll === maxRoll);
@@ -667,7 +661,6 @@ function markSwapStopped(gs: BloodState, p: BPlayer): void {
   }
 }
 
-/** 某玩家换牌结束（停止或次数用尽）后的角色钩子：入队等待逐一结算 */
 /** 双生子：初始构筑结束后，从黑市牌堆找出【双生镜片】插入弃牌区一张牌、重洗牌库并置顶 */
 function runTwinSetup(gs: BloodState): void {
   for (const p of gs.players) {
@@ -1479,6 +1472,7 @@ export function bItemAsk(gs: BloodState, playerId: string, use: boolean, now: nu
   p.items = p.items.filter((i) => i.id !== item.id);
   switch (def.effect.k) {
     case 'signalJamFx':
+      gs.deadline = now + BLOOD_TURN_MS; // 转入子交互，重置决策时限
       gs.recycle.push(item.def);
       gs.secretPending = { seat: p.id, kind: 'signalTarget' };
       pushLog(gs, 'action', `${p.name} 使用【信号干扰器】：请选择一位玩家随机弃 1 抽 1`);
@@ -1498,10 +1492,12 @@ export function bItemAsk(gs: BloodState, playerId: string, use: boolean, now: nu
       return;
     }
     case 'eraserFx':
+      gs.deadline = now + BLOOD_TURN_MS; // 转入子交互，重置决策时限
       gs.secretPending = { seat: p.id, kind: 'eraserClaim', defId: item.def };
       pushLog(gs, 'action', `${p.name} 使用【魔术橡皮】：请宣称一种牌型`);
       return;
     case 'irisGambleFx':
+      gs.deadline = now + BLOOD_TURN_MS; // 转入子交互，重置决策时限
       gs.secretPending = { seat: p.id, kind: 'irisGuess', defId: item.def };
       pushLog(gs, 'action', `${p.name} 使用【赌徒虹膜】：请选择竞猜目标与牌型`);
       return;
@@ -3177,6 +3173,14 @@ function resolveSwapEndOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
     case 'itemAsk': {
       const def = BLOOD_MARKET_BY_ID.get(pend.defId ?? '');
       pushLog(gs, 'action', `${p.name} 超时：不使用【${def?.name ?? '道具'}】`);
+      gs.secretPending = null;
+      advanceItemWindow(gs, now);
+      return;
+    }
+    case 'eraserClaim': {
+      // 魔术橡皮宣告超时：落空弃置后继续推进道具窗口（否则 swapItem 阶段永久卡死）
+      if (pend.defId) gs.recycle.push(pend.defId);
+      pushLog(gs, 'action', '【魔术橡皮】宣告超时，效果落空弃置');
       gs.secretPending = null;
       advanceItemWindow(gs, now);
       return;

@@ -172,8 +172,8 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
     case 'remove': {
       if (p.removeDone) return { k: 'wait' };
       const ch = effChar(p);
-      // 与引擎 bRemove 计费一致：黑客免费2、飞车党/双生子兄仅付费、皇叔每张1血筹、其余免费1
-      const free = ch === 'hacker' ? 2 : ch === 'biker' || ch === 'twinA' ? 0 : 1;
+      // 与引擎 bRemove 计费一致：黑客免费2、飞车党/双生子兄/皇叔无免费（皇叔每张1血筹）、其余免费1
+      const free = ch === 'hacker' ? 2 : ch === 'biker' || ch === 'twinA' || ch === 'liu' ? 0 : 1;
       const cost = ch === 'liu' ? 1 : 2;
       return { k: 'remove', cost, free };
     }

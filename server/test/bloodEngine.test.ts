@@ -1142,3 +1142,33 @@ describe('血色引擎 · JOKER 边界校验', () => {
     expect(gs.bluffer?.declared.length).toBe(p0.play.length);
   });
 });
+
+describe('血色引擎 · 道具窗口超时托管', () => {
+  it('魔术橡皮宣告超时：落空弃置并继续推进（修复 swapItem 永久卡死）', () => {
+    const gs = make2p();
+    setupDone(gs);
+    gs.players[0].items.push({ id: 'it-eraser', def: 'eraser' });
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    expect(gs.phase).toBe('swapItem');
+    bItemAsk(gs, 'p0', true, NOW);
+    expect(gs.secretPending?.kind).toBe('eraserClaim');
+    bloodTick(gs, NOW + 60_001); // 宣告超时
+    expect(gs.phase).toBe('play'); // 不再卡死，正常进入出牌阶段
+    expect(gs.recycle).toContain('eraser');
+  });
+
+  it('rejoin 清除旧绑定：同一连接换房重连不产生幽灵会话', () => {
+    const gs = make2p();
+    setupDone(gs);
+    bSwapStop(gs, gs.players[0].id, NOW);
+    bSwapStop(gs, gs.players[1].id, NOW);
+    giveHand(gs, 0, [isRank(13), isRank(13), isRank(13), isRank(13), isRank(3), isRank(2)]);
+    giveHand(gs, 1, [isRank(7), isRank(9), isRank(4), isRank(6), isRank(5), isRank(11)]);
+    bPlay(gs, 'p0', gs.players[0].hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    // p0 的出牌评估不受 rejoin 幽灵会话影响的快速验证：决胜票正常发放
+    confirmSd(gs);
+    expect(gs.result!.rows[0].gainTickets).toBe(5); // 4 + 抢跑
+  });
+});

@@ -1630,7 +1630,7 @@ body {
   top: 84px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 30;
+  z-index: 15;
   width: min(460px, calc(100% - 32px));
   background: linear-gradient(180deg, #33161d, #241014);
   border: 1px solid var(--gold);
@@ -1688,7 +1688,7 @@ body {
   top: 84px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 30;
+  z-index: 15;
   width: min(460px, calc(100% - 32px));
   background: linear-gradient(180deg, #33161d, #241014);
   border: 1px solid var(--gold);

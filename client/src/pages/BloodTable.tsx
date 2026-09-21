@@ -337,6 +337,16 @@ export function BloodTable({ view }: { view: BloodView }) {
   }, [view.logSeq]);
 
   // 拔除芯片：自动打开弃牌区选择带芯片的牌；定点爆破受害者：自动打开弃牌区选牌
+  // 阶段切换：清掉上一个阶段遗留的弹窗与插入状态（防残留 chipBuying 在后续阶段误发购买）
+  useEffect(() => {
+    if (view.prompt.k !== 'insertChip' && !chipBuying) return;
+    if (view.prompt.k !== 'insertChip' && view.prompt.k !== 'buy') {
+      setChipBuying(null);
+      setInsertConfirm(null);
+      setZoneModal(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.prompt.k]);
   useEffect(() => {
     if (view.prompt.k === 'pullChip' || view.prompt.k === 'pinpointVictim') setZoneModal({ kind: 'discard' });
   }, [view.prompt.k]);

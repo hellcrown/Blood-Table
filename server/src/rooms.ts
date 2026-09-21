@@ -109,11 +109,16 @@ export class RoomManager {
   private rooms = new Map<string, Room>();
   private tokenIndex = new Map<string, { room: Room; sessionId: string }>();
   private bindings = new WeakMap<WebSocket, { room: Room; session: Session }>();
-  /** 单 IP 加入/建房尝试限流（防房间码枚举） */
+  /** 单 IP 加入尝试限流（防房间码暴力枚举） */
   private joinAttempts = new IpTable(
     () => new SlidingWindow(60_000, MAX_JOIN_PER_MIN),
     (w, now) => w.idle(now),
   );
+
+  constructor() {
+    // 限流表闲置清理：防止海量 IP 源缓慢撑大内存
+    setInterval(() => this.joinAttempts.prune(), 5 * 60_000).unref();
+  }
 
   /* ---------------- 连接管理 ---------------- */
 
@@ -401,6 +406,12 @@ export class RoomManager {
       case 'bAuctionPick':
         blood.bAuctionPick(bs, pid, (msg as { idx?: number }).idx ?? -1, now);
         break;
+      case 'bAgentAsk':
+        blood.bAgentAsk(bs, pid, msg.seat, now);
+        break;
+      case 'bAgentDecide':
+        blood.bAgentDecide(bs, pid, msg.accept, now);
+        break;
       case 'bAuctionBid':
         blood.bAuctionBid(bs, pid, (msg as { amount?: number }).amount ?? 0, now);
         break;
@@ -505,6 +516,7 @@ export class RoomManager {
   }
 
   private handleRejoin(ws: WebSocket, msg: Extract<C2S, { t: 'rejoin' }>): void {
+    this.detachBinding(ws); // 该连接此前绑定的会话先离场清理，防幽灵占座
     const loc = this.tokenIndex.get(String(msg.token ?? ''));
     if (!loc) throw new GameError('TOKEN_INVALID', '会话已失效，请重新加入');
     const { room, sessionId } = loc;
@@ -586,6 +598,16 @@ export class RoomManager {
   }
 
   private removeSession(room: Room, session: Session): void {
+    if (session.ws) {
+      try {
+        session.ws.close(4001, 'removed');
+      } catch {
+        /* 忽略 */
+      }
+      this.bindings.delete(session.ws);
+      session.ws = null;
+    }
+    session.connected = false;
     room.sessions.delete(session.id);
     this.tokenIndex.delete(session.token);
     room.botBrains.delete(session.id);
@@ -777,6 +799,7 @@ export class RoomManager {
       target.ws = null;
     }
     target.connected = false;
+    this.tokenIndex.delete(target.token); // 被请离者的会话令牌失效，无法自动重回房间
   }
 
   private handleKickBot(room: Room, session: Session, msg: Extract<C2S, { t: 'kickBot' }>): void {
@@ -805,7 +828,9 @@ export class RoomManager {
       if (now < (room.botNextAct.get(bot.id) ?? 0)) continue;
       let acted = false;
       try {
-        acted = botAct(room.botBrains.get(bot.id) ?? createBrain(), gs, bot.id, now);
+        const brain = room.botBrains.get(bot.id) ?? createBrain();
+        room.botBrains.set(bot.id, brain); // 写回：跨回合记忆与长线策略在开局/重开清空后能重新积累
+        acted = botAct(brain, gs, bot.id, now);
       } catch {
         acted = false; // 决策异常回退：交由超时托管安全默认
       }

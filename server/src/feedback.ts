@@ -33,6 +33,7 @@ const ipLimit = new IpTable(
   () => new SlidingWindow(3_600_000, 5),
   (w, now) => w.idle(now),
 );
+setInterval(() => ipLimit.prune(), 30 * 60_000).unref();
 
 export type FeedbackError = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED';
 
@@ -88,6 +89,16 @@ export function submitFeedback(
   if (file) {
     try {
       fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+      // 文件轮转：超过 1MB 重写为最近 200 条，避免无限膨胀
+      if (fs.statSync(file).size > 1024 * 1024) {
+        const keep = list.slice(-200);
+        fs.writeFileSync(
+          file,
+          keep
+            .map((e2) => JSON.stringify(e2))
+            .join('\n') + '\n',
+        );
+      }
     } catch (e) {
       console.error('[feedback] 落盘失败（已保留内存）:', e);
     }

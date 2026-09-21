@@ -215,10 +215,6 @@ const server = http.createServer((req, res) => {
         res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(obj));
       };
-      if (!feedbackLimit.get(req.socket.remoteAddress ?? '?').allow()) {
-        send(429, { ok: false, msg: '反馈提交过于频繁，请 1 小时后再试' });
-        return;
-      }
       let parsed: { text?: unknown; contact?: unknown; room?: unknown; name?: unknown } = {};
       try {
         parsed = JSON.parse(body) as typeof parsed;
@@ -258,12 +254,6 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
-// 反馈限流：单 IP 每小时最多 5 条
-const feedbackLimit = new IpTable(
-  () => new SlidingWindow(3_600_000, 5),
-  (w, now) => w.idle(now),
-);
-setInterval(() => feedbackLimit.prune(), 30 * 60_000).unref();
 initFeedbackStore(path.resolve(process.cwd(), 'data', 'feedback.jsonl'));
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
@@ -275,6 +265,12 @@ const ipNewConn = new IpTable(
   (w, now) => w.idle(now),
 );
 setInterval(() => ipNewConn.prune(), 5 * 60_000).unref();
+setInterval(() => {
+  // 管理登录失败表清理：锁定已过期的条目直接删除
+  for (const [ip, rec] of loginFails) {
+    if (rec.until > 0 && Date.now() >= rec.until) loginFails.delete(ip);
+  }
+}, 5 * 60_000).unref();
 
 wss.on('connection', (ws, req) => {
   const ip = req.socket.remoteAddress ?? '';
@@ -285,7 +281,7 @@ wss.on('connection', (ws, req) => {
     return;
   }
   // 总并发 / 单 IP 并发超限：直接拒绝
-  if (wss.clients.size > MAX_TOTAL_CONNS || (ipConns.get(ip) ?? 0) >= MAX_CONNS_PER_IP) {
+  if (wss.clients.size >= MAX_TOTAL_CONNS || (ipConns.get(ip) ?? 0) >= MAX_CONNS_PER_IP) {
     ws.close(4008, 'too many connections');
     return;
   }

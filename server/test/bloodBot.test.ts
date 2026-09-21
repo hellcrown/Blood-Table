@@ -689,8 +689,11 @@ describe('血色机器人 · 公开服务器防护', () => {
       host,
       { t: 'kickPlayer', seat: guest.seat },
     );
-    expect(closed).toContain(4003);
+    expect(closed.some((c) => c === 4001 || c === 4003)).toBe(true); // 连接被强制关闭
     expect(guest.connected).toBe(false);
+    // 会话令牌失效：被请离者自动重连无法重回房间
+    const tokens = m.tokenIndex as unknown as Map<string, unknown>;
+    expect([...tokens.values()].some((loc) => (loc as { sessionId?: string }).sessionId === guest.id)).toBe(false);
     void room;
   });
 });

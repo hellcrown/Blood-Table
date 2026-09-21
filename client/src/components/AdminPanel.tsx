@@ -55,15 +55,20 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [feedbackError, setFeedbackError] = useState('');
 
   const loadFeedback = useCallback(async (t: string) => {
-    const r = await fetch('/api/admin/feedback', { headers: { Authorization: `Bearer ${t}` } });
-    if (r.status === 401) {
-      sessionStorage.removeItem(TOKEN_KEY);
-      setToken(null);
-      setError('登录已过期，请重新输入密码');
-      return;
+    try {
+      const r = await fetch('/api/admin/feedback', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      const data = (await r.json()) as { feedback?: FeedbackInfo[] };
+      setFeedback(data.feedback ?? []);
+      setFeedbackError('');
+    } catch {
+      setFeedbackError('加载反馈失败，请重试');
     }
-    const data = (await r.json()) as { feedback?: FeedbackInfo[] };
-    setFeedback(data.feedback ?? []);
   }, []);
 
   useEffect(() => {
