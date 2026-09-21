@@ -312,7 +312,7 @@ describe('血色引擎 · 选将与角色技能', () => {
     expect(fresh.players.every((p) => p.charOptions.length === 2)).toBe(true);
   });
 
-  it('3/4人局：直接随机分配1名角色，不经过选将阶段', () => {
+  it('基础池 3/4 人局：角色不足每人 2 张，随机分配 1 名（互不重复）', () => {
     const basic = charPoolIds(false);
     for (const n of [3, 4]) {
       const players = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
@@ -325,12 +325,18 @@ describe('血色引擎 · 选将与角色技能', () => {
       // 基础4角色均不跳过初始构筑
       expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
     }
-    // 拓展池：4人局分配的角色来自全部58名
+  });
+
+  it('拓展池 4 人局：同样抽 2 选 1，8 张选项互不重复', () => {
     const players4 = Array.from({ length: 4 }, (_, i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
     const ex = createBloodGame(4, players4, NOW, true);
     const all = charPoolIds(true);
     expect(all.length).toBe(58);
-    expect(ex.players.every((p) => all.includes(p.charId!))).toBe(true);
+    expect(ex.phase).toBe('pick');
+    const options = ex.players.flatMap((p) => p.charOptions);
+    expect(options.length).toBe(8);
+    expect(new Set(options).size).toBe(8);
+    expect(options.every((c) => all.includes(c))).toBe(true);
   });
 
   it('贵族：游戏开始获得12血筹', () => {
@@ -1140,6 +1146,30 @@ describe('血色引擎 · JOKER 边界校验', () => {
     const legal = p0.play.map((c) => ({ id: c.id, r: c.r === 0 ? 14 : c.r, s: c.s ?? 's' }));
     bBlufferDeclare(gs, 'p0', legal, NOW);
     expect(gs.bluffer?.declared.length).toBe(p0.play.length);
+  });
+});
+
+describe('血色引擎 · 4人局选将', () => {
+  const players = [0, 1, 2, 3].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
+
+  it('拓展池：每人随机 2 张选 1，8 张选项互不重复', () => {
+    const gs = createBloodGame(4, players, NOW, true);
+    expect(gs.phase).toBe('pick');
+    for (const p of gs.players) {
+      expect(p.charId).toBeNull();
+      expect(p.charOptions.length).toBe(2);
+    }
+    const all = gs.players.flatMap((p) => p.charOptions);
+    expect(new Set(all).size).toBe(8);
+    // 全员选择后进入初始构筑
+    for (const p of gs.players) bPickChar(gs, p.id, p.charOptions[0], NOW);
+    expect(gs.phase).toBe('setup');
+  });
+
+  it('基础池：仅 4 名角色，3/4 人局随机分配 1 名', () => {
+    const gs = createBloodGame(4, players, NOW, false);
+    expect(gs.phase).not.toBe('pick');
+    for (const p of gs.players) expect(p.charId).not.toBeNull();
   });
 });
 

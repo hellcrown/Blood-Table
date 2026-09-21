@@ -240,7 +240,7 @@ export function Room({ view }: { view: TableView }) {
           {view.mode === 'blood' ? (
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·
-              开局定角色（2人局随机2选1，3/4人局随机分配1名）·
+              开局定角色（角色牌足够时每人抽2选1：拓展池3/4人局可选将；基础池随机分配）·
               集齐 {view.maxPlayers <= 2 ? 24 : view.maxPlayers === 3 ? 20 : 16} 张车票获胜（
               {view.maxPlayers <= 2 ? '2人局' : view.maxPlayers === 3 ? '3人局' : '4人局'}目标）
             </p>
@@ -309,7 +309,7 @@ export function Room({ view }: { view: TableView }) {
               </label>
               <label
                 className="charpick-toggle"
-                title="选将始终进行：2人局每人随机2张角色牌选1，3/4人局每人随机分配1名角色。开启后角色池并入拓展角色（共58名），关闭则仅用基础版4名角色"
+                title="选将始终进行：角色牌足够时（拓展池必满足）每人随机2张角色牌选1，基础池仅4名角色时3/4人局随机分配1名。开启后角色池并入拓展角色（共58名）"
               >
                 拓展选将
                 <input

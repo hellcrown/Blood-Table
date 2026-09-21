@@ -825,15 +825,19 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
   it('3人局捣蛋鬼：每个小回合结束时立即返还剩余换牌次数', () => {
     const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
     const gs = createBloodGame(3, players, NOW, true);
-    // 强制 p0=捣蛋鬼、其余职员；捣蛋鬼清空个人牌堆模拟无牌堆
-    gs.players[0].charId = 'imp';
+    // 捣蛋鬼清空个人牌堆模拟无牌堆；角色通过下方选将强制
     gs.players[0].draw = [];
     gs.players[0].setupHand = [];
     gs.players[0].setupRound = 2;
-    gs.players[1].charId = 'clerk';
-    gs.players[2].charId = 'clerk';
     // 创建时随机分配的角色可能给任意玩家预排了黑客初始构筑流程，强制角色后需清除
     gs.startupQueue = gs.startupQueue.filter((e) => e.kind !== 'hackerSetup');
+    // 拓展池 3 人局现在同样经过选将阶段：设定选项并完成选择
+    gs.players[0].charOptions = ['imp', 'dealer'];
+    gs.players[1].charOptions = ['clerk', 'dealer'];
+    gs.players[2].charOptions = ['clerk', 'dealer'];
+    bPickChar(gs, 'p0', 'imp', NOW);
+    bPickChar(gs, 'p1', 'clerk', NOW);
+    bPickChar(gs, 'p2', 'clerk', NOW);
     driveTo(gs, 'swap');
     bSwapStop(gs, 'p1', NOW); // 对手1 停止 → 小回合1
     let guard = 0;

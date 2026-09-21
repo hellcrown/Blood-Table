@@ -241,9 +241,10 @@ export function createBloodGame(
   const pool = shuffle(charPoolIds(charExpansion));
   gs.charDeck = shuffle(charPoolIds(charExpansion)); // 无面人每回合抽角色用
   pushLog(gs, 'sys', `🎭 本局角色池：${charExpansion ? `全部 ${pool.length} 名角色（含拓展）` : `基础版 ${pool.length} 名角色`}`);
-  if (seatCount === 2) {
+  // 角色牌基础规则：抽 2 选 1。基础池仅 4 名角色，3/4 人局发不出 2×人数 张，退回随机分配
+  if (seatCount === 2 || pool.length >= seatCount * 2) {
     for (const p of bps) p.charOptions = [pool.pop()!, pool.pop()!];
-    pushLog(gs, 'sys', '🎭 2人局选将：每人从两张随机角色牌中选择一张');
+    pushLog(gs, 'sys', `🎭 ${seatCount}人局选将：每人从两张随机角色牌中选择一张`);
   } else {
     const assigned = bps.map((p) => {
       p.charId = pool.pop()!;
