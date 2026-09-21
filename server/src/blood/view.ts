@@ -198,6 +198,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       connected: room.sessions.get(p.id)?.connected ?? false,
       privilege: p.privilege,
       charId: p.charId,
+      tempChar: p.tempChar,
       handCount: p.hand.length,
       drawCount: p.draw.length,
       itemCount: p.items.length,

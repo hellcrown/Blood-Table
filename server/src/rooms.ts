@@ -17,7 +17,8 @@ const MAX_ALLBOT_ROOMS = 10; // 全机器人房间数量上限（超出后 bot �
 const BETTING_PHASES = new Set(['preflop', 'flop', 'turn', 'river']);
 const MAX_ROOMS = 64; // 房间总数上限（防脚本刷房耗内存）
 const MAX_ROOMS_PER_IP = 3; // 单 IP 同时拥有的房间上限
-const MAX_JOIN_PER_MIN = 30; // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
+const MAX_JOIN_PER_MIN = 30;
+const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买 // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
 
 declare module 'ws' {
   interface WebSocket {
@@ -827,12 +828,20 @@ export class RoomManager {
       if (prompt.k === 'wait') continue;
       if (now < (room.botNextAct.get(bot.id) ?? 0)) continue;
       let acted = false;
+      const buyAnnounceAt = gs.phase === 'buy' ? (gs.announce?.at ?? 0) : 0; // 行动前的宣告时间戳
       try {
         const brain = room.botBrains.get(bot.id) ?? createBrain();
         room.botBrains.set(bot.id, brain); // 写回：跨回合记忆与长线策略在开局/重开清空后能重新积累
         acted = botAct(brain, gs, bot.id, now);
       } catch {
         acted = false; // 决策异常回退：交由超时托管安全默认
+      }
+      if (acted && gs.phase === 'buy' && (gs.announce?.at ?? 0) > buyAnnounceAt) {
+        // 购买阶段发生了购买/宣告：全场停顿 5s 再进行下一次购买（含轮到下一位）
+        for (const b of bots) {
+          room.botNextAct.set(b.id, Math.max(room.botNextAct.get(b.id) ?? 0, now + BOT_BUY_PAUSE_MS));
+        }
+        return true;
       }
       room.botNextAct.set(bot.id, now + (acted ? 800 + randomInt(0, 1200) : 600));
       if (acted) return true;

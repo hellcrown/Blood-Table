@@ -20,6 +20,8 @@ export interface BloodSeatView {
   privilege: boolean;
   /** 已选角色牌 id（选将完成前为 null） */
   charId: string | null;
+  /** 无面人：当前临时技能（公开信息，仅血色模式） */
+  tempChar?: string | null;
   handCount: number;
   drawCount: number;
   itemCount: number;

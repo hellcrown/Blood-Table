@@ -198,7 +198,23 @@ type ZoneModal = null | { kind: 'discard' | 'removed' | 'items' };
 
 export function BloodTable({ view }: { view: BloodView }) {
   const me = view.players.find((p) => p.seat === view.me.seat) ?? view.players[0];
-  const opponents = view.players.filter((p) => p.seat !== view.me.seat);
+  // 对手按相对座位排序：下家→左、对家→上、上家→右（环绕牌桌）
+  const n = view.players.length;
+  const opponents = view.players
+    .filter((p) => p.seat !== view.me.seat)
+    .slice()
+    .sort((a, b) => {
+      const rel = (s: number): number => ((s - view.me.seat + n) % n);
+      return rel(a.seat) - rel(b.seat);
+    });
+  // 环绕布局方位：下家→左、对家→上、上家→右（2 人局对家在上）*/
+  const oppRingArea = (oppSeat: number, v: BloodView): 'ring-left' | 'ring-top' | 'ring-right' => {
+    const nn = v.players.length;
+    const rel = (oppSeat - v.me.seat + nn) % nn;
+    if (nn >= 4) return rel === 1 ? 'ring-left' : rel === 2 ? 'ring-top' : 'ring-right';
+    if (nn === 3) return rel === 1 ? 'ring-left' : 'ring-top';
+    return 'ring-top';
+  };
   const isHost = view.hostId === net.playerId;
 
   // 阶段/回合切换时清空各阶段的选择状态（防止上一阶段的残留占用选择上限）
@@ -364,7 +380,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   };
 
   // 自己的角色技能对评估的修正（特型演员/枪手/杂技演员/女仆）
-  const myCharId = view.players.find((p) => p.seat === view.me.seat)?.charId ?? null;
+  const mySeatView = view.players.find((p) => p.seat === view.me.seat);
+  const myCharId = view.me.tempChar || mySeatView?.charId || null;
   const toEvalMe = (cv: BloodCardView): EvalCard => applyCharEval([toEval(cv)], myCharId)[0];
 
   const playHint = useMemo(() => {
@@ -706,9 +723,12 @@ export function BloodTable({ view }: { view: BloodView }) {
           </div>
         )}
 
-        <div className="blood-area">
+        <div className="blood-area table-ring">
           {opponents.map((opp) => (
-            <div key={opp.seat} className={`bp-panel ${view.turnSeat === opp.seat ? 'to-act' : ''}`}>
+            <div
+              key={opp.seat}
+              className={`bp-panel ${oppRingArea(opp.seat, view)} ${view.turnSeat === opp.seat ? 'to-act' : ''}`}
+            >
               <div className="bp-head">
                 <span className="bp-name">
                   {opp.name}
@@ -716,8 +736,14 @@ export function BloodTable({ view }: { view: BloodView }) {
                 </span>
                 {opp.privilege && <span className="tag priv">👑特权证</span>}
                 {opp.charId && (
-                  <button className="tag char" onClick={() => setCharDetail(opp.charId)}>
-                    🎭 {BLOOD_CHAR_BY_ID.get(opp.charId)?.name}
+                  <button
+                    className="tag char"
+                    title={opp.tempChar ? `当前技能：${BLOOD_CHAR_BY_ID.get(opp.tempChar)?.text ?? ''}` : undefined}
+                    onClick={() => setCharDetail(opp.tempChar || opp.charId)}
+                  >
+                    🎭 {opp.tempChar
+                      ? `无面人·当前【${BLOOD_CHAR_BY_ID.get(opp.tempChar)?.name ?? '?'}】`
+                      : BLOOD_CHAR_BY_ID.get(opp.charId)?.name}
                   </button>
                 )}
                 <span className="spacer" />
@@ -782,7 +808,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             </div>
           ))}
 
-          <div className="market-strip">
+          <div className="market-strip ring-center">
             <div className="market-title">
               黑市 <span className="hint">供应堆 {view.supplyCount} · 回收站 {view.recycleCount}</span>
             </div>
@@ -887,16 +913,21 @@ export function BloodTable({ view }: { view: BloodView }) {
             )}
           </div>
 
-          <div className={`bp-panel mine ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
+          <div className={`bp-panel mine ring-bottom ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
             <div className="bp-head">
               <span className="bp-name">
                 {me.name}
                 <em>（你）</em>
               </span>
               {me.privilege && <span className="tag priv">👑特权证</span>}
-              {me.charId && (
+              {me.charId && !view.me.tempChar && (
                 <button className="tag char" onClick={() => setCharDetail(me.charId)}>
                   🎭 {BLOOD_CHAR_BY_ID.get(me.charId)?.name}
+                </button>
+              )}
+              {view.me.tempChar && (
+                <button className="tag char" onClick={() => setCharDetail(view.me.tempChar!)}>
+                  🎭 无面人·当前【{BLOOD_CHAR_BY_ID.get(view.me.tempChar)?.name ?? '?'}】
                 </button>
               )}
               <span className="spacer" />

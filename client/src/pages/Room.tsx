@@ -61,6 +61,43 @@ export function Room({ view }: { view: TableView }) {
     view.players.find((p) => p.seat === i) ?? null,
   );
 
+  const renderSeatCell = (i: number) => {
+    const sv = seats[i];
+    return (
+      <div className={`seat-cell ${sv ? 'taken' : 'empty'}`}>
+        {sv ? (
+          <>
+            <div className="seat-name">
+              {sv.name}
+              {sv.id === net.playerId && <em>（你）</em>}
+            </div>
+            <div className="seat-tags">
+              {sv.isHost && <span className="tag host">房主</span>}
+              {!sv.connected && <span className="tag off">已断线</span>}
+            </div>
+            {isHost && sv.id !== net.playerId && (
+              <button
+                className="btn tiny ghost kick-btn"
+                title="请离该玩家"
+                onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
+              >
+                请出
+              </button>
+            )}
+          </>
+        ) : (
+          <button className="sit-btn" onClick={() => net.send({ t: 'sit', seat: i })} title="坐到这里">
+            空座位
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // 4 人局：以自己的座位为基准的桌面方位（自己在下=南）
+  const mySeatBase = view.players.find((p) => p.id === net.playerId)?.seat ?? 0;
+  const tablePosSeat = (offset: number): number => (mySeatBase + offset) % 4;
+
   const canStart = view.players.length >= 2;
 
   const update = (patch: {
@@ -114,41 +151,67 @@ export function Room({ view }: { view: TableView }) {
           </div>
         </div>
 
-        <div className="seat-grid" style={{ gridTemplateColumns: `repeat(${Math.ceil(view.maxPlayers / 2)}, 1fr)` }}>
-          {seats.map((sv, i) => (
-            <div key={i} className={`seat-cell ${sv ? 'taken' : 'empty'}`}>
-              {sv ? (
-                <>
-                  <div className="seat-name">
-                    {sv.name}
-                    {sv.id === net.playerId && <em>（你）</em>}
-                  </div>
-                  <div className="seat-tags">
-                    {sv.isHost && <span className="tag host">房主</span>}
-                    {!sv.connected && <span className="tag off">已断线</span>}
-                  </div>
-                  {isHost && sv.id !== net.playerId && (
-                    <button
-                      className="btn tiny ghost kick-btn"
-                      title="请离该玩家"
-                      onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
-                    >
-                      请出
-                    </button>
-                  )}
-                </>
-              ) : (
-                <button
-                  className="sit-btn"
-                  onClick={() => net.send({ t: 'sit', seat: i })}
-                  title="坐到这里"
-                >
-                  空座位
-                </button>
-              )}
+        {view.maxPlayers === 4 ? (
+          <div className="table-layout">
+            <div className="table-pos pos-top">
+              <span className="dir-tag">北</span>
+              {renderSeatCell(tablePosSeat(2))}
             </div>
-          ))}
-        </div>
+            <div className="table-pos pos-left">
+              <span className="dir-tag">西</span>
+              {renderSeatCell(tablePosSeat(3))}
+            </div>
+            <div className="table-center-x">
+              <div className="table-code">{view.code}</div>
+              <div className="hint">{view.mode === 'blood' ? '血色牌局' : '德州扑克'}</div>
+              <div className="hint">{view.maxPlayers} 人局</div>
+            </div>
+            <div className="table-pos pos-right">
+              <span className="dir-tag">东</span>
+              {renderSeatCell(tablePosSeat(1))}
+            </div>
+            <div className="table-pos pos-bottom">
+              <span className="dir-tag">南</span>
+              {renderSeatCell(tablePosSeat(0))}
+            </div>
+          </div>
+        ) : (
+          <div className="seat-grid" style={{ gridTemplateColumns: `repeat(${Math.ceil(view.maxPlayers / 2)}, 1fr)` }}>
+            {seats.map((sv, i) => (
+              <div key={i} className={`seat-cell ${sv ? 'taken' : 'empty'}`}>
+                {sv ? (
+                  <>
+                    <div className="seat-name">
+                      {sv.name}
+                      {sv.id === net.playerId && <em>（你）</em>}
+                    </div>
+                    <div className="seat-tags">
+                      {sv.isHost && <span className="tag host">房主</span>}
+                      {!sv.connected && <span className="tag off">已断线</span>}
+                    </div>
+                    {isHost && sv.id !== net.playerId && (
+                      <button
+                        className="btn tiny ghost kick-btn"
+                        title="请离该玩家"
+                        onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
+                      >
+                        请出
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    className="sit-btn"
+                    onClick={() => net.send({ t: 'sit', seat: i })}
+                    title="坐到这里"
+                  >
+                    空座位
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="settings-panel">
           <div className="box-title">
