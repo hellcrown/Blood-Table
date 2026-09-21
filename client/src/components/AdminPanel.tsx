@@ -43,7 +43,7 @@ interface FeedbackInfo {
 
 /**
  * 管理员面板：输入管理密码登录后可查看所有房间并执行管理操作（如一键清空）。
- * 管理密码由服务器环境变量 ADMIN_KEY 配置（deploy.sh 自动生成于服务器 .admin-secret 文件）。
+ * 管理密码由服务器环境变量 ADMIN_KEY 配置（仅开发者可见，玩家端不展示任何细节）。
  */
 export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(TOKEN_KEY));
@@ -142,7 +142,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
         <h3>🛠️ 管理员</h3>
         {token == null ? (
           <>
-            <p className="hint">输入管理密码登录（服务器 .admin-secret 文件中保存的密钥）</p>
+            <p className="hint">请输入管理密码登录</p>
             <div className="admin-login-row">
               <input
                 type="password"
