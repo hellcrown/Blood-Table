@@ -32,6 +32,15 @@ interface RoomInfo {
   host: string;
 }
 
+interface FeedbackInfo {
+  t: number;
+  room?: string;
+  name?: string;
+  text: string;
+  contact?: string;
+  ip?: string;
+}
+
 /**
  * 管理员面板：输入管理密码登录后可查看所有房间并执行管理操作（如一键清空）。
  * 管理密码由服务器环境变量 ADMIN_KEY 配置（deploy.sh 自动生成于服务器 .admin-secret 文件）。
@@ -42,6 +51,24 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [rooms, setRooms] = useState<RoomInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<FeedbackInfo[] | null>(null);
+  const [feedbackError, setFeedbackError] = useState('');
+
+  const loadFeedback = useCallback(async (t: string) => {
+    const r = await fetch('/api/admin/feedback', { headers: { Authorization: `Bearer ${t}` } });
+    if (r.status === 401) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      setToken(null);
+      setError('登录已过期，请重新输入密码');
+      return;
+    }
+    const data = (await r.json()) as { feedback?: FeedbackInfo[] };
+    setFeedback(data.feedback ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (token) void loadFeedback(token);
+  }, [token, loadFeedback]);
 
   const loadRooms = useCallback(async (t: string) => {
     const r = await fetch('/api/admin/rooms', { headers: { Authorization: `Bearer ${t}` } });
@@ -162,6 +189,40 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     ))}
                   </tbody>
                 </table>
+              )}
+            </div>
+            <div className="admin-feedback">
+              <div className="admin-feedback-head">
+                <b>📨 玩家反馈</b>
+                <button
+                  className="btn small"
+                  disabled={busy}
+                  onClick={() => token && void loadFeedback(token)}
+                >
+                  刷新反馈
+                </button>
+              </div>
+              {feedbackError && <p className="admin-error">{feedbackError}</p>}
+              {feedback == null && <p className="hint">点击「刷新反馈」加载</p>}
+              {feedback != null && feedback.length === 0 && <p className="hint">暂无反馈</p>}
+              {feedback != null && feedback.length > 0 && (
+                <div className="feedback-list">
+                  {feedback
+                    .slice()
+                    .reverse()
+                    .map((f) => (
+                      <div key={f.t} className="feedback-item">
+                        <div className="feedback-item-meta">
+                          {new Date(f.t).toLocaleString('zh-CN', { hour12: false })}
+                          {f.room ? ` · 房间 ${f.room}` : ''}
+                          {f.name ? ` · ${f.name}` : ''}
+                          {f.contact ? ` · 联系：${f.contact}` : ''}
+                          {f.ip ? ` · IP ${f.ip}` : ''}
+                        </div>
+                        <div className="feedback-item-text">{f.text}</div>
+                      </div>
+                    ))}
+                </div>
               )}
             </div>
             {(error || '') && <p className="admin-error">{error}</p>}

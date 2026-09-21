@@ -5,3 +5,4 @@ node_modules/
 .admin-secret
 .admin-secret
 server/simdbg.tmp.ts
+server/data/

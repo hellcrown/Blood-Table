@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
+import { FeedbackModal } from '../components/FeedbackModal';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -8,6 +9,7 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [mode, setMode] = useState<'blood' | 'classic'>('blood');
   const [adminOpen, setAdminOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   const nameOk = name.trim().length > 0;
 
@@ -111,9 +113,15 @@ export function Lobby({ connected }: { connected: boolean }) {
           </ul>
         </div>
       </div>
-      <button className="admin-link" onClick={() => setAdminOpen(true)}>
+      <button className="admin-link" onClick={() => setFeedbackOpen(true)}>
+        反馈
+      </button>
+      <button className="admin-link" style={{ bottom: 42 }} onClick={() => setAdminOpen(true)}>
         管理员
       </button>
+      {feedbackOpen && (
+        <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={name.trim() || undefined} />
+      )}
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
   );

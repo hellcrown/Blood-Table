@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+import { initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
@@ -208,6 +209,45 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, cleared: n }));
     return;
   }
+  if (url.pathname === '/api/feedback' && req.method === 'POST') {
+    void readBody(req).then((body) => {
+      const send = (code: number, obj: unknown): void => {
+        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(obj));
+      };
+      if (!feedbackLimit.get(req.socket.remoteAddress ?? '?').allow()) {
+        send(429, { ok: false, msg: '反馈提交过于频繁，请 1 小时后再试' });
+        return;
+      }
+      let parsed: { text?: unknown; contact?: unknown; room?: unknown; name?: unknown } = {};
+      try {
+        parsed = JSON.parse(body) as typeof parsed;
+      } catch {
+        /* 忽略解析失败，按空内容处理 */
+      }
+      const err = submitFeedback(parsed, req.socket.remoteAddress ?? '?');
+      if (err === 'EMPTY') {
+        send(400, { ok: false, msg: '反馈内容不能为空' });
+      } else if (err === 'TOO_LONG') {
+        send(400, { ok: false, msg: `反馈内容过长（最多 ${500} 字）` });
+      } else if (err === 'RATE_LIMITED') {
+        send(429, { ok: false, msg: '反馈提交过于频繁，请 1 小时后再试' });
+      } else {
+        send(200, { ok: true, msg: '反馈已提交，感谢你的帮助！' });
+      }
+    });
+    return;
+  }
+  if (url.pathname === '/api/admin/feedback' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, feedback: listFeedback() }));
+    return;
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405);
     res.end();
@@ -217,6 +257,14 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+
+// 反馈限流：单 IP 每小时最多 5 条
+const feedbackLimit = new IpTable(
+  () => new SlidingWindow(3_600_000, 5),
+  (w, now) => w.idle(now),
+);
+setInterval(() => feedbackLimit.prune(), 30 * 60_000).unref();
+initFeedbackStore(path.resolve(process.cwd(), 'data', 'feedback.jsonl'));
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
 const MAX_TOTAL_CONNS = 200;

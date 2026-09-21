@@ -571,6 +571,14 @@ describe('血色机器人 · 芯片插入目标', () => {
 });
 
 describe('血色机器人 · 公开服务器防护', () => {
+  type TestRoom = {
+    code: string;
+    sessions: Map<string, { id: string; bot?: boolean; seat: number; connected: boolean; name?: string }>;
+    hostId: string;
+    game: BloodState | null;
+    botBrains: Map<string, BotBrain>;
+    botNextAct: Map<string, number>;
+  };
   function stubWsIp(ip: string) {
     return { readyState: 0, OPEN: 0, send: () => {}, on: () => {}, close: () => {}, ip } as never;
   }
@@ -665,6 +673,7 @@ describe('血色机器人 · 公开服务器防护', () => {
     const guest = [...room.sessions.values()].find((s) => s.id !== host.id) as unknown as {
       id: string;
       seat: number;
+      connected: boolean;
     };
     // 非房主请离 → 拒绝
     expect(() =>

@@ -3178,3 +3178,79 @@ body {
   margin-top: 6px;
   width: 100%;
 }
+
+/* 玩家反馈 */
+.feedback-link {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  background: transparent;
+  border: none;
+  color: var(--gold-dim);
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.8;
+  z-index: 50;
+}
+.feedback-link:hover {
+  opacity: 1;
+  color: var(--gold);
+}
+.feedback-modal {
+  width: min(520px, calc(100% - 40px));
+}
+.feedback-text,
+.feedback-contact {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+  color: inherit;
+  padding: 8px 10px;
+  font-size: 14px;
+  resize: vertical;
+}
+.feedback-meta {
+  margin: 6px 0 2px;
+}
+.feedback-done {
+  margin: 14px 0;
+  font-size: 15px;
+}
+.admin-feedback {
+  margin-top: 12px;
+  border-top: 1px solid var(--gold-dim);
+  padding-top: 10px;
+}
+.admin-feedback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.feedback-list {
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.feedback-item {
+  background: var(--panel-2);
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.feedback-item-meta {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.feedback-item-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
