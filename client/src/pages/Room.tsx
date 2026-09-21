@@ -63,16 +63,13 @@ export function Room({ view }: { view: TableView }) {
 
   const renderSeatCell = (i: number) => {
     const sv = seats[i];
-    const isMine = sv?.id === net.playerId;
-    const clickable = !isMine;
+    const empty = !sv;
     return (
       <div
-        className={`seat-cell ${sv ? 'taken' : 'empty'} ${clickable ? 'clickable' : ''}`}
-        title={clickable ? (sv ? '点击与此玩家换位' : '点击入座') : undefined}
+        className={`seat-cell ${sv ? 'taken' : 'empty'} ${empty ? 'clickable' : ''}`}
+        title={empty ? '点击坐到这里' : undefined}
         onClick={() => {
-          if (!clickable) return;
-          if (sv) net.send({ t: 'swapSeat', seat: i });
-          else net.send({ t: 'sit', seat: i });
+          if (empty) net.send({ t: 'sit', seat: i });
         }}
       >
         {sv ? (

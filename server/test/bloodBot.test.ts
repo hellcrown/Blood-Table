@@ -623,7 +623,7 @@ describe('血色机器人 · 公开服务器防护', () => {
     expect(rooms.size).toBe(3);
   });
 
-  it('换座位：点击他人座位互换（仅开局前），空座位直接入座', () => {
+  it('换座位：已入座玩家点击空座位即可移动过去', () => {
     const mgr = new RoomManager();
     const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
     const rooms = m.rooms as unknown as Map<string, TestRoom>;
@@ -633,28 +633,20 @@ describe('血色机器人 · 公开服务器防护', () => {
     const host = [...room.sessions.values()][0] as unknown as { id: string; seat: number };
     const ws2 = stubWsIp('7.7.7.8');
     (m.handleJoin as (w: unknown, msg: unknown) => void)(ws2, { t: 'join', code: room.code, name: '乙' });
-    const p2 = [...room.sessions.values()].find((s) => s.id !== host.id) as unknown as { id: string; seat: number };
-    // 与乙换位
-    (m.handleSwapSeat as (r: unknown, s: unknown, msg: unknown) => void)(
-      room,
-      host,
-      { t: 'swapSeat', seat: p2.seat },
-    );
-    const hostAfter = [...room.sessions.values()].find((s) => s.id === host.id)! as unknown as { seat: number };
-    const guestAfter = [...room.sessions.values()].find((s) => s.id === p2.id)! as unknown as { seat: number };
-    expect(hostAfter.seat).toBe(1);
-    expect(guestAfter.seat).toBe(0);
-    // 移到空座位
+    const guest = [...room.sessions.values()].find((s) => s.id !== host.id) as unknown as { id: string; seat: number };
+    expect(host.seat).toBe(0);
+    expect(guest.seat).toBe(1);
+    // 房主点击 3 号空座位 → 移动过去，原座位释放
     (m.handleSit as (r: unknown, s: unknown, msg: unknown) => void)(room, host, { t: 'sit', seat: 3 });
-    expect((hostAfter as unknown as { seat: number }).seat).toBe(3);
-    // 开局后不能换位
+    expect(host.seat).toBe(3);
+    expect(guest.seat).toBe(1);
+    // 空出的 0 号座位：乙也可以移动过去
+    (m.handleSit as (r: unknown, s: unknown, msg: unknown) => void)(room, guest, { t: 'sit', seat: 0 });
+    expect(guest.seat).toBe(0);
+    // 开局后不能换座位
     room.game = { phase: 'pick' } as unknown as BloodState;
     expect(() =>
-      (m.handleSwapSeat as (r: unknown, s: unknown, msg: unknown) => void)(
-        room,
-        { id: host.id, seat: 3 } as unknown as { id: string; seat: number },
-        { t: 'swapSeat', seat: 0 },
-      ),
+      (m.handleSit as (r: unknown, s: unknown, msg: unknown) => void)(room, host, { t: 'sit', seat: 0 }),
     ).toThrow('对局进行中不能换座位');
     void m;
   });
