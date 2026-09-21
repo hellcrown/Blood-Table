@@ -110,3 +110,15 @@ export function submitFeedback(
 export function listFeedback(): FeedbackEntry[] {
   return list.slice();
 }
+
+/** 管理员清空全部反馈（内存与文件） */
+export function clearFeedback(): void {
+  list.length = 0;
+  if (file) {
+    try {
+      fs.writeFileSync(file, '');
+    } catch (e) {
+      console.error('[feedback] 清空文件失败:', e);
+    }
+  }
+}

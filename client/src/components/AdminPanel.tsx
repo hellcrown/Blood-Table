@@ -54,6 +54,25 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [feedback, setFeedback] = useState<FeedbackInfo[] | null>(null);
   const [feedbackError, setFeedbackError] = useState('');
 
+  const clearFeedback = useCallback(async (t: string) => {
+    try {
+      const r = await fetch('/api/admin/feedback/clear', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      setFeedback([]);
+      setFeedbackError('');
+    } catch {
+      setFeedbackError('清空失败，请重试');
+    }
+  }, []);
+
   const loadFeedback = useCallback(async (t: string) => {
     try {
       const r = await fetch('/api/admin/feedback', { headers: { Authorization: `Bearer ${t}` } });
@@ -199,12 +218,24 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
             <div className="admin-feedback">
               <div className="admin-feedback-head">
                 <b>📨 玩家反馈</b>
+                <span className="spacer" />
                 <button
                   className="btn small"
                   disabled={busy}
                   onClick={() => token && void loadFeedback(token)}
                 >
                   刷新反馈
+                </button>
+                <button
+                  className="btn small danger"
+                  disabled={busy || !feedback || feedback.length === 0}
+                  onClick={() => {
+                    if (window.confirm('确定清空全部玩家反馈？此操作不可恢复')) {
+                      if (token) void clearFeedback(token);
+                    }
+                  }}
+                >
+                  清空反馈
                 </button>
               </div>
               {feedbackError && <p className="admin-error">{feedbackError}</p>}

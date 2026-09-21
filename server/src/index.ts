@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { initFeedbackStore, listFeedback, submitFeedback } from './feedback';
+import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
@@ -195,6 +195,17 @@ const server = http.createServer((req, res) => {
     const n = manager.clearAllRooms();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, cleared: n }));
+    return;
+  }
+  if (url.pathname === '/api/admin/feedback/clear' && req.method === 'POST') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    clearFeedback();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
   if (url.pathname === '/api/rooms/clear' && req.method === 'POST') {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { initFeedbackStore, listFeedback, submitFeedback } from '../src/feedback';
+import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from '../src/feedback';
 
 const NOW = 1_700_000_000_000;
 
@@ -69,6 +69,23 @@ describe('玩家反馈存储', () => {
     expect(all.length).toBe(500);
     expect(all[0].text).toBe('反馈 5'); // 最旧的 5 条被淘汰
     expect(all[499].text).toBe('反馈 504');
+    fs.unlinkSync(f);
+  });
+});
+
+
+describe('清空反馈', () => {
+  it('clearFeedback：清空内存与文件，之后可继续提交', () => {
+    const f = tmpFile();
+    initFeedbackStore(f);
+    submitFeedback({ text: '问题1' }, '2.2.2.2', NOW);
+    submitFeedback({ text: '问题2' }, '3.3.3.3', NOW + 1);
+    clearFeedback();
+    expect(listFeedback().length).toBe(0);
+    expect(fs.readFileSync(f, 'utf-8')).toBe('');
+    // 清空后可继续正常提交
+    expect(submitFeedback({ text: '新的反馈' }, '4.4.4.4', NOW + 2)).toBeNull();
+    expect(listFeedback().length).toBe(1);
     fs.unlinkSync(f);
   });
 });
