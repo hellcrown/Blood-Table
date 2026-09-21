@@ -137,6 +137,11 @@ export const BLOOD_MARKET_EXPANSION_DEFS: BloodMarketDef[] = [
   { id: 'demag', no: 'NO.051', name: '消磁枪', kind: 'item', cost: 4, count: 2, text: '【对决】令一位玩家的1张强化芯片失效。', effect: { k: 'demagNullify' }, expansion: true },
 ];
 
+/** 按名称查牌（牌局记录点击查看用） */
+export const BLOOD_MARKET_BY_NAME = new Map(
+  [...BLOOD_MARKET_DEFS, ...BLOOD_MARKET_EXPANSION_DEFS].map((d) => [d.name, d]),
+);
+
 /** 全量牌表（含拓展）：视图/购买解析用 */
 export const BLOOD_MARKET_BY_ID = new Map(
   [...BLOOD_MARKET_DEFS, ...BLOOD_MARKET_EXPANSION_DEFS].map((d) => [d.id, d]),

@@ -202,6 +202,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       handCount: p.hand.length,
       drawCount: p.draw.length,
       itemCount: p.items.length,
+      items: p.items.map((i) => i.def),
       swapLeft: p.swapLeft,
       swapDone: p.swapDone,
       locked: p.locked,

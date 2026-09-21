@@ -832,6 +832,8 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     gs.players[0].setupRound = 2;
     gs.players[1].charId = 'clerk';
     gs.players[2].charId = 'clerk';
+    // 创建时随机分配的角色可能给任意玩家预排了黑客初始构筑流程，强制角色后需清除
+    gs.startupQueue = gs.startupQueue.filter((e) => e.kind !== 'hackerSetup');
     driveTo(gs, 'swap');
     bSwapStop(gs, 'p1', NOW); // 对手1 停止 → 小回合1
     let guard = 0;

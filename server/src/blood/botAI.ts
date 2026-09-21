@@ -557,7 +557,11 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
     }
     case 'revealItem': {
       const demag = p.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify');
-      if (demag) {
+      // 对手出牌区没有任何可失效的芯片时不使用消磁枪（避免选目标空转卡住）
+      const anyChip = opponentsOf(gs, p).some((o) =>
+        o.play.some((card) => o.chips.some((ch) => ch.on === card.id && !ch.off)),
+      );
+      if (demag && anyChip) {
         blood.bUseItem(gs, p.id, demag.id, now);
       } else {
         blood.bUseItem(gs, p.id, null, now);
@@ -678,8 +682,9 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return false;
     }
     case 'demagTarget': {
+      // 选芯片最贵的对手；即使其没有芯片，引擎也会"落空弃置"并继续推进（不空转卡住）
       const t = opponentsOf(gs, p).sort((a, b) => mostExpensiveChip(b) - mostExpensiveChip(a))[0];
-      if (t && mostExpensiveChip(t) > 0) {
+      if (t) {
         blood.bSecretTarget(gs, p.id, t.seat, now);
         return true;
       }

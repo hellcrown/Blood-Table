@@ -3357,3 +3357,25 @@ body {
     grid-row: auto !important;
   }
 }
+/* 牌局记录中的牌名（可点击） */
+.log-card {
+  color: var(--gold);
+  cursor: pointer;
+  border-bottom: 1px dotted var(--gold-dim);
+}
+.log-card:hover {
+  color: var(--gold);
+}
+.info-card-panel {
+  width: min(460px, calc(100% - 40px));
+}
+.info-card-panel p {
+  white-space: pre-wrap;
+}
+.opp-item-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

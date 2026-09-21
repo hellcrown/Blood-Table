@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
+import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
 import { applyCharEval } from '@shared/bloodChars';
 import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
@@ -281,6 +281,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   // 插入芯片二次确认：点选目标牌后弹出（防误触），确认才真正发送插入
   const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [infoCard, setInfoCard] = useState<string | null>(null); // 牌局记录中点击的牌 def id
+  const [oppItems, setOppItems] = useState<{ name: string; defs: string[] } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
   /** 角色技能详情弹层（选将确认 / 座位徽章查看共用） */
   const [charDetail, setCharDetail] = useState<string | null>(null);
@@ -346,10 +348,11 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (showdown && !view.showdownWait && view.phase !== 'gameover') setShowdown(null);
   }, [view.showdownWait, view.phase, showdown]);
 
-  // 日志自动滚到底部
+  // 日志滚动：仅当停留在底部附近时自动滚到最新，向上翻阅历史不被顶走
+  const logPinned = useRef(true);
   useEffect(() => {
     const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && logPinned.current) el.scrollTop = el.scrollHeight;
   }, [view.logSeq]);
 
   // 拔除芯片：自动打开弃牌区选择带芯片的牌；定点爆破受害者：自动打开弃牌区选牌
@@ -390,6 +393,26 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (chosen.length === 0) return null;
     return evalBloodHand(chosen.map(toEvalMe));
   }, [view.prompt.k, view.me.hand, selPlay, myCharId]);
+
+  /** 牌局记录中的【牌名】渲染为可点击（打开牌面详情）；非牌名（技能名等）保持纯文本 */
+  const renderLogText = (text: string): React.ReactNode => {
+    const parts = text.split(/(【[^】]+】)/g);
+    return parts.map((part, i) => {
+      const m = /^【([^】]+)】$/.exec(part);
+      const def = m ? BLOOD_MARKET_BY_NAME.get(m[1]) : undefined;
+      if (!m || !def) return <span key={i}>{part}</span>;
+      return (
+        <span
+          key={i}
+          className="log-card"
+          title="点击查看牌面"
+          onClick={() => setInfoCard(def.id)}
+        >
+          {part}
+        </span>
+      );
+    });
+  };
 
   const phaseIdx = PHASES.findIndex((p) => p.key === view.phase);
 
@@ -651,10 +674,18 @@ export function BloodTable({ view }: { view: BloodView }) {
       {/* 左侧：牌局记录列（小箭头可收起/展开；手机端为左侧抽屉） */}
       <aside className={`blood-side ${logOpen ? 'open' : ''}`}>
         <div className="box-title">牌局记录</div>
-        <div className="blood-loglist" ref={logRef}>
+        <div
+          className="blood-loglist"
+          ref={logRef}
+          onScroll={() => {
+            const el = logRef.current;
+            if (!el) return;
+            logPinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+        >
           {view.log.map((l) => (
             <div key={l.seq} className={`log-line k-${l.kind}`}>
-              {l.text}
+              {renderLogText(l.text)}
             </div>
           ))}
         </div>
@@ -758,7 +789,18 @@ export function BloodTable({ view }: { view: BloodView }) {
                     : Array.from({ length: opp.locked ? 5 : 0 }, (_, i) => <CardView key={i} faceDown size="sm" />)}
                 </div>
                 <div className="bp-stats">
-                  手牌 {opp.handCount} · 牌库 {opp.drawCount} · 道具 {opp.itemCount}
+                  手牌 {opp.handCount} · 牌库 {opp.drawCount} ·{' '}
+                  {opp.itemCount > 0 ? (
+                    <span
+                      className="log-card"
+                      title="点击查看道具"
+                      onClick={() => setOppItems({ name: opp.name, defs: opp.items ?? [] })}
+                    >
+                      道具 {opp.itemCount}
+                    </span>
+                  ) : (
+                    <>道具 {opp.itemCount}</>
+                  )}
                   {view.phase === 'swap' && !opp.swapDone && ` · 还可换 ${opp.swapLeft} 次`}
                   {opp.lastAction && <div className="bp-action">{opp.lastAction}</div>}
                   {opp.handName && (
@@ -2474,6 +2516,51 @@ export function BloodTable({ view }: { view: BloodView }) {
           </div>
         </div>
       )}
+      {infoCard &&
+        (() => {
+          const def = BLOOD_MARKET_BY_ID.get(infoCard)!;
+          return (
+            <div className="overlay" onClick={() => setInfoCard(null)}>
+              <div className="panel info-card-panel" onClick={(e) => e.stopPropagation()}>
+                <h3>【{def.name}】</h3>
+                <div className="hint">
+                  {def.kind === 'chip' ? '强化芯片' : def.kind === 'item' ? '备用道具' : '秘密交易'} ·{' '}
+                  {def.cost}🩸{def.noJoker ? ' · 不可插入JOKER' : ''}
+                </div>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{def.text}</p>
+                <button className="btn small" onClick={() => setInfoCard(null)}>
+                  关闭
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      {oppItems && (
+        <div className="overlay" onClick={() => setOppItems(null)}>
+          <div className="panel info-card-panel" onClick={(e) => e.stopPropagation()}>
+            <h3>{oppItems.name} 的道具区</h3>
+            {oppItems.defs.length === 0 && <p className="hint">空</p>}
+            <div className="opp-item-list">
+              {oppItems.defs.map((defId, i) => {
+                const def = BLOOD_MARKET_BY_ID.get(defId);
+                return (
+                  <div key={`${defId}-${i}`} className="feedback-item">
+                    <div className="feedback-item-meta">
+                      【{def?.name ?? '?'}】 ·{' '}
+                      {def?.kind === 'chip' ? '强化芯片' : def?.kind === 'item' ? '备用道具' : '秘密交易'} ·{' '}
+                      {def?.cost ?? 0}🩸
+                    </div>
+                    <div className="feedback-item-text">{def?.text ?? ''}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="btn small" style={{ marginTop: 10 }} onClick={() => setOppItems(null)}>
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
       {feedbackOpen && (
       <FeedbackModal
         onClose={() => setFeedbackOpen(false)}
@@ -2484,4 +2571,5 @@ export function BloodTable({ view }: { view: BloodView }) {
     </div>
   );
 }
+
 

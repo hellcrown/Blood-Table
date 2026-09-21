@@ -25,6 +25,8 @@ export interface BloodSeatView {
   handCount: number;
   drawCount: number;
   itemCount: number;
+  /** 道具区的牌 def id（道具区在桌面上公开可见） */
+  items?: string[];
   swapLeft: number;
   swapDone: boolean;
   locked: boolean;
