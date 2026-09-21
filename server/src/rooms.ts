@@ -208,6 +208,9 @@ export class RoomManager {
       case 'sit':
         this.handleSit(room, session, msg);
         return;
+      case 'swapSeat':
+        this.handleSwapSeat(room, session, msg);
+        return;
       case 'addBot':
         this.handleAddBot(room, session);
         return;
@@ -864,6 +867,21 @@ export class RoomManager {
     const player = g?.players.find((p) => p.id === session.id);
     if (player) player.seat = seat;
     if (g) g.players.sort((x, y) => x.seat - y.seat);
+    this.broadcast(room);
+  }
+
+  /** 点击他人座位：与其互换座位（仅开局前；双方保留各自身份与状态，只交换座位号） */
+  private handleSwapSeat(room: Room, session: Session, msg: Extract<C2S, { t: 'swapSeat' }>): void {
+    if (room.game) throw new GameError('IN_GAME', '对局进行中不能换座位');
+    const targetSeat = Math.floor(msg.seat);
+    if (!Number.isInteger(targetSeat) || targetSeat < 0 || targetSeat >= room.maxPlayers) {
+      throw new GameError('BAD_SEAT', '座位号无效');
+    }
+    if (targetSeat === session.seat) return;
+    const other = [...room.sessions.values()].find((s) => s.seat === targetSeat);
+    if (!other) throw new GameError('BAD_SEAT', '该座位没有人（空座位会直接入座）');
+    other.seat = session.seat;
+    session.seat = targetSeat;
     this.broadcast(room);
   }
 

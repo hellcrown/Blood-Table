@@ -63,8 +63,18 @@ export function Room({ view }: { view: TableView }) {
 
   const renderSeatCell = (i: number) => {
     const sv = seats[i];
+    const isMine = sv?.id === net.playerId;
+    const clickable = !isMine;
     return (
-      <div className={`seat-cell ${sv ? 'taken' : 'empty'}`}>
+      <div
+        className={`seat-cell ${sv ? 'taken' : 'empty'} ${clickable ? 'clickable' : ''}`}
+        title={clickable ? (sv ? '点击与此玩家换位' : '点击入座') : undefined}
+        onClick={() => {
+          if (!clickable) return;
+          if (sv) net.send({ t: 'swapSeat', seat: i });
+          else net.send({ t: 'sit', seat: i });
+        }}
+      >
         {sv ? (
           <>
             <div className="seat-name">
@@ -79,14 +89,24 @@ export function Room({ view }: { view: TableView }) {
               <button
                 className="btn tiny ghost kick-btn"
                 title="请离该玩家"
-                onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  net.send({ t: 'kickPlayer', seat: sv.seat });
+                }}
               >
                 请出
               </button>
             )}
           </>
         ) : (
-          <button className="sit-btn" onClick={() => net.send({ t: 'sit', seat: i })} title="坐到这里">
+          <button
+            className="sit-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              net.send({ t: 'sit', seat: i });
+            }}
+            title="坐到这里"
+          >
             空座位
           </button>
         )}
@@ -154,11 +174,9 @@ export function Room({ view }: { view: TableView }) {
         {view.maxPlayers === 4 ? (
           <div className="table-layout">
             <div className="table-pos pos-top">
-              <span className="dir-tag">北</span>
               {renderSeatCell(tablePosSeat(2))}
             </div>
             <div className="table-pos pos-left">
-              <span className="dir-tag">西</span>
               {renderSeatCell(tablePosSeat(3))}
             </div>
             <div className="table-center-x">
@@ -167,11 +185,9 @@ export function Room({ view }: { view: TableView }) {
               <div className="hint">{view.maxPlayers} 人局</div>
             </div>
             <div className="table-pos pos-right">
-              <span className="dir-tag">东</span>
               {renderSeatCell(tablePosSeat(1))}
             </div>
             <div className="table-pos pos-bottom">
-              <span className="dir-tag">南</span>
               {renderSeatCell(tablePosSeat(0))}
             </div>
           </div>
@@ -193,7 +209,10 @@ export function Room({ view }: { view: TableView }) {
                       <button
                         className="btn tiny ghost kick-btn"
                         title="请离该玩家"
-                        onClick={() => net.send({ t: 'kickPlayer', seat: sv.seat })}
+                        onClick={(e) => {
+                  e.stopPropagation();
+                  net.send({ t: 'kickPlayer', seat: sv.seat });
+                }}
                       >
                         请出
                       </button>
