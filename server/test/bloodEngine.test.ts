@@ -1173,6 +1173,36 @@ describe('血色引擎 · 4人局选将', () => {
   });
 });
 
+describe('血色引擎 · 磁力线圈', () => {
+  it('重整重洗：线圈宿主牌置于抽牌堆顶并被第一张抽到', () => {
+    const gs = make2p();
+    setupDone(gs);
+    const p0 = gs.players[0];
+    // 手牌中挑一张牌挂磁力线圈并丢进弃牌区
+    const host = p0.hand[0];
+    p0.chips.push({ id: 'ch-coil', def: 'magCoil', on: host.id });
+    p0.hand = p0.hand.filter((c) => c.id !== host.id);
+    p0.discard.push(host);
+    bSwapStop(gs, 'p0', NOW);
+    bSwapStop(gs, 'p1', NOW);
+    bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    confirmSd(gs);
+    bPassBuy(gs, 'p0', NOW);
+    bPassBuy(gs, 'p1', NOW);
+    bRemoveDone(gs, 'p0', NOW);
+    bRemoveDone(gs, 'p1', NOW);
+    expect(gs.phase).toBe('reorg');
+    // 重整：重洗牌库 → 线圈宿主牌置于抽牌堆顶
+    bReorg(gs, 'p0', 'reshuffle', NOW);
+    expect(p0.draw[p0.draw.length - 1].id).toBe(host.id);
+    bReorg(gs, 'p1', 'blood', NOW);
+    // 下一回合抽牌阶段：host 是第一张被抽到的牌
+    expect(p0.hand.some((c) => c.id === host.id)).toBe(true);
+    expect(p0.chips.some((ch) => ch.on === host.id && ch.def === 'magCoil')).toBe(true);
+  });
+});
+
 describe('血色引擎 · 道具窗口超时托管', () => {
   it('魔术橡皮宣告超时：落空弃置并继续推进（修复 swapItem 永久卡死）', () => {
     const gs = make2p();

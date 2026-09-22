@@ -389,29 +389,37 @@ function seatDist(gs: BloodState, from: number, to: number): number {
 
 function reshuffleIfEmpty(gs: BloodState, p: BPlayer): void {
   if (p.draw.length === 0 && p.discard.length > 0) {
+    const coils = extractCoilCards(p); // 重洗前先挑出磁力线圈宿主牌
     p.draw = shuffle(p.discard);
     p.discard = [];
-    onLibraryReshuffle(gs);
+    p.draw.push(...coils); // 线圈宿主牌置于抽牌堆顶
+    if (coils.length) {
+      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.map(bloodCardText).join('、')} 置于抽牌堆顶`);
+    }
+    grantLaundryOnReshuffle(gs);
   }
 }
 
-/** 重洗牌库（弃牌区与抽牌区重新洗混）触发：洗衣房店主 +1 血筹；磁力线圈此牌回到抽牌堆顶 */
-function onLibraryReshuffle(gs: BloodState): void {
+/** 重洗牌库触发：洗衣房店主 +1 血筹（任何人重洗都算） */
+function grantLaundryOnReshuffle(gs: BloodState): void {
   for (const x of gs.players) {
     if (effChar(x) === 'laundry') {
       x.blood += 1;
       pushLog(gs, 'action', `${pname(x)}【洗衣房店主】因重洗牌库获得 1 血筹`);
     }
-    // 磁力线圈：弃牌区装有线圈的牌挑出，放在抽牌堆顶
-    const coilCard = x.discard.find(
-      (c) => x.chips.some((ch) => ch.on === c.id && !ch.off && BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'magCoil'),
-    );
-    if (coilCard) {
-      x.discard = x.discard.filter((c) => c.id !== coilCard.id);
-      x.draw.push(coilCard); // draw 末端为堆顶
-      pushLog(gs, 'action', `${pname(x)} 的【磁力线圈】发动：${bloodCardText(coilCard)} 放在抽牌堆顶`);
+  }
+}
+
+/** 重洗前：从玩家弃牌区挑出磁力线圈宿主牌（返回待置于堆顶的牌；洗牌后再放回，否则会被洗进堆中部） */
+function extractCoilCards(p: BPlayer): BCard[] {
+  const out: BCard[] = [];
+  for (const c of [...p.discard]) {
+    if (p.chips.some((ch) => ch.on === c.id && !ch.off && BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'magCoil')) {
+      p.discard = p.discard.filter((d) => d.id !== c.id);
+      out.push(c);
     }
   }
+  return out;
 }
 
 function drawN(gs: BloodState, p: BPlayer, n: number): BCard[] {
@@ -684,13 +692,14 @@ function runTwinSetup(gs: BloodState): void {
       pushLog(gs, 'sys', `${pname(p)}【双生子】弃牌区没有可插入的牌，【双生镜片】弃置`);
       continue;
     }
+    const coils = extractCoilCards(p); // 重洗前先挑出磁力线圈宿主牌
     const host = candidates[randomInt(0, candidates.length)];
     p.discard = p.discard.filter((c) => c.id !== host.id);
     p.chips.push({ id: `ch-${Math.random().toString(36).slice(2, 10)}`, def: 'twinLens', on: host.id });
     p.draw = shuffle([...p.discard, ...p.draw]);
     p.discard = [];
-    p.draw.push(host); // 末端为堆顶
-    onLibraryReshuffle(gs);
+    p.draw.push(host, ...coils); // 末端为堆顶
+    grantLaundryOnReshuffle(gs);
     pushLog(gs, 'action', `🪞 ${pname(p)}【双生子】将【双生镜片】插入 ${bloodCardText(host)}、重洗牌库后置于抽牌堆顶`);
   }
 }
@@ -2857,9 +2866,14 @@ export function bReorg(
     return;
   }
   if (choice === 'reshuffle') {
+    const coils = extractCoilCards(p); // 重洗前先挑出磁力线圈宿主牌
     p.draw = shuffle([...p.discard, ...p.draw]);
     p.discard = [];
-    onLibraryReshuffle(gs);
+    p.draw.push(...coils); // 磁力线圈宿主牌置于抽牌堆顶
+    if (coils.length) {
+      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.map(bloodCardText).join('、')} 置于抽牌堆顶`);
+    }
+    grantLaundryOnReshuffle(gs);
     pushLog(gs, 'action', `${pname(p)} 重洗牌库`);
     // 质检员：重洗牌库则获得 1 血筹
     if (effChar(p) === 'inspector') {
@@ -4560,7 +4574,7 @@ export function bCleanerDel(gs: BloodState, playerId: string, seat: number, card
   if (fromDraw) {
     t.draw = t.draw.filter((c) => c.id !== card.id);
     t.draw = shuffle(t.draw); // 删除抽牌堆的牌后重洗抽牌堆
-    onLibraryReshuffle(gs);
+    grantLaundryOnReshuffle(gs);
   } else {
     t.discard = t.discard.filter((c) => c.id !== card.id);
   }
