@@ -1069,8 +1069,8 @@ function afterPlayHookResolved(gs: BloodState, now: number): void {
 }
 
 function startReveal(gs: BloodState, now: number): void {
+  // comparePipsFirst（荷官证）在对决前道具窗口置位；回合级清零在 startDrawPhase
   gs.phase = 'reveal';
-  gs.comparePipsFirst = false;
   gs.stealPending = null;
   gs.revealed = gs.players.map((p) => ({ seat: p.seat, cardIds: p.play.map((c) => c.id) }));
   pushLog(gs, 'hand', `第 ${gs.round} 回合 · 对决阶段：亮牌！`);
@@ -1869,7 +1869,7 @@ function settle(gs: BloodState, now: number): void {
   // 出牌区置入弃牌区（枪手先记下本回合打出的4；自毁芯片记下是否发动）
   const gunnerFours = new Map<string, string[]>();
   const playedIdsByP = new Map<string, string[]>();
-  let selfDestructFired = false;
+  const selfDestructPids = new Set<string>();
   for (const p of gs.players) {
     if (effChar(p) === 'gunner') gunnerFours.set(p.id, p.play.filter((c) => c.r === 4).map((c) => c.id));
     if (
@@ -1877,7 +1877,7 @@ function settle(gs: BloodState, now: number): void {
         .filter((ch) => p.play.some((card) => card.id === ch.on) && !ch.off)
         .some((ch) => chipEffectsFor(p, ch).some((eff) => eff.k === 'selfDestruct'))
     ) {
-      selfDestructFired = true;
+      selfDestructPids.add(p.id);
     }
     playedIdsByP.set(p.id, p.play.map((c) => c.id));
     p.discard.push(...p.play);
@@ -1892,16 +1892,15 @@ function settle(gs: BloodState, now: number): void {
     purgeChipsOn(gs, p, new Set(ids));
     pushLog(gs, 'action', `${pname(p)}【枪手】结算结束：删除本回合打出的4（${moved.map(bloodCardText).join(' ')}）`);
   }
-  if (selfDestructFired) {
-    for (const p of gs.players) {
-      const ids = playedIdsByP.get(p.id)!;
-      const moved = p.discard.filter((c) => ids.includes(c.id));
-      if (moved.length === 0) continue;
-      p.discard = p.discard.filter((c) => !ids.includes(c.id));
-      p.removed.push(...moved);
-      purgeChipsOn(gs, p, new Set(ids));
-      pushLog(gs, 'action', `【自毁芯片】发动：${pname(p)} 本回合打出的 ${moved.length} 张牌全部删除`);
-    }
+  for (const p of gs.players) {
+    if (!selfDestructPids.has(p.id)) continue; // 只删"装了自毁芯片"玩家自己打出的牌
+    const ids = playedIdsByP.get(p.id)!;
+    const moved = p.discard.filter((c) => ids.includes(c.id));
+    if (moved.length === 0) continue;
+    p.discard = p.discard.filter((c) => !ids.includes(c.id));
+    p.removed.push(...moved);
+    purgeChipsOn(gs, p, new Set(ids));
+    pushLog(gs, 'action', `【自毁芯片】发动：${pname(p)} 本回合打出的 ${moved.length} 张牌全部删除`);
   }
 
   // 炸弹客：结算结束时，其他玩家随机删除 X 张本回合打出的牌，自己删除 X+1 张
@@ -2234,6 +2233,7 @@ export function bBuy(
   p.blood += bonusTaken;
   ms.bonus = 0;
   const baristaFirst = effChar(p) === 'barista' && !p.firstBuyUsed && def.cost >= 3;
+  if (baristaFirst) p.baristaPending = true; // 咖啡师：免费获得牌堆顶一张（结算后发放）
   p.firstBuyUsed = true; // 首次购买已消耗（0血筹购入也算）
   p.boughtAny = true;
   gs.announce = { defId: def.id, buyerSeat: p.seat, at: Date.now() };
@@ -3094,6 +3094,8 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (gs.stealPending && gs.stealPending.seat === p.id) {
         gs.stealPending = null;
         pushLog(gs, 'action', `${pname(p)} 掠夺目标无效，效果落空`);
+        nextRevealOrSettle(gs, now);
+        return true;
       } else {
         act(() => bUseItem(gs, p.id, null, now));
       }
@@ -3163,6 +3165,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         if (p.draw.length > 0) {
           const c = p.draw.pop()!;
           p.removed.push(c);
+          purgeChipsOn(gs, p, new Set([c.id]));
           pushLog(gs, 'action', `${pname(p)}【清洁工】托管：删除自己抽牌堆顶的 ${bloodCardText(c)}`);
         } else {
           pushLog(gs, 'action', `${pname(p)}【清洁工】托管：抽牌堆为空，无事发生`);
@@ -3238,6 +3241,16 @@ function resolveSwapEndOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
     case 'ceoGive':
       pushLog(gs, 'action', `${pname(p)}【霸道总裁】超时：结束给予`);
       break;
+    case 'ceoDecide': {
+      // 回应超时：视为拒绝，付双倍给霸道总裁
+      const ceo = gs.players.find((x) => x.id === pend.buyerId)!;
+      const amount = pend.given ?? 0;
+      const pay = Math.min(amount * 2, Math.max(0, p.blood));
+      p.blood -= pay;
+      ceo.blood += pay;
+      pushLog(gs, 'action', `💼 ${p.name} 回应超时：视为拒绝，支付 ${pay} 血筹给 ${pname(ceo)}`);
+      break;
+    }
     case 'impDraw':
       pushLog(gs, 'action', `${pname(p)}【捣蛋鬼】抽牌超时：暂停抽牌`);
       break;
@@ -4457,6 +4470,12 @@ export function bAuctionBid(gs: BloodState, playerId: string, amount: number, no
 export function bBuySeer(gs: BloodState, playerId: string, idx: number, now: number): void {
   void now;
   if (gs.phase !== 'buy') throw new BloodError('BAD_PHASE', '不在购买阶段');
+  if (gs.secretPending && gs.secretPending.seat !== playerId) {
+    throw new BloodError('PENDING', '其他玩家的结算尚未完成，请稍候');
+  }
+  if (gs.secretPending && gs.secretPending.seat === playerId) {
+    throw new BloodError('PENDING', '先完成当前的结算');
+  }
   const p = gs.players.find((x) => x.id === playerId)!;
   if (effChar(p) !== 'seer') throw new BloodError('BAD_PHASE', '你不是窥天师');
   if (gs.turnSeat !== p.seat || p.buyPassed) throw new BloodError('NOT_YOUR_TURN', '还没轮到你购买');
