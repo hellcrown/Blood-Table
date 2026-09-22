@@ -139,6 +139,8 @@ export type C2S =
   | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode }
   | { t: 'join'; name: string; code: string }
   | { t: 'spectate'; name: string; code: string }
+  | { t: 'enterSpectate' }
+  | { t: 'replaceBot'; seat: number }
   | { t: 'rejoin'; token: string }
   | { t: 'leave' }
   | { t: 'start' }
