@@ -223,6 +223,12 @@ export class RoomManager {
       case 'kickPlayer':
         this.handleKickPlayer(room, session, msg);
         return;
+      case 'enterSpectate':
+        this.handleEnterSpectate(room, session);
+        return;
+      case 'replaceBot':
+        this.handleReplaceBot(room, session, msg);
+        return;
       case 'act':
         this.handleAct(room, session, msg);
         return;
@@ -842,6 +848,48 @@ export class RoomManager {
     }
     target.connected = false;
     this.tokenIndex.delete(target.token); // 被请离者的会话令牌失效，无法自动重回房间
+  }
+
+  /** 等待界面：已入座玩家进入观战席（释放座位；开局后不可） */
+  private handleEnterSpectate(room: Room, session: Session): void {
+    if (session.spectator) return;
+    if (room.game) throw new GameError('IN_GAME', '对局开始后不能进入观战席');
+    session.spectator = true;
+    session.seat = -1;
+    if (room.hostId === session.id) {
+      const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && !s.spectator && s.id !== session.id);
+      room.hostId = next?.id ?? '';
+    }
+    this.broadcast(room);
+  }
+
+  /** 观战者接替机器人座位：沿用机器人的会话 id 与对局内身份，立即参与当前对局 */
+  private handleReplaceBot(room: Room, session: Session, msg: Extract<C2S, { t: 'replaceBot' }>): void {
+    if (room.mode !== 'blood' || !room.game) throw new GameError('IN_GAME', '当前没有可接替的对局');
+    const bs = room.game as BloodState;
+    if (!session.spectator) throw new GameError('NOT_SPECTATOR', '你不是观战者');
+    const seat = Math.floor(msg.seat);
+    const bot = [...room.sessions.values()].find((s) => s.bot && s.seat === seat);
+    if (!bot) throw new GameError('BAD_SEAT', '该座位没有机器人');
+    const gp = bs.players.find((p) => p.id === bot.id);
+    if (!gp) throw new GameError('BAD_SEAT', '该机器人不在当前对局中');
+    // 会话令牌转移：观战者以机器人会话的身份继续（对局内玩家 id 不变，无需改动对局状态）
+    const oldBotToken = bot.token;
+    this.tokenIndex.delete(oldBotToken);
+    bot.token = session.token;
+    bot.name = session.name;
+    bot.spectator = false;
+    bot.bot = false;
+    bot.ws = session.ws;
+    bot.connected = true;
+    this.tokenIndex.set(bot.token, { room, sessionId: bot.id });
+    this.bindings.set(session.ws!, { room, session: bot });
+    room.sessions.delete(session.id);
+    if (!room.hostId) room.hostId = bot.id;
+    gp.name = bot.name;
+    bs.log.push({ seq: ++bs.logSeq, kind: 'action', text: `👋 ${bot.name} 接替机器人入座` });
+    send(session.ws, { t: 'hello', token: bot.token, playerId: bot.id });
+    this.broadcast(room);
   }
 
   private handleKickBot(room: Room, session: Session, msg: Extract<C2S, { t: 'kickBot' }>): void {

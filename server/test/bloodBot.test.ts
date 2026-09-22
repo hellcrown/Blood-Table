@@ -45,7 +45,9 @@ describe('血色机器人 · 完整对局', () => {
     expect(gs.phase).toBe('gameover');
     expect(gs.final).not.toBeNull();
     const champ = gs.players.find((p) => p.seat === gs.final!.winnerSeat)!;
-    expect(champ.tickets).toBeGreaterThanOrEqual(gs.target);
+    // 皇叔可经"删光整副牌"特殊获胜（票数只需 ≥ 目标一半）
+    if (champ.charId === 'liu') expect(champ.tickets).toBeGreaterThanOrEqual(gs.target / 2);
+    else expect(champ.tickets).toBeGreaterThanOrEqual(gs.target);
   }, 60_000);
 
   it('3 人局全 bot（基础池）打到终局', () => {
@@ -488,20 +490,28 @@ describe('血色机器人 · 换牌节奏', () => {
     throw new Error('无法构造高牌散牌手牌');
   }
 
-  it('换牌：成手（三条）立即停牌，未用次数兑换血筹', () => {
+  it('换牌：成手（四条+双王）立即停牌，未用次数兑换血筹', () => {
     const gs = toSwapC('clerk', 'clerk');
     const p0 = gs.players[0];
     const pool = [...p0.draw, ...p0.hand, ...p0.discard];
-    const threes = pool.filter((c) => c.r === 9).slice(0, 3);
-    expect(threes.length).toBe(3);
-    const filler = pool.filter((c) => c.r !== 9 && !threes.includes(c)).slice(0, 3);
-    p0.hand = [...threes, ...filler];
+    // 自适应取牌：任一出现 ≥2 次的点数 + 双王 → 必为四条及以上（铁定成手）
+    const byRank = new Map<number, typeof pool>();
+    for (const c of pool) {
+      if (c.r === 0) continue;
+      const list = byRank.get(c.r) ?? [];
+      list.push(c);
+      byRank.set(c.r, list);
+    }
+    const pairEntry = [...byRank.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+    expect(pairEntry[1].length).toBeGreaterThanOrEqual(2);
+    const jokers = pool.filter((c) => c.r === 0).slice(0, 2);
+    p0.hand = [...pairEntry[1].slice(0, 2), ...jokers];
     p0.draw = pool.filter((c) => !p0.hand.includes(c));
     p0.discard = [];
     const swapLeft = p0.swapLeft;
     const bloodBefore = p0.blood;
     botAct(createBrain(), gs, p0.id, NOW);
-    expect(p0.swapDone).toBe(true); // 成手停牌，不再浪费次数
+    expect(p0.lastAction).toBe('停止换牌'); // 成手停牌，不再浪费次数
     expect(p0.swapLeft).toBe(swapLeft);
     // 对手也停 → 换牌阶段收尾，未用次数 1:1 兑换血筹
     bSwapStop(gs, gs.players[1].id, NOW);
@@ -573,7 +583,7 @@ describe('血色机器人 · 芯片插入目标', () => {
 describe('血色机器人 · 公开服务器防护', () => {
   type TestRoom = {
     code: string;
-    sessions: Map<string, { id: string; bot?: boolean; seat: number; connected: boolean; name?: string }>;
+    sessions: Map<string, { id: string; bot?: boolean; seat: number; connected: boolean; name?: string; spectator?: boolean }>;
     hostId: string;
     game: BloodState | null;
     botBrains: Map<string, BotBrain>;
@@ -660,7 +670,7 @@ describe('血色机器人 · 公开服务器防护', () => {
       (m.handleSit as (r: unknown, s: unknown, msg: unknown) => void)(room, spec, { t: 'sit', seat: 3 }),
     ).toThrow();
     // 观战者离开即从房间移除
-    (m.handleLeave as (r: unknown, s: unknown, msg: unknown) => void)(room, spec);
+    (m.handleLeave as (r: unknown, s: unknown) => void)(room, spec);
     expect([...room.sessions.values()].some((s) => s.spectator)).toBe(false);
   });
 
