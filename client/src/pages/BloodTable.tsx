@@ -2520,11 +2520,11 @@ export function BloodTable({ view }: { view: BloodView }) {
             </ol>
             <div className="panel-actions">
               {isHost ? (
-                <button className="btn primary" onClick={() => send({ t: 'bRematch' })}>
-                  再来一场
+                <button className="btn primary" onClick={() => send({ t: 'backToRoom' })}>
+                  返回房间（可调整后重新开局）
                 </button>
               ) : (
-                <span className="hint">等待房主开始新一场…</span>
+                <span className="hint">等待房主返回房间…</span>
               )}
             </div>
           </div>

@@ -141,6 +141,7 @@ export type C2S =
   | { t: 'spectate'; name: string; code: string }
   | { t: 'enterSpectate' }
   | { t: 'replaceBot'; seat: number }
+  | { t: 'backToRoom' }
   | { t: 'rejoin'; token: string }
   | { t: 'leave' }
   | { t: 'start' }

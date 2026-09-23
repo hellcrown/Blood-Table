@@ -477,7 +477,14 @@ export class RoomManager {
         if (bs.phase !== 'gameover') return;
         room.botBrains.clear(); // 记忆只在单局内有效
         room.botNextAct.clear();
-        room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion);
+        room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion); // 重开保留自定义目标
+        break;
+      }
+      case 'backToRoom': {
+        if (room.hostId && room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
+        if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
+        room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
+        this.broadcast(room);
         break;
       }
       default:

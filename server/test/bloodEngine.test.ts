@@ -1188,8 +1188,11 @@ describe('血色引擎 · 磁力线圈', () => {
     bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
     bPlay(gs, 'p1', gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
     confirmSd(gs);
-    bPassBuy(gs, 'p0', NOW);
-    bPassBuy(gs, 'p1', NOW);
+    // 购买从特权证持有者开始：按当前回合顺序跳过
+    for (let i = 0; i < gs.seatCount; i++) {
+      const cur = gs.players.find((p) => p.seat === gs.turnSeat)!;
+      bPassBuy(gs, cur.id, NOW);
+    }
     bRemoveDone(gs, 'p0', NOW);
     bRemoveDone(gs, 'p1', NOW);
     expect(gs.phase).toBe('reorg');
