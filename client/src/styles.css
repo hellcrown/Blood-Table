@@ -318,6 +318,11 @@ select:focus {
   text-align: center;
 }
 
+/* 占位提示较长：未输入时用正常字距，避免被截断；输入 4 位码后仍用 6px 字距 */
+.code-input:placeholder-shown {
+  letter-spacing: normal;
+}
+
 .rules-hint ul {
   margin: 0;
   padding-left: 18px;
