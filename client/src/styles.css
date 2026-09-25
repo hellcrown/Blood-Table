@@ -300,6 +300,15 @@ select:focus {
 
 .row input {
   flex: 1;
+  min-width: 0; /* 允许收缩：input 固有宽度（约 20 字符）会撑破 flex/grid 容器 */
+}
+
+.join-box .row {
+  flex-wrap: wrap;
+}
+
+.join-box .row .code-input {
+  flex: 1 1 100%; /* 房间码输入框独占一行，加入/观战按钮排下一行，避免挤破背景卡片 */
 }
 
 .code-input {
