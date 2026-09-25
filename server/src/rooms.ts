@@ -994,6 +994,7 @@ export class RoomManager {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
     if (cg.phase !== 'gameover') return;
     for (const s of room.sessions.values()) {
+      if (s.spectator) continue; // 观战者（seat=-1）不能进入牌局，否则成为幽灵玩家导致牌局死锁
       if (!cg.players.some((p) => p.id === s.id)) {
         engine.addPlayer(cg, { id: s.id, name: s.name, seat: s.seat, chips: room.settings.startChips });
       }

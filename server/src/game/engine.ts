@@ -53,6 +53,7 @@ export function createGame(settings: RoomSettings, seatCount: number, players: P
 
 export function addPlayer(gs: GState, init: PlayerInit): void {
   if (gs.players.some((p) => p.id === init.id)) return;
+  if (!(init.seat >= 0)) return; // 防御：非法座位（如观战者的 -1）不允许进局
   const p: GPlayer = {
     id: init.id,
     name: init.name,
@@ -241,6 +242,8 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
 }
 
 function doRaise(gs: GState, p: GPlayer, toRaw: number, forceAllIn = false): void {
+  // 客户端消息未经过运行时类型校验：NaN 会穿透下方的比较校验（NaN 比较恒为 false）污染整局筹码
+  if (!Number.isFinite(toRaw)) throw new GameError('BAD_RAISE', '加注金额无效');
   const maxTo = p.bet + p.chips;
   const to = Math.min(Math.floor(toRaw), maxTo);
   if (to <= gs.currentBet) throw new GameError('BAD_RAISE', `加注必须高于当前注 ${gs.currentBet}`);

@@ -66,14 +66,11 @@ class Net {
         this.view = msg.view as AnyView;
         this.viewListeners.forEach((l) => l(msg.view as AnyView));
       } else if (msg.t === 'error') {
-        if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED') {
-          // 会话/房间失效：静默回到大厅
+        if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
+          // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
           this.clearToken();
-          return;
-        }
-        if (msg.code === 'TOKEN_INVALID') {
-          // token 失效：静默回到大厅
-          this.clearToken();
+          this.setView(null);
+          if (msg.code === 'KICKED') this.errorListeners.forEach((l) => l(msg.msg)); // 被请离要给出原因
           return;
         }
         this.errorListeners.forEach((l) => l(msg.msg));

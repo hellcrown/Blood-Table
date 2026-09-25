@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Card, Rank, Suit } from '@shared/protocol';
 import { computePots, legalActionsFor } from '../src/game/betting';
-import { applyAction, autoAction, createGame, startHand } from '../src/game/engine';
+import { addPlayer, applyAction, autoAction, createGame, startHand } from '../src/game/engine';
 import type { GState } from '../src/game/types';
 
 const RANK_MAP: Record<string, Rank> = { T: 10, J: 11, Q: 12, K: 13, A: 14 };
@@ -236,5 +236,27 @@ describe('边池与结算', () => {
       else act(gs, s, { k: 'fold' });
     }
     expect(gs.players.reduce((s, p) => s + p.chips, 0)).toBe(1000);
+  });
+});
+
+describe('输入防御', () => {
+  it('addPlayer 拒绝非法座位（观战者 seat=-1 不得进局）', () => {
+    const gs = makeGame(2);
+    addPlayer(gs, { id: 'sp', name: '观战者', seat: -1, chips: 1000 });
+    expect(gs.players.some((p) => p.id === 'sp')).toBe(false);
+  });
+
+  it('raise 缺 to / 非数值：拒绝且筹码状态不被 NaN 污染', () => {
+    const gs = makeGame(2);
+    startHand(gs, 0);
+    const p = seat(gs, gs.buttonSeat);
+    const before = { chips: p.chips, bet: p.bet, committed: p.committed };
+    expect(() => act(gs, p.seat, { k: 'raise' } as never)).toThrow();
+    expect(() => act(gs, p.seat, { k: 'raise', to: Number.NaN } as never)).toThrow();
+    expect(p.chips).toBe(before.chips);
+    expect(p.bet).toBe(before.bet);
+    expect(p.committed).toBe(before.committed);
+    expect(Number.isFinite(gs.currentBet)).toBe(true);
+    expect(Number.isFinite(gs.minRaise)).toBe(true);
   });
 });

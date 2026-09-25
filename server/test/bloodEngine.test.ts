@@ -29,6 +29,7 @@ import {
   bSpringUse,
   bRevealChipTarget,
   bSkipDecision,
+  bSteal,
   bBarrierDecide,
   bDemagPick,
   bPinpointVictimPick,
@@ -635,6 +636,25 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     expect(evalForPlayer(p0).pips).toBe(pips0 + 2);
     bSkipDecision(gs, 'p0', NOW); // 决策完成 → 窗口推进 → 结算
     expect(gs.phase).toBe('settle');
+  });
+
+  it('血幕镀层（夺）：掠夺完成后立即推进亮牌窗口，不再挂起等超时', () => {
+    const gs = reachReveal();
+    const p0 = gs.players[0];
+    const p1 = gs.players[1];
+    p0.chips.push({ id: 'ch-cs', def: 'coatSteal', on: p0.hand[0].id });
+    bPlay(gs, 'p0', p0.hand.slice(0, 5).map((c) => c.id), NOW);
+    bPlay(gs, 'p1', gs.players[1].hand.slice(0, 5).map((c) => c.id), NOW);
+    expect(gs.phase).toBe('reveal');
+    expect(gs.stealPending?.seat).toBe('p0'); // 甲的窗口等待掠夺选择
+    const blood0 = p0.blood;
+    const blood1 = p1.blood;
+    bSteal(gs, 'p0', 1, NOW);
+    // 掠夺即时转移 1 血筹；随后 settle 立即发放名次奖励（2 人局第 2 名 +4🩸），故净 +3
+    expect(p1.blood).toBe(blood1 + 3);
+    expect(p0.blood).toBe(blood0 + 1);
+    expect(gs.stealPending).toBeNull();
+    expect(gs.phase).toBe('settle'); // 无道具可宣告 → 直接推进结算（修复前卡死在 reveal 等待 60s 托管）
   });
 
   it('复制芯片：复制对手镀层（胜），夺魁时生效', () => {

@@ -1453,7 +1453,6 @@ function startDeferredDecision(gs: BloodState, now: number): void {
 }
 
 export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now: number): void {
-  void now;
   if (gs.phase !== 'reveal') throw new BloodError('BAD_PHASE', '不在对决阶段');
   if (!gs.stealPending || gs.stealPending.seat !== playerId) throw new BloodError('NOT_YOUR_TURN', '当前没有需要你选择的掠夺目标');
   const p = gs.players.find((x) => x.id === playerId)!;
@@ -1464,6 +1463,12 @@ export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now
   p.blood += gs.stealPending.blood;
   pushLog(gs, 'action', `${pname(p)} 掠夺 ${pname(target)} ${gs.stealPending.blood} 血筹`);
   gs.stealPending = null;
+  // 掠夺完成后推进亮牌窗口：该玩家已无道具可宣告、或已不在其宣告窗口
+  // （复制芯片的延迟决策阶段）时必须继续推进，否则没有任何合法动作能走出等待，
+  // 只能干等 60s 回合超时托管（与超时兜底的处理一致：清 stealPending + 推进）
+  if (usableItemCount(p) === 0 || p.seat !== gs.turnSeat) {
+    nextRevealOrSettle(gs, now);
+  }
 }
 
 /**

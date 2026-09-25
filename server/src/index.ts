@@ -18,7 +18,7 @@ const adminTokens = new Map<string, number>();
 const loginFails = new Map<string, { count: number; until: number }>();
 
 function loginBlocked(req: http.IncomingMessage): number {
-  const ip = req.socket.remoteAddress ?? '?';
+  const ip = clientIp(req);
   const rec = loginFails.get(ip);
   if (!rec) return 0;
   if (rec.until > 0 && Date.now() >= rec.until) {
@@ -29,7 +29,7 @@ function loginBlocked(req: http.IncomingMessage): number {
 }
 
 function recordLoginFail(req: http.IncomingMessage): void {
-  const ip = req.socket.remoteAddress ?? '?';
+  const ip = clientIp(req);
   const rec = loginFails.get(ip) ?? { count: 0, until: 0 };
   rec.count += 1;
   if (rec.count >= 5) {
@@ -63,13 +63,33 @@ function isLoopback(req: http.IncomingMessage): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
-/** 读取 POST 请求的 JSON body */
+/**
+ * 客户端真实 IP（限流/登录锁定/反馈归因用）。
+ * 经本机回环反向代理转发时取 X-Forwarded-For 的最后一跳——那是可信代理追加的真实来源，
+ * 取首跳会被伪造头欺骗；直连（含局域网/Tailscale）直接用 socket 地址。
+ */
+function clientIp(req: http.IncomingMessage): string {
+  const remote = req.socket.remoteAddress ?? '';
+  const viaLoopbackProxy = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+  const xff = req.headers['x-forwarded-for'];
+  if (viaLoopbackProxy && typeof xff === 'string' && xff.trim() !== '') {
+    const hops = xff.split(',').map((h) => h.trim()).filter((h) => h !== '');
+    const last = hops[hops.length - 1];
+    if (last) return last;
+  }
+  return remote;
+}
+
+/** 读取 POST 请求的 JSON body（超过 64KB 直接断开连接，拒绝继续接收） */
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      if (data.length > 64 * 1024) reject(new Error('body too large'));
+      if (data.length > 64 * 1024) {
+        req.destroy();
+        reject(new Error('body too large'));
+      }
     });
     req.on('end', () => resolve(data));
     req.on('error', reject);
@@ -171,9 +191,12 @@ const server = http.createServer((req, res) => {
         send(401, { ok: false, msg: '管理密码错误' });
         return;
       }
-      loginFails.delete(req.socket.remoteAddress ?? '?');
+      loginFails.delete(clientIp(req));
       send(200, { ok: true, token: issueAdminToken() });
-    });
+    })
+      .catch(() => {
+        /* body 超限已断开连接：无需响应，但必须接住拒绝防进程崩溃 */
+      });
     return;
   }
   if (url.pathname === '/api/admin/rooms' && req.method === 'GET') {
@@ -232,7 +255,7 @@ const server = http.createServer((req, res) => {
       } catch {
         /* 忽略解析失败，按空内容处理 */
       }
-      const err = submitFeedback(parsed, req.socket.remoteAddress ?? '?');
+      const err = submitFeedback(parsed, clientIp(req));
       if (err === 'EMPTY') {
         send(400, { ok: false, msg: '反馈内容不能为空' });
       } else if (err === 'TOO_LONG') {
@@ -242,7 +265,10 @@ const server = http.createServer((req, res) => {
       } else {
         send(200, { ok: true, msg: '反馈已提交，感谢你的帮助！' });
       }
-    });
+    })
+      .catch(() => {
+        /* body 超限已断开连接：无需响应，但必须接住拒绝防进程崩溃 */
+      });
     return;
   }
   if (url.pathname === '/api/admin/feedback' && req.method === 'GET') {
@@ -284,7 +310,7 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 wss.on('connection', (ws, req) => {
-  const ip = req.socket.remoteAddress ?? '';
+  const ip = clientIp(req);
   (ws as unknown as { ip?: string }).ip = ip;
   // 新建连接频率超限：直接拒绝
   if (!ipNewConn.get(ip).allow()) {
