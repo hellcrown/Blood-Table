@@ -667,6 +667,21 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     }
   });
 
+  it('清洁工托管：删自抽牌堆同样重洗（洗衣房店主 +1）', () => {
+    const gs = makeGame('cleaner', 'laundry');
+    driveTo(gs, 'reorg');
+    bReorg(gs, 'p1', 'blood', NOW);
+    if (!gs.players[0].reorgDone) bReorg(gs, 'p0', 'blood', NOW);
+    if (gs.secretPending?.kind !== 'cleanerDel') return; // 本局未触发（乙先夺魁等），跳过
+    const laundry = gs.players[1];
+    const before = laundry.blood;
+    bloodTick(gs, NOW + 61_000); // 清洁工超时 → 托管删除自己抽牌堆顶
+    const logs = gs.log.map((l) => l.text ?? '').join('|');
+    expect(logs).toContain('托管：删除自己抽牌堆顶的');
+    expect(logs).toContain('（并重洗抽牌堆）'); // 修复前缺失：托管删牌不重洗、不触发洗衣房
+    expect(laundry.blood).toBe(before + 1);
+  });
+
   it('皇叔：删牌每张仅1血筹', () => {
     const gs = makeGame('liu', 'clerk');
     driveTo(gs, 'remove');

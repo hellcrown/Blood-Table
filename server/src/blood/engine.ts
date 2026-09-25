@@ -3171,7 +3171,9 @@ export function bloodTick(gs: BloodState, now: number): boolean {
           const c = p.draw.pop()!;
           p.removed.push(c);
           purgeChipsOn(gs, p, new Set([c.id]));
-          pushLog(gs, 'action', `${pname(p)}【清洁工】托管：删除自己抽牌堆顶的 ${bloodCardText(c)}`);
+          p.draw = shuffle(p.draw); // 删自抽牌堆：按卡面规则同样重洗（并触发洗衣房店主）
+          grantLaundryOnReshuffle(gs);
+          pushLog(gs, 'action', `${pname(p)}【清洁工】托管：删除自己抽牌堆顶的 ${bloodCardText(c)}（并重洗抽牌堆）`);
         } else {
           pushLog(gs, 'action', `${pname(p)}【清洁工】托管：抽牌堆为空，无事发生`);
         }
