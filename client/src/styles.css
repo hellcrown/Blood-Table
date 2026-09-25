@@ -280,7 +280,7 @@ select:focus {
 .rules-hint,
 .settings-panel {
   background: var(--panel-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--gold-dim); /* 金色边框：板块边界更清晰，与标题金色呼应 */
   border-radius: 12px;
   padding: 14px;
 }
