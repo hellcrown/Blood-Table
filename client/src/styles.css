@@ -3446,3 +3446,18 @@ body {
   margin-bottom: 12px;
   font-size: 14px;
 }
+
+.beian {
+  margin: 16px 0 -4px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.beian a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.beian a:hover {
+  text-decoration: underline;
+}

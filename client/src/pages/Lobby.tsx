@@ -124,6 +124,11 @@ export function Lobby({ connected }: { connected: boolean }) {
             <li>支持 2/3/4 人局（血色模式 2 人目标 24 车票、3 人 20、4 人 16）；拓展选将开启时 3/4 人局同样抽 2 选 1</li>
           </ul>
         </div>
+        <p className="beian">
+          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
+            鄂ICP备2026054300号
+          </a>
+        </p>
       </div>
       <button className="admin-link" onClick={() => setFeedbackOpen(true)}>
         反馈
