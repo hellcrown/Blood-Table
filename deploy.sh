@@ -28,6 +28,9 @@ ADMIN_KEY_VALUE=$(cat "$SECRET_FILE")
 
 # 4. 启动 / 重启（进程名 blood-table）
 PORT="${PORT:-3000}"
+# 千人并发连接需要大量 fd，Ubuntu 默认软上限 1024 会先爆（EMFILE）；pm2 守护进程继承本 shell 限制，
+# 若守护进程已按旧限制运行，需先 `pm2 kill` 再重新执行本脚本
+ulimit -n 65535 2>/dev/null || ulimit -n "$(ulimit -H)" 2>/dev/null || true
 pm2 delete blood-table >/dev/null 2>&1 || true
 PORT="$PORT" ADMIN_KEY="$ADMIN_KEY_VALUE" pm2 start npm --name blood-table -- start
 pm2 save

@@ -294,7 +294,8 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 initFeedbackStore(path.resolve(process.cwd(), 'data', 'feedback.jsonl'));
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
-const MAX_TOTAL_CONNS = 200;
+// 1200 ≈ 千人同时在线余量（1GB 内存实测 1000 连接约占 150-250MB，先于内存见顶的是这个常量）
+const MAX_TOTAL_CONNS = 1200;
 const MAX_CONNS_PER_IP = 10;
 const ipConns = new Map<string, number>();
 const ipNewConn = new IpTable(

@@ -178,7 +178,7 @@ describe('血色机器人 · AI 行为', () => {
 
 /* ---------------- RoomManager 级：添加/移除/回收 ---------------- */
 
-import { RoomManager } from '../src/rooms';
+import { MAX_ROOMS, RoomManager } from '../src/rooms';
 
 function stubWs() {
   return { readyState: 0, OPEN: 0, send: () => {}, on: () => {}, close: () => {} } as never;
@@ -702,11 +702,11 @@ describe('血色机器人 · 公开服务器防护', () => {
     void m;
   });
 
-  it('房间总数上限 64', () => {
+  it('房间总数上限（MAX_ROOMS）', () => {
     const mgr = new RoomManager();
     const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
     const rooms = m.rooms as unknown as Map<string, { ownerIp: string }>;
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < MAX_ROOMS; i++) {
       rooms.set(`SEED${i}`, { ownerIp: `seed-${i}` });
     }
     const ws = stubWsIp('8.8.8.8');
