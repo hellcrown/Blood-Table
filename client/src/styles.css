@@ -3498,9 +3498,11 @@ body {
 
 .lobby-links {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: center;
-  margin-top: 12px;
+  /* 与上方 .lobby-actions 的 18px 下边距对称：按钮行居中于「创建/加入」与「玩法速览」两模块之间 */
+  margin: 0 0 18px;
 }
 
 .codex-overlay {

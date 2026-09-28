@@ -18,6 +18,18 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [qqCopied, setQqCopied] = useState(false);
+
+  /** 复制 QQ 群号到剪贴板（https 下可用；失败时按钮文本本身仍展示群号） */
+  const copyQqGroup = async () => {
+    try {
+      await navigator.clipboard.writeText('730193109');
+      setQqCopied(true);
+      window.setTimeout(() => setQqCopied(false), 1600);
+    } catch {
+      /* 剪贴板不可用：忽略，群号已展示在按钮上 */
+    }
+  };
 
   const nameOk = name.trim().length > 0;
 
@@ -209,6 +221,13 @@ export function Lobby({ connected }: { connected: boolean }) {
           </button>
           <button className="btn small ghost" onClick={() => setBoardOpen(true)}>
             🏆 角色胜率榜
+          </button>
+          <button
+            className="btn small ghost"
+            title="点击复制群号，加入 QQ 交流群"
+            onClick={() => void copyQqGroup()}
+          >
+            {qqCopied ? '✓ 已复制群号' : '💬 QQ交流群 730193109'}
           </button>
         </div>
 
