@@ -10,6 +10,7 @@ const BGM_KEY = 'blood.bgmVol'; // 0-100，0=关闭，默认 0
 
 export type SfxName =
   | 'click' // 按钮点击
+  | 'tap' // 选牌轻响
   | 'deal' // 发牌/换牌
   | 'lock' // 暗扣确认
   | 'reveal' // 亮牌揭晓
@@ -59,6 +60,15 @@ function ensureCtx(): AudioContext | null {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('pointerdown', () => void ensureCtx(), { once: true, capture: true });
+  // 全局按钮点击音（capture 兜底 stopPropagation 的按钮）；选牌音由 toggle 单独挂 'tap'
+  document.addEventListener(
+    'click',
+    (e) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('button');
+      if (el && !(el as HTMLButtonElement).disabled) playSfx('click');
+    },
+    { capture: true },
+  );
 }
 
 /** 噪声缓冲（发牌沙沙声用），首次用时创建 */
@@ -125,7 +135,13 @@ export function playSfx(name: SfxName): void {
   try {
     switch (name) {
       case 'click':
-        tone(c, master, 'square', 700, 500, 0.05, 0.08);
+        tone(c, master, 'square', 760, 520, 0.07, 0.16);
+        tone(c, master, 'sine', 1400, 900, 0.04, 0.06);
+        break;
+      case 'tap':
+        // 选牌：短促纸牌轻拂
+        noise(c, master, 3200, 0.045, 0.2);
+        tone(c, master, 'triangle', 900, 700, 0.03, 0.06);
         break;
       case 'deal':
         noise(c, master, 2600, 0.09, 0.22);
@@ -147,8 +163,9 @@ export function playSfx(name: SfxName): void {
         tone(c, master, 'sine', 1870, 1870, 0.14, 0.13, 0.05);
         break;
       case 'ticket':
-        tone(c, master, 'triangle', 660, 660, 0.1, 0.13);
-        tone(c, master, 'triangle', 880, 880, 0.14, 0.12, 0.08);
+        tone(c, master, 'triangle', 660, 660, 0.12, 0.2);
+        tone(c, master, 'triangle', 880, 880, 0.16, 0.18, 0.08);
+        tone(c, master, 'triangle', 1174, 1174, 0.2, 0.14, 0.16);
         break;
       case 'win': {
         // 上行四音琶音

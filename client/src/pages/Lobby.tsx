@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { playSfx } from '../audio/sound';
 import { loadLastRoom, net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
 import { CodexModal } from '../components/CodexModal';
@@ -67,7 +66,6 @@ export function Lobby({ connected }: { connected: boolean }) {
   }, [code]);
 
   const create = () => {
-    playSfx('click');
     net.saveName(name.trim());
     net.send({
       t: 'create',
@@ -86,12 +84,10 @@ export function Lobby({ connected }: { connected: boolean }) {
   });
 
   const join = () => {
-    playSfx('click');
     net.saveName(name.trim());
     net.send(joinMsg(code.trim().toUpperCase()));
   };
   const spectate = () => {
-    playSfx('click');
     net.saveName(name.trim());
     net.send({
       t: 'spectate',

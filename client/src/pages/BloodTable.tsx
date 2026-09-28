@@ -314,8 +314,17 @@ export function BloodTable({ view }: { view: BloodView }) {
     prevPhaseRef.current = view.phase;
     if (!prev || prev === view.phase) return;
     if (view.phase === 'reveal') playSfx('reveal');
-    else if (view.phase === 'settle') playSfx('ticket');
   }, [view.phase]);
+
+  // 结算音：以「结算数据出现」为准（比阶段切换更可靠——settle 视图可能被快速确认跳过渲染）
+  const prevResultRoundRef = useRef<number | null>(null);
+  useEffect(() => {
+    const key = view.result ? view.round : null;
+    const prev = prevResultRoundRef.current;
+    prevResultRoundRef.current = key;
+    if (key == null || key === prev) return;
+    playSfx('ticket');
+  }, [view.result, view.round]);
 
   const prevFinalRef = useRef<string | null>(null);
   useEffect(() => {
@@ -417,8 +426,13 @@ export function BloodTable({ view }: { view: BloodView }) {
   };
 
   const toggle = (list: string[], setList: (v: string[]) => void, id: string, max: number) => {
-    if (list.includes(id)) setList(list.filter((x) => x !== id));
-    else if (list.length < max) setList([...list, id]);
+    if (list.includes(id)) {
+      setList(list.filter((x) => x !== id));
+      playSfx('tap');
+    } else if (list.length < max) {
+      setList([...list, id]);
+      playSfx('tap');
+    }
   };
 
   // 自己的角色技能对评估的修正（特型演员/枪手/杂技演员/女仆）
@@ -1125,6 +1139,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       disabled={myCharId !== 'tarot' && selSwap.length === 0}
                       onClick={() => {
                         send({ t: 'bSwap', cardIds: selSwap, drawCount: tarotDraw });
+                        playSfx('deal');
                         setSelSwap([]);
                       }}
                     >
@@ -1186,6 +1201,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       const ev = evalBloodHand(chosen.map(toEvalMe));
                       const ordered = sortHandByType(chosen, ev.cat);
                       send({ t: 'bPlay', cardIds: ordered.map((c) => c.id) });
+                      playSfx('lock');
                       setSelPlay([]);
                     }}
                   >
