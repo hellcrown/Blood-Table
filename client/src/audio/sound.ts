@@ -134,49 +134,49 @@ export function playSfx(name: SfxName): void {
   try {
     switch (name) {
       case 'tap':
-        // 选牌/按钮：短促纸牌轻拂（无高频成分）
-        noise(c, master, 3200, 0.045, 0.2);
-        tone(c, master, 'triangle', 900, 700, 0.03, 0.06);
+        // 选牌/按钮：短促纸牌轻拂（全低频段）
+        noise(c, master, 1500, 0.05, 0.2);
+        tone(c, master, 'triangle', 700, 550, 0.03, 0.06);
         break;
       case 'deal':
-        noise(c, master, 2600, 0.09, 0.22);
-        noise(c, master, 3400, 0.06, 0.12, 0.04);
+        noise(c, master, 1300, 0.09, 0.22);
+        noise(c, master, 1700, 0.06, 0.12, 0.04);
         break;
       case 'lock':
         tone(c, master, 'sine', 180, 90, 0.16, 0.3);
-        noise(c, master, 900, 0.05, 0.1);
+        noise(c, master, 700, 0.05, 0.1);
         break;
       case 'reveal': {
-        // 双音悬念 sting：低→五度
-        tone(c, master, 'sawtooth', 147, 147, 0.28, 0.1);
-        tone(c, master, 'sawtooth', 220, 220, 0.34, 0.12, 0.14);
-        noise(c, master, 1800, 0.12, 0.08, 0.02);
+        // 双音悬念 sting：低→五度（三角波，无高频谐波）
+        tone(c, master, 'triangle', 147, 147, 0.28, 0.12);
+        tone(c, master, 'triangle', 220, 220, 0.34, 0.14, 0.14);
+        noise(c, master, 900, 0.12, 0.08, 0.02);
         break;
       }
       case 'coin':
-        tone(c, master, 'sine', 1250, 1250, 0.09, 0.16);
-        tone(c, master, 'sine', 1870, 1870, 0.14, 0.13, 0.05);
+        tone(c, master, 'sine', 720, 720, 0.09, 0.16);
+        tone(c, master, 'sine', 1080, 1080, 0.14, 0.13, 0.05);
         break;
       case 'ticket':
-        tone(c, master, 'triangle', 660, 660, 0.12, 0.2);
-        tone(c, master, 'triangle', 880, 880, 0.16, 0.18, 0.08);
-        tone(c, master, 'triangle', 1174, 1174, 0.2, 0.14, 0.16);
+        tone(c, master, 'triangle', 523, 523, 0.12, 0.2);
+        tone(c, master, 'triangle', 659, 659, 0.16, 0.18, 0.08);
+        tone(c, master, 'triangle', 784, 784, 0.2, 0.14, 0.16);
         break;
       case 'win': {
-        // 上行四音琶音
-        const seq = [523, 659, 784, 1047];
+        // 上行四音琶音（上限 784Hz）
+        const seq = [392, 523, 659, 784];
         seq.forEach((f, i) => tone(c, master, 'triangle', f, f, 0.22, 0.14, i * 0.11));
-        tone(c, master, 'sine', 262, 262, 0.7, 0.08, 0.1);
+        tone(c, master, 'sine', 196, 196, 0.7, 0.08, 0.1);
         break;
       }
       case 'lose': {
-        tone(c, master, 'sawtooth', 220, 110, 0.55, 0.1);
+        tone(c, master, 'triangle', 220, 110, 0.55, 0.12);
         tone(c, master, 'sine', 165, 82, 0.7, 0.1, 0.08);
         break;
       }
       case 'error':
-        tone(c, master, 'square', 170, 150, 0.14, 0.07);
-        tone(c, master, 'square', 140, 120, 0.14, 0.07, 0.12);
+        tone(c, master, 'triangle', 170, 150, 0.14, 0.09);
+        tone(c, master, 'triangle', 140, 120, 0.14, 0.09, 0.12);
         break;
     }
   } catch {
