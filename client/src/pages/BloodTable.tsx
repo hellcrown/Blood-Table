@@ -2514,7 +2514,8 @@ export function BloodTable({ view }: { view: BloodView }) {
             <ol className="ranking">
               {view.final.ranking.map((r, i) => (
                 <li key={r.seat} className={i === 0 ? 'champ' : ''}>
-                  {i + 1}. {r.name} — {r.tickets} 车票 / {r.blood} 血筹 {i === 0 ? '👑' : ''}
+                  {i + 1}. {r.name}
+                  {r.wasAuto ? ' 🤖' : ''} — {r.tickets} 车票 / {r.blood} 血筹 {i === 0 ? '👑' : ''}
                 </li>
               ))}
             </ol>

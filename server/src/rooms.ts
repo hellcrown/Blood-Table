@@ -9,6 +9,7 @@ import { botAct, createBrain, updateBrains, type BotBrain } from './blood/botAI'
 import type { BloodState } from './blood/types';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
+import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -61,11 +62,17 @@ export interface Room {
   game: GState | BloodState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
+  /** 房间密码（可选；设置后加入/观战须携带） */
+  password?: string;
   emptySince: number;
   /** 机器人跨回合记忆（按会话 id） */
   botBrains: Map<string, BotBrain>;
   /** 机器人下次允许行动的时间戳（随机 0.8-2s 思考延迟） */
   botNextAct: Map<string, number>;
+  /** 当前对局已落库（终局摘要只写一次；开局/重开时重置） */
+  matchLogged: boolean;
+  /** 当前对局开始时间（局时长统计用） */
+  gameStartedAt: number | null;
 }
 
 function send(ws: WebSocket | null, msg: S2C): void {
@@ -98,6 +105,13 @@ function cleanName(raw: unknown, fallbackSeed: number): string {
   return s || `玩家${fallbackSeed % 100}`;
 }
 
+/** 房间密码校验（无密码房间恒通过）；返回 null=通过，否则为错误码 */
+export function verifyRoomPassword(room: Pick<Room, 'password'>, password: unknown): 'WRONG_PASSWORD' | null {
+  if (!room.password) return null;
+  const pw = typeof password === 'string' ? password : '';
+  return pw === room.password ? null : 'WRONG_PASSWORD';
+}
+
 /** 每连接消息令牌桶（持续 ~6条/秒，突发 30；正常游戏远低于此） */
 const msgBuckets = new WeakMap<WebSocket, TokenBucket>();
 function takeMessageSlot(ws: WebSocket): boolean {
@@ -116,6 +130,11 @@ export class RoomManager {
   /** 单 IP 加入尝试限流（防房间码暴力枚举） */
   private joinAttempts = new IpTable(
     () => new SlidingWindow(60_000, MAX_JOIN_PER_MIN),
+    (w, now) => w.idle(now),
+  );
+  /** 带密码房间的加入尝试限流（防密码爆破，更严格） */
+  private pwJoins = new IpTable(
+    () => new SlidingWindow(60_000, 10),
     (w, now) => w.idle(now),
   );
 
@@ -478,6 +497,8 @@ export class RoomManager {
         room.botBrains.clear(); // 记忆只在单局内有效
         room.botNextAct.clear();
         room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion); // 重开保留自定义目标
+        room.matchLogged = false;
+        room.gameStartedAt = now;
         break;
       }
       case 'backToRoom': {
@@ -491,6 +512,8 @@ export class RoomManager {
         send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
         return;
     }
+    const actor = bs.players.find((x) => x.id === pid);
+    if (actor) actor.wasAuto = false; // 真人操作：清除超时托管标记
     this.broadcast(room);
   }
 
@@ -511,6 +534,13 @@ export class RoomManager {
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.password) {
+      if (!this.pwJoins.get(ws.ip ?? '').allow()) {
+        throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
+      }
+      const err = verifyRoomPassword(room, msg.password);
+      if (err) throw new GameError(err, '房间密码错误');
+    }
     const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
     if (spectatorCount >= MAX_SPECTATORS) throw new GameError('ROOM_LIMIT', '观战人数已达上限');
     this.detachBinding(ws);
@@ -530,6 +560,8 @@ export class RoomManager {
     this.detachBinding(ws);
     const mode: GameMode = msg.mode === 'blood' ? 'blood' : 'classic';
     const room = this.createRoom(msg.maxPlayers, mode, ip);
+    const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
+    if (pw) room.password = pw;
     const session = this.addSession(room, msg.name);
     this.bind(ws, room, session);
     send(ws, { t: 'hello', token: session.token, playerId: session.id });
@@ -546,6 +578,14 @@ export class RoomManager {
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
     const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
     if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
+    if (room.password) {
+      // 带密码房间：先限速（防爆破），再校验密码
+      if (!this.pwJoins.get(ip).allow()) {
+        throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
+      }
+      const err = verifyRoomPassword(room, msg.password);
+      if (err) throw new GameError(err, '房间密码错误');
+    }
     this.detachBinding(ws);
     const session = this.addSession(room, msg.name);
     this.bind(ws, room, session);
@@ -604,6 +644,8 @@ export class RoomManager {
       emptySince: 0,
       botBrains: new Map(),
       botNextAct: new Map(),
+      matchLogged: false,
+      gameStartedAt: null,
     };
     this.rooms.set(code, room);
     return room;
@@ -749,6 +791,8 @@ export class RoomManager {
       room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
         targetTickets: room.targetTickets || undefined,
       });
+      room.matchLogged = false;
+      room.gameStartedAt = now;
     } else {
       if (!room.game) {
         const players = [...room.sessions.values()]
@@ -759,6 +803,8 @@ export class RoomManager {
       }
       if (room.game.phase !== 'waiting') return;
       engine.startHand(room.game, now);
+      room.matchLogged = false;
+      room.gameStartedAt = now;
     }
     this.broadcast(room);
   }
@@ -789,6 +835,10 @@ export class RoomManager {
     if (msg.targetTickets != null) {
       const n = Math.round(msg.targetTickets);
       room.targetTickets = Math.min(30, Math.max(0, Number.isFinite(n) ? n : 0));
+    }
+    if (msg.password != null) {
+      const pw = String(msg.password).trim().slice(0, 12);
+      room.password = pw || undefined; // 空串清除密码
     }
     this.broadcast(room);
   }
@@ -1050,8 +1100,75 @@ export class RoomManager {
 
   /* ---------------- 广播 ---------------- */
 
+  /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次） */
+  private maybeRecordFinal(room: Room, g: GState | BloodState | null): void {
+    if (!g || room.matchLogged || !('final' in g) || !g.final) return;
+    room.matchLogged = true;
+    const now = Date.now();
+    const durationMin =
+      room.gameStartedAt != null && now > room.gameStartedAt
+        ? Math.round(((now - room.gameStartedAt) / 60_000) * 10) / 10
+        : undefined;
+    let entry: MatchEntry;
+    if (room.mode === 'blood' && 'market' in g) {
+      entry = {
+        endedAt: now,
+        ...(durationMin != null ? { durationMin } : {}),
+        mode: 'blood',
+        seatCount: g.players.length,
+        winnerSeat: g.final.winnerSeat,
+        settings: {
+          targetTickets: room.targetTickets || undefined,
+          charExpansion: room.charExpansion,
+          expansion: room.expansion,
+        },
+        players: g.final.ranking.map((r, i): MatchPlayerRow => {
+          const p = g.players.find((x) => x.seat === r.seat);
+          return {
+            name: r.name,
+            seat: r.seat,
+            rank: i + 1,
+            ...(p?.charId ? { charId: p.charId } : {}),
+            tickets: r.tickets,
+            blood: r.blood,
+            isBot: room.sessions.get(p?.id ?? '')?.bot ?? false,
+            wasAuto: !!r.wasAuto,
+          };
+        }),
+      };
+    } else {
+      const cg = g as GState;
+      const final = cg.final!; // 外层守卫已保证非空（as GState 丢失收窄）
+      entry = {
+        endedAt: now,
+        ...(durationMin != null ? { durationMin } : {}),
+        mode: 'classic',
+        seatCount: cg.players.length,
+        winnerSeat: final.ranking[0]?.seat ?? -1,
+        settings: { ...room.settings },
+        players: final.ranking.map((r, i): MatchPlayerRow => {
+          const p = cg.players.find((x) => x.seat === r.seat);
+          return {
+            name: r.name,
+            seat: r.seat,
+            rank: i + 1,
+            chips: r.chips,
+            isBot: room.sessions.get(p?.id ?? '')?.bot ?? false,
+            wasAuto: !!r.wasAuto,
+          };
+        }),
+      };
+    }
+    try {
+      recordMatch(entry);
+    } catch (e) {
+      console.error('[room] 对局落库失败:', e);
+    }
+  }
+
   broadcast(room: Room): void {
     const g = room.game;
+    this.maybeRecordFinal(room, g);
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {

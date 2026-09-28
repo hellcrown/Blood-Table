@@ -1,0 +1,190 @@
+/**
+ * 对局记录落库：JSONL 追加 + 内存全量索引（供管理端统计聚合）。
+ * - 文件：server/data/matches.jsonl，每行一条对局摘要（players 按名次升序）
+ * - 写入点：RoomManager.broadcast 检测到 gs.final 首次出现时调用 recordMatch（房间内 matchLogged 哨兵防重）
+ * - 重启：initMatchStore 从文件全量恢复（坏行跳过）；超上限轮转保留最近条目
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+
+export interface MatchPlayerRow {
+  name: string;
+  seat: number;
+  /** 名次（1 = 冠军，按 ranking 顺序） */
+  rank: number;
+  /** 血色模式：角色 id */
+  charId?: string;
+  /** 血色模式：车票/血筹 */
+  tickets?: number;
+  blood?: number;
+  /** 德州模式：终局筹码 */
+  chips?: number;
+  /** 服务端机器人 */
+  isBot?: boolean;
+  /** 曾被超时托管代打 */
+  wasAuto?: boolean;
+}
+
+export interface MatchEntry {
+  /** 终局时间（epoch ms） */
+  endedAt: number;
+  /** 对局时长（分钟，开局时间可得时记录） */
+  durationMin?: number;
+  mode: 'blood' | 'classic';
+  seatCount: number;
+  /** 冠军座位 */
+  winnerSeat: number;
+  /** 血色：目标票数/拓展开关；德州：盲注与起始筹码 */
+  settings?: {
+    targetTickets?: number;
+    charExpansion?: boolean;
+    expansion?: boolean;
+    sb?: number;
+    bb?: number;
+    startChips?: number;
+  };
+  players: MatchPlayerRow[];
+}
+
+export interface CharStat {
+  charId: string;
+  games: number;
+  wins: number;
+  /** 胜率（百分比，1 位小数） */
+  winRate: number;
+  /** 平均名次（null = 无数据） */
+  avgRank: number | null;
+}
+
+export interface MatchStats {
+  total: number;
+  /** 近 7 天对局数 */
+  last7d: number;
+  avgDurationMin: number | null;
+  /** 机器人座位占总座位百分比（1 位小数） */
+  botShare: number;
+  byMode: Record<string, number>;
+  /** 角色出场/胜率聚合（按出场次数降序，前 12） */
+  chars: CharStat[];
+}
+
+const MAX_MATCHES = 20_000;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const ROTATE_KEEP = 10_000;
+
+let file: string | null = null;
+const list: MatchEntry[] = [];
+
+/** 启动时调用：全量恢复（目录自动创建，坏行跳过） */
+export function initMatchStore(filePath: string): void {
+  file = filePath;
+  list.length = 0;
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, '');
+      return;
+    }
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const entry = JSON.parse(trimmed) as MatchEntry;
+        if (
+          typeof entry?.endedAt === 'number' &&
+          (entry.mode === 'blood' || entry.mode === 'classic') &&
+          Array.isArray(entry?.players)
+        ) {
+          list.push(entry);
+        }
+      } catch {
+        /* 尾部半行或坏行：跳过 */
+      }
+    }
+    if (list.length > MAX_MATCHES) list.splice(0, list.length - MAX_MATCHES);
+  } catch (e) {
+    console.error('[matchlog] 初始化存储失败（对局记录暂存内存）:', e);
+  }
+}
+
+/** 终局落库：内存追加 + 文件追加；超限轮转 */
+export function recordMatch(entry: MatchEntry): void {
+  list.push(entry);
+  if (list.length > MAX_MATCHES) list.splice(0, list.length - MAX_MATCHES);
+  if (!file) return;
+  try {
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+    if (fs.statSync(file).size > MAX_FILE_BYTES) {
+      const keep = list.slice(-ROTATE_KEEP);
+      fs.writeFileSync(file, keep.map((m) => JSON.stringify(m)).join('\n') + '\n');
+    }
+  } catch (e) {
+    console.error('[matchlog] 落盘失败（已保留内存）:', e);
+  }
+}
+
+/** 管理端：全部记录（内存副本） */
+export function listMatches(): MatchEntry[] {
+  return list.slice();
+}
+
+/** 管理端清空（内存与文件） */
+export function clearMatches(): void {
+  list.length = 0;
+  if (file) {
+    try {
+      fs.writeFileSync(file, '');
+    } catch (e) {
+      console.error('[matchlog] 清空文件失败:', e);
+    }
+  }
+}
+
+/** 统计聚合（管理端展示用） */
+export function matchStats(now = Date.now()): MatchStats {
+  let seats = 0;
+  let botSeats = 0;
+  let last7d = 0;
+  let durSum = 0;
+  let durCount = 0;
+  const byMode: Record<string, number> = {};
+  const charAgg = new Map<string, { games: number; wins: number; rankSum: number }>();
+  for (const m of list) {
+    if (now - m.endedAt <= 7 * 86_400_000) last7d++;
+    byMode[m.mode] = (byMode[m.mode] ?? 0) + 1;
+    if (typeof m.durationMin === 'number' && m.durationMin > 0) {
+      durSum += m.durationMin;
+      durCount++;
+    }
+    for (const pl of m.players) {
+      seats++;
+      if (pl.isBot) botSeats++;
+      if (m.mode === 'blood' && pl.charId) {
+        const agg = charAgg.get(pl.charId) ?? { games: 0, wins: 0, rankSum: 0 };
+        agg.games++;
+        agg.rankSum += pl.rank;
+        if (pl.rank === 1) agg.wins++;
+        charAgg.set(pl.charId, agg);
+      }
+    }
+  }
+  const chars: CharStat[] = [...charAgg.entries()]
+    .map(([charId, a]) => ({
+      charId,
+      games: a.games,
+      wins: a.wins,
+      winRate: a.games ? Math.round((a.wins / a.games) * 1000) / 10 : 0,
+      avgRank: a.games ? Math.round((a.rankSum / a.games) * 100) / 100 : null,
+    }))
+    .sort((a, b) => b.games - a.games)
+    .slice(0, 12);
+  return {
+    total: list.length,
+    last7d,
+    avgDurationMin: durCount ? Math.round((durSum / durCount) * 10) / 10 : null,
+    botShare: seats ? Math.round((botSeats / seats) * 1000) / 10 : 0,
+    byMode,
+    chars,
+  };
+}

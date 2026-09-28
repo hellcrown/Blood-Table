@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 
 /** 管理员会话 token 存 sessionStorage（关浏览器即失效） */
 const TOKEN_KEY = 'blood-admin-token';
@@ -41,6 +42,42 @@ interface FeedbackInfo {
   ip?: string;
 }
 
+interface CharStat {
+  charId: string;
+  games: number;
+  wins: number;
+  winRate: number;
+  avgRank: number | null;
+}
+
+interface MatchStats {
+  total: number;
+  last7d: number;
+  avgDurationMin: number | null;
+  botShare: number;
+  byMode: Record<string, number>;
+  chars: CharStat[];
+}
+
+interface MatchRow {
+  endedAt: number;
+  durationMin?: number;
+  mode: string;
+  seatCount: number;
+  winnerSeat: number;
+  players: {
+    name: string;
+    seat: number;
+    rank: number;
+    charId?: string;
+    tickets?: number;
+    blood?: number;
+    chips?: number;
+    isBot?: boolean;
+    wasAuto?: boolean;
+  }[];
+}
+
 /**
  * 管理员面板：输入管理密码登录后可查看所有房间并执行管理操作（如一键清空）。
  * 管理密码由服务器环境变量 ADMIN_KEY 配置（仅开发者可见，玩家端不展示任何细节）。
@@ -53,6 +90,27 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackInfo[] | null>(null);
   const [feedbackError, setFeedbackError] = useState('');
+  const [stats, setStats] = useState<MatchStats | null>(null);
+  const [recent, setRecent] = useState<MatchRow[] | null>(null);
+  const [matchError, setMatchError] = useState('');
+
+  const loadMatches = useCallback(async (t: string) => {
+    try {
+      const r = await fetch('/api/admin/matches', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      const data = (await r.json()) as { stats?: MatchStats; recent?: MatchRow[] };
+      setStats(data.stats ?? null);
+      setRecent(data.recent ?? []);
+      setMatchError('');
+    } catch {
+      setMatchError('加载对局统计失败，请重试');
+    }
+  }, []);
 
   const clearFeedback = useCallback(async (t: string) => {
     try {
@@ -91,8 +149,11 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (token) void loadFeedback(token);
-  }, [token, loadFeedback]);
+    if (token) {
+      void loadFeedback(token);
+      void loadMatches(token);
+    }
+  }, [token, loadFeedback, loadMatches]);
 
   const loadRooms = useCallback(async (t: string) => {
     const r = await fetch('/api/admin/rooms', { headers: { Authorization: `Bearer ${t}` } });
@@ -213,6 +274,78 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     ))}
                   </tbody>
                 </table>
+              )}
+            </div>
+            <div className="admin-feedback">
+              <div className="admin-feedback-head">
+                <b>📊 对局统计</b>
+                <span className="spacer" />
+                <button
+                  className="btn small"
+                  disabled={busy}
+                  onClick={() => token && void loadMatches(token)}
+                >
+                  刷新统计
+                </button>
+              </div>
+              {matchError && <p className="admin-error">{matchError}</p>}
+              {stats == null && <p className="hint">加载中…</p>}
+              {stats != null && (
+                <>
+                  <p className="hint">
+                    累计 {stats.total} 局 · 近 7 天 {stats.last7d} 局 · 平均时长{' '}
+                    {stats.avgDurationMin != null ? `${stats.avgDurationMin} 分钟` : '—'} · 机器人座位占{' '}
+                    {stats.botShare}% · 血色 {stats.byMode.blood ?? 0} 局 / 德州 {stats.byMode.classic ?? 0} 局
+                  </p>
+                  {stats.chars.length > 0 && (
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>角色</th>
+                          <th>出场</th>
+                          <th>胜率</th>
+                          <th>平均名次</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.chars.map((c) => (
+                          <tr key={c.charId}>
+                            <td>
+                              {BLOOD_CHAR_BY_ID.get(c.charId)?.emoji ?? ''}{' '}
+                              {BLOOD_CHAR_BY_ID.get(c.charId)?.name ?? c.charId}
+                            </td>
+                            <td>{c.games}</td>
+                            <td>{c.winRate}%</td>
+                            <td>{c.avgRank ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
+              {recent != null && recent.length > 0 && (
+                <div className="feedback-list">
+                  {recent.map((m) => (
+                    <div key={`${m.endedAt}-${m.winnerSeat}`} className="feedback-item">
+                      <div className="feedback-item-meta">
+                        {new Date(m.endedAt).toLocaleString('zh-CN', { hour12: false })}
+                        {m.durationMin != null ? ` · ${m.durationMin} 分钟` : ''}
+                        {` · ${m.mode === 'blood' ? '血色' : '德州'} ${m.seatCount} 人`}
+                      </div>
+                      <div className="feedback-item-text">
+                        {m.players
+                          .map(
+                            (p) =>
+                              `${p.rank === 1 ? '👑' : ''}${p.name}${p.isBot ? '🤖' : ''}${
+                                p.charId ? `(${BLOOD_CHAR_BY_ID.get(p.charId)?.name ?? p.charId})` : ''
+                              }`,
+                          )
+                          .join(' · ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
             <div className="admin-feedback">

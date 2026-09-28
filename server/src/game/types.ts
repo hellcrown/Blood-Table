@@ -33,6 +33,8 @@ export interface GPlayer {
   won: number;
   handScore: number;
   handName: string | null;
+  /** 本手曾被超时托管代打（真人行动即清除；终局计分板 🤖 标记用） */
+  wasAuto?: boolean;
 }
 
 export interface GState {

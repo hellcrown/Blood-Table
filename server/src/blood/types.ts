@@ -119,6 +119,8 @@ export interface BPlayer {
   sdSeen: boolean;
   lastAction: string | null;
   connected: boolean;
+  /** 本局曾被超时托管代打（真人任意操作即清除；终局计分板 🤖 标记用） */
+  wasAuto?: boolean;
 }
 
 export interface MarketSlot {
@@ -164,7 +166,7 @@ export interface BloodResultView {
 
 export interface BloodFinal {
   winnerSeat: number;
-  ranking: { seat: number; name: string; tickets: number; blood: number }[];
+  ranking: { seat: number; name: string; tickets: number; blood: number; wasAuto?: boolean }[];
 }
 
 export interface BloodState {

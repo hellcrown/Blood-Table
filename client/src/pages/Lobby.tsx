@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { net } from '../net/socket';
+import { loadLastRoom, net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
 import { FeedbackModal } from '../components/FeedbackModal';
 
@@ -8,6 +8,10 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [mode, setMode] = useState<'blood' | 'classic'>('blood');
+  const [createPw, setCreatePw] = useState('');
+  const [joinPw, setJoinPw] = useState('');
+  const [pwForCode, setPwForCode] = useState<string | null>(null);
+  const [lastRoom, setLastRoom] = useState(loadLastRoom());
   const [adminOpen, setAdminOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
@@ -32,17 +36,52 @@ export function Lobby({ connected }: { connected: boolean }) {
     if (m) setCode(m[1].toUpperCase());
   }, []);
 
+  // 加入带密码房间：服务端返回 WRONG_PASSWORD 后展开密码输入
+  useEffect(() => {
+    return net.onError((errorCode) => {
+      if (errorCode === 'WRONG_PASSWORD' && code.length === 4) setPwForCode(code);
+    });
+  }, [code]);
+
   const create = () => {
     net.saveName(name.trim());
-    net.send({ t: 'create', name: name.trim(), maxPlayers, mode });
+    net.send({
+      t: 'create',
+      name: name.trim(),
+      maxPlayers,
+      mode,
+      ...(createPw.trim() ? { password: createPw.trim() } : {}),
+    });
   };
+
+  const joinMsg = (roomCode: string): { t: 'join'; name: string; code: string; password?: string } => ({
+    t: 'join',
+    name: name.trim(),
+    code: roomCode,
+    ...(pwForCode === roomCode && joinPw ? { password: joinPw } : {}),
+  });
+
   const join = () => {
     net.saveName(name.trim());
-    net.send({ t: 'join', name: name.trim(), code: code.trim().toUpperCase() });
+    net.send(joinMsg(code.trim().toUpperCase()));
   };
   const spectate = () => {
     net.saveName(name.trim());
-    net.send({ t: 'spectate', name: name.trim(), code: code.trim().toUpperCase() });
+    net.send({
+      t: 'spectate',
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      ...(pwForCode === code.trim().toUpperCase() && joinPw ? { password: joinPw } : {}),
+    });
+  };
+
+  /** ⚡ 回到上次房间：填码并直接加入（昵称为空时仅填码） */
+  const rejoinLast = () => {
+    if (!lastRoom) return;
+    setCode(lastRoom.code);
+    if (!nameOk || !connected) return;
+    net.saveName(name.trim());
+    net.send(joinMsg(lastRoom.code));
   };
 
   return (
@@ -53,6 +92,28 @@ export function Lobby({ connected }: { connected: boolean }) {
           <small>德州扑克联机</small>
         </h1>
         <p className="subtitle">2-4 人 · 建房后把房间码告诉朋友即可开局</p>
+
+        {lastRoom && (
+          <div className="rejoin-banner">
+            <span>
+              上次房间 <b>{lastRoom.code}</b>
+            </span>
+            <span className="spacer" />
+            <button className="btn small primary" disabled={!nameOk || !connected} onClick={rejoinLast}>
+              ⚡ 回到房间
+            </button>
+            <button
+              className="btn small ghost"
+              title="不再提示"
+              onClick={() => {
+                net.forgetLastRoom();
+                setLastRoom(null);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <label className="field">
           <span>你的昵称</span>
@@ -72,6 +133,15 @@ export function Lobby({ connected }: { connected: boolean }) {
                 <option value="blood">血色牌局（卡片对决）</option>
                 <option value="classic">经典德州扑克</option>
               </select>
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <input
+                value={createPw}
+                maxLength={12}
+                placeholder="密码（可选）"
+                title="设置后朋友加入时需输入密码；留空为公开房间"
+                onChange={(e) => setCreatePw(e.target.value)}
+              />
             </div>
             <div className="row" style={{ marginTop: 10 }}>
               <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
@@ -110,6 +180,20 @@ export function Lobby({ connected }: { connected: boolean }) {
                 观战
               </button>
             </div>
+            {pwForCode === code.trim().toUpperCase() && (
+              <div className="row" style={{ marginTop: 10 }}>
+                <input
+                  value={joinPw}
+                  maxLength={12}
+                  placeholder="房间密码"
+                  type="password"
+                  onChange={(e) => setJoinPw(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && nameOk && joinPw) join();
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 

@@ -186,6 +186,8 @@ export interface BloodAnnounceView {
 export interface BloodView {
   kind: 'blood';
   code: string;
+  /** 房间是否设置了密码（不下发密码本体） */
+  hasPassword?: boolean;
   phase:
     | 'pick'
     | 'setup'
@@ -216,7 +218,7 @@ export interface BloodView {
   /** 对决展示等待确认（settle 阶段非空：已确认数/总数） */
   showdownWait: { done: number; total: number } | null;
   result: { rows: BloodSettleRowView[]; winnerSeat: number; comparePipsFirst: boolean } | null;
-  final: { winnerSeat: number; ranking: { seat: number; name: string; tickets: number; blood: number }[] } | null;
+  final: { winnerSeat: number; ranking: { seat: number; name: string; tickets: number; blood: number; wasAuto?: boolean }[] } | null;
   log: LogLine[];
   logSeq: number;
   me: {

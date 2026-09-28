@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
+import { clearMatches, initMatchStore, listMatches, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
@@ -281,6 +282,28 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, feedback: listFeedback() }));
     return;
   }
+  if (url.pathname === '/api/admin/matches' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    const all = listMatches();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, stats: matchStats(), recent: all.slice(-30).reverse() }));
+    return;
+  }
+  if (url.pathname === '/api/admin/matches/clear' && req.method === 'POST') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    clearMatches();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405);
     res.end();
@@ -292,6 +315,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 initFeedbackStore(path.resolve(process.cwd(), 'data', 'feedback.jsonl'));
+initMatchStore(path.resolve(process.cwd(), 'data', 'matches.jsonl'));
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
 // 1200 ≈ 千人同时在线余量（1GB 内存实测 1000 连接约占 150-250MB，先于内存见顶的是这个常量）

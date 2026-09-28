@@ -249,6 +249,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
   return {
     kind: 'blood',
     code: room.code,
+    hasPassword: !!room.password,
     phase: gs.phase,
     round: gs.round,
     target: gs.target,

@@ -14,7 +14,7 @@ export default function App() {
   useEffect(() => {
     const offV = net.onView(setView);
     const offS = net.onStatus(setStatus);
-    const offE = net.onError((msg) => {
+    const offE = net.onError((_code, msg) => {
       setToast(msg);
       window.setTimeout(() => setToast(null), 2600);
     });

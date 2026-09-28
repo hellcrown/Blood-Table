@@ -76,7 +76,7 @@ export interface HandResultView {
 }
 
 export interface GameOverView {
-  ranking: { seat: number; name: string; chips: number }[];
+  ranking: { seat: number; name: string; chips: number; wasAuto?: boolean }[];
 }
 
 export interface TableView {
@@ -88,6 +88,8 @@ export interface TableView {
   maxPlayers: number;
   settings: RoomSettings;
   hostId: string;
+  /** 房间是否设置了密码（不下发密码本体） */
+  hasPassword?: boolean;
   /** 血色模式：拓展选将开关（选将始终进行；开=角色池并入拓展角色，关=仅基础4角色） */
   charExpansion: boolean;
   /** 血色模式：拓展黑市开关（开=牌库并入拓展牌；默认关） */
@@ -136,16 +138,16 @@ export type PlayerAction =
   | PlayerActionAllIn;
 
 export type C2S =
-  | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode }
-  | { t: 'join'; name: string; code: string }
-  | { t: 'spectate'; name: string; code: string }
+  | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode; password?: string }
+  | { t: 'join'; name: string; code: string; password?: string }
+  | { t: 'spectate'; name: string; code: string; password?: string }
   | { t: 'enterSpectate' }
   | { t: 'replaceBot'; seat: number }
   | { t: 'backToRoom' }
   | { t: 'rejoin'; token: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }

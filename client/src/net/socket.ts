@@ -5,12 +5,48 @@ export type ConnStatus = 'connecting' | 'open' | 'closed';
 export type AnyView = import('@shared/protocol').TableView | BloodView;
 
 type ViewListener = (v: AnyView | null) => void;
-type ErrorListener = (msg: string) => void;
+type ErrorListener = (code: string, msg: string) => void;
 type StatusListener = (s: ConnStatus) => void;
 
 const TOKEN_KEY = 'blood.token';
 const NAME_KEY = 'blood.name';
+const LAST_ROOM_KEY = 'blood.lastRoom';
 // token 存 sessionStorage：每个标签页独立会话，同浏览器多开互不干扰；刷新仍可恢复
+// lastRoom 存 localStorage：跨标签页/会话保留「最近房间码」，供大厅「回到房间」横幅使用
+
+export interface LastRoomRef {
+  code: string;
+  ts: number;
+}
+
+/** 读取最近房间引用（无/损坏时返回 null） */
+export function loadLastRoom(): LastRoomRef | null {
+  try {
+    const raw = localStorage.getItem(LAST_ROOM_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as LastRoomRef;
+    if (v && typeof v.code === 'string' && /^[A-Z0-9]{4}$/.test(v.code)) return v;
+  } catch {
+    /* 忽略损坏数据 */
+  }
+  return null;
+}
+
+function saveLastRoom(code: string): void {
+  try {
+    localStorage.setItem(LAST_ROOM_KEY, JSON.stringify({ code, ts: Date.now() }));
+  } catch {
+    /* 隐私模式等场景下写入失败可忽略 */
+  }
+}
+
+function clearLastRoom(): void {
+  try {
+    localStorage.removeItem(LAST_ROOM_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}
 
 /**
  * WebSocket 单例：自动重连、token 恢复、视图分发。
@@ -24,6 +60,8 @@ class Net {
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
   private started = false;
+  /** 已写入 lastRoom 的房间码（避免每条 state 消息重复写 localStorage） */
+  private notedCode: string | null = null;
 
   view: AnyView | null = null;
   token: string | null = sessionStorage.getItem(TOKEN_KEY);
@@ -63,6 +101,11 @@ class Net {
         this.playerId = msg.playerId;
         sessionStorage.setItem(TOKEN_KEY, msg.token);
       } else if (msg.t === 'state') {
+        const code = typeof msg.view?.code === 'string' ? msg.view.code : null;
+        if (code && code !== this.notedCode) {
+          this.notedCode = code;
+          saveLastRoom(code);
+        }
         this.view = msg.view as AnyView;
         this.viewListeners.forEach((l) => l(msg.view as AnyView));
       } else if (msg.t === 'error') {
@@ -70,10 +113,11 @@ class Net {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
           this.clearToken();
           this.setView(null);
-          if (msg.code === 'KICKED') this.errorListeners.forEach((l) => l(msg.msg)); // 被请离要给出原因
+          if (msg.code !== 'TOKEN_INVALID') clearLastRoom(); // 房间已解散/被请离：清除「回到房间」；仅 token 失效时保留（房间可能还在，可重新加入）
+          if (msg.code === 'KICKED') this.errorListeners.forEach((l) => l(msg.code, msg.msg)); // 被请离要给出原因
           return;
         }
-        this.errorListeners.forEach((l) => l(msg.msg));
+        this.errorListeners.forEach((l) => l(msg.code, msg.msg));
       }
     };
     ws.onclose = () => {
@@ -106,7 +150,14 @@ class Net {
   leaveRoom(): void {
     this.send({ t: 'leave' });
     this.clearToken();
+    clearLastRoom();
     this.setView(null);
+  }
+
+  /** 大厅「回到房间」横幅手动关闭 */
+  forgetLastRoom(): void {
+    this.notedCode = null;
+    clearLastRoom();
   }
 
   private clearToken(): void {

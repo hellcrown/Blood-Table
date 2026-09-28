@@ -185,6 +185,7 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
   if (gs.toActSeat !== seat) throw new GameError('NOT_YOUR_TURN', '还没轮到你行动');
   const p = bySeat(gs, seat);
   if (!p) throw new GameError('NO_SEAT', '座位不存在');
+  p.wasAuto = false; // 真人行动：清除超时托管标记
   const legal = legalActionsFor(gs, seat);
   if (!legal) throw new GameError('NOT_YOUR_TURN', '你当前无法行动');
 
@@ -447,6 +448,7 @@ export function autoAction(gs: GState, seat: number, now: number = Date.now()): 
   const legal = legalActionsFor(gs, seat);
   if (!legal) return;
   const p = bySeat(gs, seat)!;
+  p.wasAuto = true;
   if (legal.canCheck) {
     p.acted = true;
     p.lastAction = '让牌';
@@ -487,7 +489,7 @@ function advanceAfterResult(gs: GState, now: number): void {
     const ranking = gs.players
       .slice()
       .sort((a, b) => b.chips - a.chips)
-      .map((p) => ({ seat: p.seat, name: p.name, chips: p.chips }));
+      .map((p) => ({ seat: p.seat, name: p.name, chips: p.chips, wasAuto: !!p.wasAuto }));
     const final: GameOverView = { ranking };
     gs.final = final;
     pushLog(gs, 'sys', champion ? `🏆 ${champion.name} 赢得整场比赛！` : '比赛结束');

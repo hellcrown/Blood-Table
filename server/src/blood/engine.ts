@@ -2018,7 +2018,7 @@ function finishByTickets(
     ranking: gs.players
       .slice()
       .sort((a, b) => b.tickets - a.tickets || b.blood - a.blood || dist(a) - dist(b))
-      .map((p) => ({ seat: p.seat, name: p.name, tickets: p.tickets, blood: p.blood })),
+      .map((p) => ({ seat: p.seat, name: p.name, tickets: p.tickets, blood: p.blood, wasAuto: !!p.wasAuto })),
   };
   pushLog(gs, 'sys', `🏆 ${pname(champion)} 集齐 ${champion.tickets} 张车票（目标 ${gs.target}），赢得比赛！`);
 }
@@ -2774,7 +2774,7 @@ function checkLiuWin(gs: BloodState, p: BPlayer, now: number): void {
       ranking: gs.players
         .slice()
         .sort((a, b) => (b.id === p.id ? 1 : a.id === p.id ? -1 : 0) || b.tickets - a.tickets || b.blood - a.blood)
-        .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood })),
+        .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood, wasAuto: !!x.wasAuto })),
     };
     pushLog(gs, 'sys', `⚰️ ${pname(p)}【皇叔】删光整副 54 张牌且分数过半，达成宿命胜利！`);
     void now;
@@ -2933,7 +2933,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       // 选将超时托管：自动选择第一张
       for (const p of gs.players) {
         if (gs.phase !== 'pick') break;
-        if (!p.charId) act(() => bPickChar(gs, p.id, p.charOptions[0], now));
+        if (!p.charId) {
+          p.wasAuto = true;
+          act(() => bPickChar(gs, p.id, p.charOptions[0], now));
+        }
       }
       return true;
     }
@@ -2957,7 +2960,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       for (const p of gs.players) {
         if (gs.phase !== 'setup') break;
-        if (p.setupRound < 2) act(() => bSetup(gs, p.id, [], now));
+        if (p.setupRound < 2) {
+          p.wasAuto = true;
+          act(() => bSetup(gs, p.id, [], now));
+        }
       }
       return true;
     }
@@ -2998,6 +3004,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       for (const p of gs.players) {
         if (gs.phase !== 'swap') break; // swapItem 阶段全员已停止换牌，无需强制收尾
         if (!p.swapDone && !(gs.secretPending && gs.secretPending.seat === p.id)) {
+          p.wasAuto = true;
           act(() => bSwapStop(gs, p.id, now));
         }
       }
@@ -3045,7 +3052,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       for (const p of gs.players) {
         if (gs.phase !== 'play') break;
-        if (!p.locked) act(() => bPlay(gs, p.id, bestFive(p), now));
+        if (!p.locked) {
+          p.wasAuto = true;
+          act(() => bPlay(gs, p.id, bestFive(p), now));
+        }
       }
       if (gs.phase === 'play' && allDone(gs, (x) => x.locked) && !gs.secretPending) {
         tryStartReveal(gs, now);
@@ -3102,6 +3112,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         nextRevealOrSettle(gs, now);
         return true;
       } else {
+        p.wasAuto = true;
         act(() => bUseItem(gs, p.id, null, now));
       }
       return true;
@@ -3122,7 +3133,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       for (const p of gs.players) {
         if (gs.phase !== 'settle') break;
-        if (!p.sdSeen) act(() => bShowdownDone(gs, p.id, now));
+        if (!p.sdSeen) {
+          p.wasAuto = true;
+          act(() => bShowdownDone(gs, p.id, now));
+        }
       }
       return true;
     }
@@ -3145,6 +3159,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         advanceBuyTurn(gs, p.seat, now); // 自愈：回合玩家已跳过购买（如编剧/闭店礼）则推进
         return true;
       }
+      p.wasAuto = true;
       act(() => bPassBuy(gs, p.id, now));
       return true;
     }
@@ -3157,7 +3172,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       for (const p of gs.players) {
         if (gs.phase !== 'remove') break;
-        if (!p.removeDone) act(() => bRemoveDone(gs, p.id, now));
+        if (!p.removeDone) {
+          p.wasAuto = true;
+          act(() => bRemoveDone(gs, p.id, now));
+        }
       }
       return true;
     }
@@ -3188,7 +3206,10 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       for (const p of gs.players) {
         if (gs.phase !== 'reorg') break;
-        if (!p.reorgDone) act(() => bReorg(gs, p.id, 'blood', now));
+        if (!p.reorgDone) {
+          p.wasAuto = true;
+          act(() => bReorg(gs, p.id, 'blood', now));
+        }
       }
       return true;
     }
@@ -3678,7 +3699,7 @@ export function bResign(gs: BloodState, playerId: string, now: number): void {
         if (b.id === playerId) return -1;
         return b.tickets - a.tickets || b.blood - a.blood;
       })
-      .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood })),
+      .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood, wasAuto: !!x.wasAuto })),
   };
   pushLog(gs, 'sys', `🏳️ ${pname(p)} 投降，本局判负 · ${pname(winner)} 获胜`);
 }

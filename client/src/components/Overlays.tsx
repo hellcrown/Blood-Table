@@ -53,7 +53,8 @@ export function GameOverOverlay({ view }: { view: TableView }) {
         <ol className="ranking">
           {final.ranking.map((r, i) => (
             <li key={r.seat} className={i === 0 ? 'champ' : ''}>
-              {i + 1}. {r.name} — {r.chips} 筹码 {i === 0 ? '👑' : ''}
+              {i + 1}. {r.name}
+              {r.wasAuto ? ' 🤖' : ''} — {r.chips} 筹码 {i === 0 ? '👑' : ''}
             </li>
           ))}
         </ol>
