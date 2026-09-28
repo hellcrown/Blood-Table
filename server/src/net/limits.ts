@@ -22,6 +22,12 @@ export class SlidingWindow {
     return true;
   }
 
+  /** 窗口内是否已达上限（只读检查，不记录——用于「已锁定则直接拒绝」场景） */
+  reached(now = Date.now()): boolean {
+    this.hits = this.hits.filter((t) => now - t < this.windowMs);
+    return this.hits.length >= this.max;
+  }
+
   /** 距最近一次记录是否超过 idleMs（用于清理闲置条目） */
   idle(now = Date.now()): boolean {
     return now - this.lastHit > this.windowMs * 4;

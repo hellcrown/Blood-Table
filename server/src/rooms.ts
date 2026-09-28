@@ -176,10 +176,36 @@ export class RoomManager {
     () => new SlidingWindow(60_000, 10),
     (w, now) => w.idle(now),
   );
+  /** 单房间密码错误全局限速（防多 IP 分布式爆破同一房间）：错误达 20 次/分即整体冷却 */
+  private pwFailsByRoom = new Map<string, SlidingWindow>();
+
+  private roomPwFailWindow(code: string): SlidingWindow {
+    let w = this.pwFailsByRoom.get(code);
+    if (!w) {
+      w = new SlidingWindow(60_000, 20);
+      this.pwFailsByRoom.set(code, w);
+    }
+    return w;
+  }
+
+  /** 密码错误记录 + 判定是否已锁定该房间 */
+  private notePasswordFail(code: string): void {
+    this.roomPwFailWindow(code).allow();
+  }
+
+  private roomPasswordLocked(code: string): boolean {
+    return this.roomPwFailWindow(code).reached();
+  }
 
   constructor() {
     // 限流表闲置清理：防止海量 IP 源缓慢撑大内存
-    setInterval(() => this.joinAttempts.prune(), 5 * 60_000).unref();
+    setInterval(() => {
+      this.joinAttempts.prune();
+      const now = Date.now();
+      for (const [code, w] of this.pwFailsByRoom) {
+        if (w.idle(now)) this.pwFailsByRoom.delete(code);
+      }
+    }, 5 * 60_000).unref();
   }
 
   /* ---------------- 连接管理 ---------------- */
@@ -576,11 +602,17 @@ export class RoomManager {
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
     if (room.password) {
+      if (this.roomPasswordLocked(code)) {
+        throw new GameError('RATE_LIMITED', '该房间密码错误次数过多，请 1 分钟后再试');
+      }
       if (!this.pwJoins.get(ws.ip ?? '').allow()) {
         throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
       }
       const err = verifyRoomPassword(room, msg.password);
-      if (err) throw new GameError(err, '房间密码错误');
+      if (err) {
+        this.notePasswordFail(code);
+        throw new GameError(err, '房间密码错误');
+      }
     }
     const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
     if (spectatorCount >= MAX_SPECTATORS) throw new GameError('ROOM_LIMIT', '观战人数已达上限');
@@ -620,12 +652,18 @@ export class RoomManager {
     const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
     if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
     if (room.password) {
-      // 带密码房间：先限速（防爆破），再校验密码
+      // 带密码房间：先查房间级锁定（防多 IP 分布式爆破），再按 IP 限速，最后校验密码
+      if (this.roomPasswordLocked(code)) {
+        throw new GameError('RATE_LIMITED', '该房间密码错误次数过多，请 1 分钟后再试');
+      }
       if (!this.pwJoins.get(ip).allow()) {
         throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
       }
       const err = verifyRoomPassword(room, msg.password);
-      if (err) throw new GameError(err, '房间密码错误');
+      if (err) {
+        this.notePasswordFail(code);
+        throw new GameError(err, '房间密码错误');
+      }
     }
     this.detachBinding(ws);
     const session = this.addSession(room, msg.name);
@@ -878,7 +916,7 @@ export class RoomManager {
       room.targetTickets = Math.min(30, Math.max(0, Number.isFinite(n) ? n : 0));
     }
     if (msg.password != null) {
-      const pw = String(msg.password).trim().slice(0, 12);
+      const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
       room.password = pw || undefined; // 空串清除密码
     }
     this.broadcast(room);

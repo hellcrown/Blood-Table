@@ -37,9 +37,8 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
   const chars = BLOOD_CHARS.filter((c) =>
     charPool === 'all' ? true : charPool === 'basic' ? !!c.basic : !c.basic,
   );
-  const cards = [...BLOOD_MARKET_DEFS, ...BLOOD_MARKET_EXPANSION_DEFS].filter(
-    (d) => (withExp || !d.expansion) && (kind === 'all' || d.kind === kind),
-  );
+  const allCards = [...BLOOD_MARKET_DEFS, ...BLOOD_MARKET_EXPANSION_DEFS];
+  const cards = allCards.filter((d) => (withExp || !d.expansion) && (kind === 'all' || d.kind === kind));
 
   const chip = (active: boolean, label: string, onClick: () => void, key?: string) => (
     <button key={key ?? label} className={`btn tiny ${active ? 'primary' : 'ghost'}`} onClick={onClick}>
@@ -64,7 +63,7 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
               </>
             ) : (
               <>
-                {chip(kind === 'all', `全部 ${withExp ? 51 : 24}`, () => setKind('all'))}
+                {chip(kind === 'all', `全部 ${(withExp ? allCards : allCards.filter((d) => !d.expansion)).length}`, () => setKind('all'))}
                 {chip(kind === 'chip', '强化芯片', () => setKind('chip'))}
                 {chip(kind === 'item', '备用道具', () => setKind('item'))}
                 {chip(kind === 'secret', '秘密交易', () => setKind('secret'))}

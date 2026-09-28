@@ -123,6 +123,7 @@ export function startHand(gs: GState, now: number = Date.now()): void {
     p.handName = null;
     p.lastAction = null;
     p.inHand = p.chips > 0;
+    p.wasAuto = false; // 每手重置：wasAuto 是「本手」级标记
   }
 
   pushLog(gs, 'hand', `── 第 ${gs.handNumber} 手 ──`);

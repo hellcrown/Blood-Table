@@ -2954,6 +2954,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       const pend = gs.secretPending;
       if (pend?.kind === 'mynameSet') {
         const p = gs.players.find((x) => x.id === pend.seat)!;
+        p.wasAuto = true; // 托管命名
         gs.mynameCat = 1;
         gs.mynameText = '神秘牌型';
         gs.secretPending = null;
@@ -2963,6 +2964,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       if (pend?.kind === 'hackerSetup') {
         const p = gs.players.find((x) => x.id === pend.seat)!;
+        p.wasAuto = true; // 托管构筑
         gs.secretPending = null;
         act(() => bHackerSetup(gs, p.id, p.draw.slice(-8).map((c) => c.id), now));
         return true;
@@ -2989,6 +2991,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       if (pend?.kind === 'facelessPick') {
         const p = gs.players.find((x) => x.id === pend.seat)!;
+        p.wasAuto = true; // 托管选角色
         gs.secretPending = null;
         act(() => bFacelessPick(gs, p.id, pend.options?.[0] ?? '', now));
         return true;
@@ -3032,6 +3035,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       }
       if (pend?.kind === 'agentDecide') {
         const t = gs.players.find((x) => x.id === pend.seat)!;
+        t.wasAuto = true; // 托管：自动接受交换
         gs.secretPending = null;
         act(() => bAgentDecide(gs, t.id, true, now));
         return true;
@@ -3193,6 +3197,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (pend?.kind === 'cleanerDel') {
         const p = gs.players.find((x) => x.id === pend.seat)!;
         // 托管：退化为删除自己抽牌堆顶 1 张
+        p.wasAuto = true;
         gs.secretPending = null;
         if (p.draw.length > 0) {
           const c = p.draw.pop()!;
@@ -3251,6 +3256,7 @@ function resolveSwapEndOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       const opps = gs.players.filter((o) => o.id !== p.id);
       if (opps.length > 0) {
         const t = opps[randomInt(0, opps.length)];
+        p.wasAuto = true; // 托管指定目标
         pushLog(gs, 'action', `${pname(p)} 的【信号干扰器】目标超时：托管指定 ${pname(t)}`);
         bSecretTarget(gs, p.id, t.seat, now);
       } else {
@@ -3306,6 +3312,7 @@ function resolveSettleOnTimeout(gs: BloodState, p: BPlayer, now: number): void {
     const want: 'm' | 'f' = effChar(p) === 'succubus' && p.privilege ? 'm' : 'f';
     const targets = gs.players.filter((o) => o.id !== p.id && genderMatches(effChar(o), want) && o.blood > 0);
     gs.secretPending = null;
+    p.wasAuto = true; // 托管抢夺
     if (targets.length > 0) {
       const t = targets[randomInt(0, targets.length)];
       const pay = Math.min(amount, t.blood);
@@ -3604,6 +3611,7 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       const chips = t ? t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off) : [];
       gs.recycle.push(pend.defId ?? 'demag');
       gs.secretPending = null;
+      p.wasAuto = true; // 托管选目标
       if (chips.length > 0) {
         const pickChip = chips[randomInt(0, chips.length)];
         pickChip.off = true;
@@ -3620,6 +3628,7 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       const rank = pend.rank ?? 0;
       const matches = p.discard.filter((c) => finalRank(p, c) === rank);
       gs.secretPending = null;
+      p.wasAuto = true; // 托管选删牌
       if (matches.length === 0) {
         pushLog(gs, 'action', `【定点爆破】${pname(p)} 弃牌堆没有 ${rank} 点的牌，落空`);
       } else {
@@ -3726,7 +3735,12 @@ export function bMynameSet(gs: BloodState, playerId: string, cat: number, name: 
   }
   const p = gs.players.find((x) => x.id === playerId)!;
   if (!Number.isInteger(cat) || cat < 0 || cat > 14) throw new BloodError('BAD_TARGET', '牌型无效');
-  const trimmed = name.trim().slice(0, 12);
+  // 与 cleanName 同标准：滤控制字符/零宽字符，防日志与落库行结构被破坏
+  const trimmed = name
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029\ufeff]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 12);
   if (!trimmed) throw new BloodError('BAD_TARGET', '名称不能为空');
   gs.mynameCat = cat;
   gs.mynameText = trimmed;

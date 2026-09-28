@@ -152,3 +152,28 @@ describe('对局记录落库 matchlog', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('托管标记生命周期', () => {
+  it('德州 startHand 重置 wasAuto（本手级标记，跨手/跨局不残留）', () => {
+    const players = [
+      { id: 'a', name: '甲', seat: 0, chips: 1000 },
+      { id: 'b', name: '乙', seat: 1, chips: 1000 },
+    ];
+    const gs = createGame({ sb: 5, bb: 10, startChips: 1000 }, 2, players);
+    // 上一手结束态残留标记（模拟终局后再来一场/下一手开始前）
+    for (const p of gs.players) p.wasAuto = true;
+    startHand(gs, NOW);
+    expect(gs.players.every((p) => p.wasAuto === false)).toBe(true);
+  });
+
+  it('SlidingWindow.reached 只读检查不消耗额度', async () => {
+    const { SlidingWindow } = await import('../src/net/limits');
+    const w = new SlidingWindow(60_000, 2);
+    expect(w.allow(1000)).toBe(true);
+    expect(w.allow(1001)).toBe(true);
+    expect(w.reached(1002)).toBe(true); // 已满
+    expect(w.reached(1002)).toBe(true); // 只读，重复查询结果一致
+    expect(w.allow(1003)).toBe(false); // allow 被拒
+    expect(w.allow(70_000)).toBe(true); // 窗口滑过后恢复
+  });
+});
