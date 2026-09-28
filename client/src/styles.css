@@ -3032,6 +3032,7 @@ body {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  white-space: nowrap; /* 标签与提示不折行（房间密码/拓展选将等短标签此前会竖排换字） */
 }
 
 .charpick-toggle input[type='checkbox'] {
@@ -3623,4 +3624,34 @@ body {
 
 .tutorial-dots i.on {
   background: var(--gold);
+}
+
+/* ---------- 更新日志弹窗 ---------- */
+
+.log-entry {
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.log-entry-head b {
+  color: var(--gold);
+}
+
+.log-entry ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.8;
 }

@@ -31,6 +31,9 @@ export function Room({ view }: { view: TableView }) {
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   // 目标票数本地草稿：输入中不实时上报，失焦时钳制并提交
   const [targetTicketsInput, setTargetTicketsInput] = useState(String(view.targetTickets || ''));
+  // 房间密码草稿：服务端不下发密码本体，仅显示是否已设置
+  const [pwDraft, setPwDraft] = useState('');
+  const [pwMsg, setPwMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setSettings(view.settings);
@@ -127,8 +130,20 @@ export function Room({ view }: { view: TableView }) {
     charExpansion?: boolean;
     expansion?: boolean;
     targetTickets?: number;
+    password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
+  };
+
+  /** 房主提交密码（失焦触发）：空串清除密码 */
+  const commitPassword = () => {
+    if (!isHost) return;
+    const pw = pwDraft.trim();
+    if (!pw && !view.hasPassword) return; // 无变化
+    update({ password: pw });
+    setPwDraft('');
+    setPwMsg(pw ? '密码已设置 ✓（朋友加入时需输入）' : view.hasPassword ? '密码已清除' : null);
+    window.setTimeout(() => setPwMsg(null), 2500);
   };
 
   return (
@@ -360,6 +375,26 @@ export function Room({ view }: { view: TableView }) {
               </label>
             </div>
           )}
+          <div className="settings-grid" style={{ marginTop: 10, gridTemplateColumns: '1fr' }}>
+            <label
+              className="charpick-toggle"
+              title={isHost ? '设置后朋友加入/观战需输入密码；留空提交即清除' : '该房间是否需要密码加入'}
+            >
+              房间密码
+              <input
+                value={pwDraft}
+                maxLength={12}
+                placeholder={view.hasPassword ? '已设置（输入新密码可修改）' : '未设置（可选）'}
+                disabled={!isHost}
+                onChange={(e) => setPwDraft(e.target.value)}
+                onBlur={commitPassword}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitPassword();
+                }}
+              />
+              <span className="hint">{pwMsg ?? (view.hasPassword ? '🔒 需密码加入' : '公开房间')}</span>
+            </label>
+          </div>
         </div>
 
         <div className="start-row">

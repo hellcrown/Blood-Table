@@ -5,6 +5,7 @@ import { CodexModal } from '../components/CodexModal';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { LeaderboardModal } from '../components/LeaderboardModal';
 import { TutorialModal } from '../components/TutorialModal';
+import { ChangelogModal } from '../components/ChangelogModal';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -20,6 +21,7 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [codexOpen, setCodexOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
 
   /** 复制 QQ 群号到剪贴板（https 下可用；失败时按钮文本本身仍展示群号） */
@@ -234,6 +236,9 @@ export function Lobby({ connected }: { connected: boolean }) {
           >
             {qqCopied ? '✓ 已复制群号' : '💬 QQ交流群 730193109'}
           </button>
+          <button className="btn small ghost" onClick={() => setLogOpen(true)}>
+            📜 更新日志
+          </button>
         </div>
 
         <div className="rules-hint">
@@ -263,6 +268,7 @@ export function Lobby({ connected }: { connected: boolean }) {
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
       {tutorialOpen && <TutorialModal onClose={() => setTutorialOpen(false)} />}
+      {logOpen && <ChangelogModal onClose={() => setLogOpen(false)} />}
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
   );
