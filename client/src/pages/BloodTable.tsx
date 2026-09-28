@@ -332,6 +332,7 @@ export function BloodTable({ view }: { view: BloodView }) {
     const prev = prevFinalRef.current;
     prevFinalRef.current = key;
     if (!key || key === prev) return;
+    if (view.me.seat < 0) return; // 观战者不播胜负音
     playSfx(key === `w${view.me.seat}` ? 'win' : 'lose');
   }, [view.final]);
 
@@ -407,7 +408,13 @@ export function BloodTable({ view }: { view: BloodView }) {
   // 阶段切换：清掉上一个阶段遗留的弹窗与插入状态（防残留 chipBuying 在后续阶段误发购买）
   useEffect(() => {
     if (view.prompt.k !== 'insertChip' && !chipBuying) return;
-    if (view.prompt.k !== 'insertChip' && view.prompt.k !== 'buy') {
+    if (view.prompt.k === 'insertChip') {
+      // 免费/赠送芯片的插入挂起到来时，清掉购买流程残留——否则确认时误发旧 bBuy
+      setChipBuying(null);
+      setInsertConfirm(null);
+      return;
+    }
+    if (view.prompt.k !== 'buy') {
       setChipBuying(null);
       setInsertConfirm(null);
       setZoneModal(null);
@@ -595,6 +602,8 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '我的名字？：选择一种牌型并为其自定义名称（任何人打出它你 +2🩸）';
       case 'cleanerDel':
         return '清洁工：选择目标玩家，从其弃牌区选牌删除（或随机删其抽牌堆一张，删自抽牌堆则重洗）';
+      case 'pinpointVictim':
+        return `定点爆破：从你的弃牌区点击一张 ${view.prompt.rank ?? 0} 点的牌删除（可跳过）`;
       default:
         return '等待其他玩家操作…';
     }
@@ -607,7 +616,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const handClickable = view.prompt.k === 'setup' || view.prompt.k === 'swap' || view.prompt.k === 'play';
   const handSel = view.prompt.k === 'setup' ? selSetup : view.prompt.k === 'play' ? selPlay : selSwap;
   const handSetSel = view.prompt.k === 'setup' ? setSelSetup : view.prompt.k === 'play' ? setSelPlay : setSelSwap;
-  const handMax = view.prompt.k === 'setup' ? 4 : view.prompt.k === 'play' ? 5 : 3;
+  const handMax = view.prompt.k === 'setup' ? 4 : view.prompt.k === 'play' ? 5 : myCharId === 'tarot' ? 2 : 3;
 
   // 与引擎 isChipInsertable 同规则：弃牌区目标牌能否插入指定芯片
   const chipInsertable = (c: BloodCardView, defId: string): boolean => {
@@ -616,13 +625,15 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (c.chipIds.length > 0) return false;
     if (def.noJoker && (c.s == null || c.r === 0)) return false;
     if (def.effect.k === 'rankMod') {
+      // 点数芯片不得插王（服务端同规则）：否则王失去万能性
+      if (c.s == null || c.r === 0) return false;
       const v = c.r + def.effect.mod;
       if (v < 2 || v > 14) return false;
     }
     return true;
   };
   // 当前待插入的芯片（购买选目标 / 免费芯片待插入）
-  const activeChipDefId = chipBuying?.defId ?? (view.prompt.k === 'insertChip' ? view.prompt.defId : undefined);
+  const activeChipDefId = view.prompt.k === 'insertChip' ? view.prompt.defId : chipBuying?.defId;
 
   // 芯片插入模式下弃牌区点击
   const onDiscardClick = (c: BloodCardView) => {
@@ -881,8 +892,13 @@ export function BloodTable({ view }: { view: BloodView }) {
                     </div>
                   )}
                   {view.prompt.k === 'steal' && (
-                    <button className="btn small danger" onClick={() => send({ t: 'bSteal', seat: opp.seat })}>
-                      掠夺 1 血筹
+                    <button
+                      className="btn small danger"
+                      disabled={opp.blood < (view.prompt.blood ?? 1)}
+                      title={opp.blood < (view.prompt.blood ?? 1) ? '该对手血筹不足' : undefined}
+                      onClick={() => send({ t: 'bSteal', seat: opp.seat })}
+                    >
+                      掠夺 {view.prompt.blood ?? 1} 血筹
                     </button>
                   )}
                   {TARGET_LABELS[view.prompt.k] && (
@@ -1307,7 +1323,12 @@ export function BloodTable({ view }: { view: BloodView }) {
                 )}
                 {view.prompt.k === 'violentTarget' && (
                   <>
-                    <button className="btn primary" onClick={() => send({ t: 'bViolent', seat: view.me.seat })}>
+                    <button
+                      className="btn primary"
+                      disabled={view.me.drawCount < 3}
+                      title={view.me.drawCount < 3 ? '自己抽牌堆不足 3 张' : undefined}
+                      onClick={() => send({ t: 'bViolent', seat: view.me.seat })}
+                    >
                       删自己牌堆顶3张（{view.me.drawCount} 张）
                     </button>
                     {opponents.map((o) => (
@@ -1491,7 +1512,10 @@ export function BloodTable({ view }: { view: BloodView }) {
                           <button
                             key={`${pl.seat}-${c.id}-${defId}`}
                             className="btn tiny"
-                            disabled={view.prompt.decision?.t === 'copy' && defId === 'twinLens'}
+                            disabled={
+                              (view.prompt.decision?.t === 'copy' && (defId === 'twinLens' || pl.seat === view.me.seat))
+                            }
+                            title={view.prompt.decision?.t === 'copy' && pl.seat === view.me.seat ? '不能复制自己的芯片' : undefined}
                             onClick={() => send({ t: 'bRevealChipTarget', seat: pl.seat, cardId: c.id, defId })}
                           >
                             {pl.seat === view.me.seat ? '自己' : pl.name}·{BLOOD_MARKET_BY_ID.get(defId)?.name}
@@ -2341,12 +2365,13 @@ export function BloodTable({ view }: { view: BloodView }) {
                 <button
                   className="btn"
                   onClick={() => {
-                    send({ t: 'bInsertSkip' });
+                    // 仅真实 insertChip 挂起可发 skip；购买选目标阶段的「放弃」只是本地关闭（服务端没有 pending）
+                    if (view.prompt.k === 'insertChip') send({ t: 'bInsertSkip' });
                     setChipBuying(null);
                     setZoneModal(null);
                   }}
                 >
-                  放弃购买（费用不退，芯片进回收站）
+                  {view.prompt.k === 'insertChip' ? '放弃插入（芯片进回收站）' : '取消购买（未扣费）'}
                 </button>
               )}
               <button className="btn small" onClick={() => setZoneModal(null)}>

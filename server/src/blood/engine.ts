@@ -525,6 +525,12 @@ function processPreDrawQueue(gs: BloodState, now: number): void {
     return;
   }
   if (next.kind === 'facelessPick') {
+    // 出队时复核：并发抽取可能已掏空角色牌堆（如两名无面人），不足 2 张则跳过本次互动
+    if (gs.charDeck.length < 2) {
+      pushLog(gs, 'action', `🎭 ${gs.players.find((p) => p.id === next.seat)?.name}【无面人】角色牌堆不足，跳过抽取`);
+      processPreDrawQueue(gs, now);
+      return;
+    }
     const opts = [gs.charDeck.pop()!, gs.charDeck.pop()!];
     gs.secretPending = { seat: next.seat, kind: 'facelessPick', options: opts };
     pushLog(gs, 'action', `🎭 ${gs.players.find((p) => p.id === next.seat)?.name}【无面人】抽取角色牌，须选择其中一张的技能`);
@@ -560,7 +566,8 @@ function finishDrawPhase(gs: BloodState, now: number): void {
     }
     if (effChar(p) === 'bartender') swapBase += 1;
     p.swapLeft = swapBase;
-    p.swapDone = false;
+    // 换牌次数被投毒到 0：直接视为已完成换牌，不给「剩 0 次仍可换一组」的漏洞
+    p.swapDone = swapBase <= 0;
     p.locked = false;
     p.buyPassed = false;
     p.removeDone = false;
@@ -616,6 +623,7 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   const p = gs.players.find((x) => x.id === playerId)!;
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成当前角色技能抉择');
   if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
+  if (p.swapLeft <= 0) throw new BloodError('NO_SWAP', '没有剩余换牌次数');
   const tarot = effChar(p) === 'tarot';
   // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）；drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）
   const dc = Number(drawCount ?? 0);
@@ -3632,8 +3640,12 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       bSecretDelete(gs, p.id, [], now);
       return;
     case 'violentTarget':
-      // 托管按金科玉律默认对自己发动（删自己堆顶 3 张），而非直接落空
-      bViolent(gs, p.id, p.seat, now);
+      // 托管按金科玉律默认对自己发动（删自己堆顶 3 张）；自己堆不足 3 张则退化为落空。
+      // act2 兜底：bloodTick 链上任何 BloodError 逃逸都会击穿 setInterval 崩溃进程
+      act2(() => {
+        if (p.draw.length >= 3) bViolent(gs, p.id, p.seat, now);
+        else bViolent(gs, p.id, -1, now);
+      });
       return;
     case 'refreshPick':
       bRefreshPick(gs, p.id, [], now);

@@ -150,7 +150,7 @@ export interface BloodMyPrompt {
   /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 自己弃牌区 */
   cards?: { id: string; r: number; s: string | null }[];
   /** revealDecide：当前决策类型与决策牌 */
-  decision?: { t: 'spring' | 'copy' | 'shield'; cardId: string };
+  decision?: { t: 'spring' | 'copy' | 'shield'; cardId: string; chipId: string };
   chipId?: string;
   /** barrierAsk：待反制效果描述 */
   eff?: string;

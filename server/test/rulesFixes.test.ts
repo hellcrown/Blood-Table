@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evalBloodHand, applyImitate, type EvalCard } from '@shared/bloodEval';
-import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, type BloodState, type BPlayer } from '../src/blood/engine';
+import type { BloodState, BPlayer } from '../src/blood/types';
+import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank } from '../src/blood/engine';
 
 const NOW = 1000;
 
@@ -50,7 +51,7 @@ describe('深查修复 · 血色引擎', () => {
     const p0 = gs.players[0];
     p0.play = [{ id: 'cx', r: 5, s: 's' }];
     p0.chips = [{ id: 'cc1', def: 'copyChip', on: 'cx' }];
-    gs.secretPending = { seat: 'p0', kind: 'revealDecide', decision: { t: 'copy', chipId: 'cc1', cardId: 'cx' } };
+    gs.secretPending = { seat: 'p0', kind: 'revealDecide', decision: { t: 'copy', chipId: 'cc1', cardId: 'cx', defId: 'copyChip' } };
     expect(() => bRevealChipTarget(gs, 'p0', 0, 'cx', 'copyChip', NOW)).toThrow(/不能复制自己/);
   });
 
@@ -87,5 +88,79 @@ describe('深查修复 · 评估器', () => {
     expect(out[0].ranks).not.toContain(7);
     expect(out[1].ranks).toContain(7);
     expect(out[1].ranks).not.toContain(9);
+  });
+});
+
+describe('深查修复 · 视图层', () => {
+  it('revealDecide 的 prompt 必须下发 chipId（弹簧夹层人机依赖，漏发则永远「决策目标不匹配」）', async () => {
+    const { buildBloodView } = await import('../src/blood/view');
+    const gs = makeGame(['dealer', 'dealer']);
+    gs.phase = 'reveal';
+    gs.turnSeat = 0;
+    const p0 = gs.players[0];
+    p0.play = [{ id: 'cx', r: 5, s: 's' }];
+    p0.chips = [{ id: 'ch1', def: 'spring', on: 'cx' }];
+    gs.secretPending = {
+      seat: 'p0',
+      kind: 'revealDecide',
+      decision: { t: 'spring', chipId: 'ch1', cardId: 'cx', defId: 'spring' },
+    };
+    const room = {
+      code: 'TEST',
+      hostId: '',
+      ownerIp: '',
+      maxPlayers: 2,
+      mode: 'blood' as const,
+      settings: { sb: 5, bb: 10, startChips: 1000 },
+      charExpansion: false,
+      expansion: false,
+      targetTickets: 0,
+      sessions: new Map(),
+      game: gs,
+      pendingRemove: new Set(),
+      emptySince: 0,
+      botBrains: new Map(),
+      botNextAct: new Map(),
+      matchLogged: false,
+      gameStartedAt: null,
+    };
+    const view = buildBloodView(room as never, gs, 'p0');
+    expect(view.prompt.k).toBe('revealDecide');
+    expect(view.prompt.chipId).toBe('ch1');
+    expect(view.prompt.decision?.chipId).toBe('ch1');
+  });
+
+  it('视图过滤失效芯片：cardView 不下发 off 芯片（目标列表不再有死按钮）', async () => {
+    const { buildBloodView } = await import('../src/blood/view');
+    const gs = makeGame(['dealer', 'dealer']);
+    gs.phase = 'reveal';
+    const p1 = gs.players[1];
+    p1.play = [{ id: 'cx', r: 9, s: 'h' }];
+    p1.chips = [
+      { id: 'chA', def: 'calib1', on: 'cx' },
+      { id: 'chB', def: 'calib2', on: 'cx', off: true },
+    ];
+    const room = {
+      code: 'TEST',
+      hostId: '',
+      ownerIp: '',
+      maxPlayers: 2,
+      mode: 'blood' as const,
+      settings: { sb: 5, bb: 10, startChips: 1000 },
+      charExpansion: false,
+      expansion: false,
+      targetTickets: 0,
+      sessions: new Map(),
+      game: gs,
+      pendingRemove: new Set(),
+      emptySince: 0,
+      botBrains: new Map(),
+      botNextAct: new Map(),
+      matchLogged: false,
+      gameStartedAt: null,
+    };
+    const view = buildBloodView(room as never, gs, 'p0');
+    const played = view.players.find((p) => p.seat === 1)?.played ?? [];
+    expect(played[0]?.chipIds).toEqual(['calib1']); // off 的 calib2 不下发
   });
 });
