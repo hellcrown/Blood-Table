@@ -9,8 +9,7 @@ const SFX_KEY = 'blood.sfxVol'; // 0-100，默认 60
 const BGM_KEY = 'blood.bgmVol'; // 0-100，0=关闭，默认 0
 
 export type SfxName =
-  | 'click' // 按钮点击
-  | 'tap' // 选牌轻响
+  | 'tap' // 选牌/按钮：纸牌轻拂（用户反馈高频方波难受，统一用低频噪声拂动）
   | 'deal' // 发牌/换牌
   | 'lock' // 暗扣确认
   | 'reveal' // 亮牌揭晓
@@ -60,12 +59,12 @@ function ensureCtx(): AudioContext | null {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('pointerdown', () => void ensureCtx(), { once: true, capture: true });
-  // 全局按钮点击音（capture 兜底 stopPropagation 的按钮）；选牌音由 toggle 单独挂 'tap'
+  // 全局按钮点击音（capture 兜底 stopPropagation 的按钮）——与选牌同款纸牌轻拂，无高频
   document.addEventListener(
     'click',
     (e) => {
       const el = (e.target as HTMLElement | null)?.closest?.('button');
-      if (el && !(el as HTMLButtonElement).disabled) playSfx('click');
+      if (el && !(el as HTMLButtonElement).disabled) playSfx('tap');
     },
     { capture: true },
   );
@@ -134,12 +133,8 @@ export function playSfx(name: SfxName): void {
   master.connect(c.destination);
   try {
     switch (name) {
-      case 'click':
-        tone(c, master, 'square', 760, 520, 0.07, 0.16);
-        tone(c, master, 'sine', 1400, 900, 0.04, 0.06);
-        break;
       case 'tap':
-        // 选牌：短促纸牌轻拂
+        // 选牌/按钮：短促纸牌轻拂（无高频成分）
         noise(c, master, 3200, 0.045, 0.2);
         tone(c, master, 'triangle', 900, 700, 0.03, 0.06);
         break;
