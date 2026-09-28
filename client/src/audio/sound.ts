@@ -134,9 +134,10 @@ export function playSfx(name: SfxName): void {
   try {
     switch (name) {
       case 'tap':
-        // 选牌/按钮：短促纸牌轻拂（用户偏好：保留清脆沙声版本）
-        noise(c, master, 3200, 0.045, 0.2);
-        tone(c, master, 'triangle', 900, 700, 0.03, 0.06);
+        // 选牌/按钮：低沉咔擦——短噪声"咔" + 低频正弦"沉" + 弱噪声"擦"尾
+        noise(c, master, 1100, 0.025, 0.24);
+        tone(c, master, 'sine', 210, 110, 0.08, 0.3);
+        noise(c, master, 800, 0.02, 0.1, 0.045);
         break;
       case 'deal':
         noise(c, master, 1300, 0.09, 0.22);
