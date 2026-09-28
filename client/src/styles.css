@@ -3493,3 +3493,78 @@ body {
 .beian a:hover {
   text-decoration: underline;
 }
+
+/* ---------- 图鉴 / 胜率榜弹窗 ---------- */
+
+.lobby-links {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.codex-overlay {
+  z-index: 60;
+}
+
+.codex-panel {
+  width: min(880px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.codex-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.codex-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.codex-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.codex-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.codex-grid.chars {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+
+.codex-grid.cards {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+
+.codex-card {
+  cursor: default;
+}
+
+.codex-note {
+  margin: 10px 0 0;
+}
+
+.lb-body {
+  margin-top: 6px;
+}
+
+.lb-panel {
+  width: min(680px, 94vw);
+}

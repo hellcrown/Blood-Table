@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
-import { clearMatches, initMatchStore, listMatches, matchStats } from './matchlog';
+import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
@@ -152,10 +152,25 @@ function serveStatic(pathname: string, res: http.ServerResponse): void {
   fs.createReadStream(filePath).pipe(res);
 }
 
+/** 公开角色胜率榜缓存（60s）：防刷同时省去每次全量聚合 */
+let publicStatsCache: { at: number; body: string } | null = null;
+
 const manager = new RoomManager();
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
+  if (url.pathname === '/api/stats/chars' && req.method === 'GET') {
+    if (publicStatsCache && Date.now() - publicStatsCache.at < 60_000) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(publicStatsCache.body);
+      return;
+    }
+    const body = JSON.stringify({ ok: true, total: matchStats().total, chars: matchCharLeaderboard(5) });
+    publicStatsCache = { at: Date.now(), body };
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(body);
+    return;
+  }
   if (url.pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, rooms: manager.roomCount() }));

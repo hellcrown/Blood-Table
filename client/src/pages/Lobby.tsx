@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { loadLastRoom, net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
+import { CodexModal } from '../components/CodexModal';
 import { FeedbackModal } from '../components/FeedbackModal';
+import { LeaderboardModal } from '../components/LeaderboardModal';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -14,6 +16,8 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [lastRoom, setLastRoom] = useState(loadLastRoom());
   const [adminOpen, setAdminOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [codexOpen, setCodexOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
 
   const nameOk = name.trim().length > 0;
 
@@ -199,6 +203,15 @@ export function Lobby({ connected }: { connected: boolean }) {
 
         {!connected && <p className="hint">正在连接服务器…</p>}
 
+        <div className="lobby-links">
+          <button className="btn small ghost" onClick={() => setCodexOpen(true)}>
+            📖 图鉴
+          </button>
+          <button className="btn small ghost" onClick={() => setBoardOpen(true)}>
+            🏆 角色胜率榜
+          </button>
+        </div>
+
         <div className="rules-hint">
           <div className="box-title">玩法速览</div>
           <ul>
@@ -223,6 +236,8 @@ export function Lobby({ connected }: { connected: boolean }) {
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={name.trim() || undefined} />
       )}
+      {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
+      {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
   );

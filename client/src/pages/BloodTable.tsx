@@ -5,6 +5,7 @@ import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
 import { net } from '../net/socket';
 import { FeedbackModal } from '../components/FeedbackModal';
+import { CodexModal } from '../components/CodexModal';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { CharDetail, CharPortrait } from '../components/CharCard';
 import { CardView } from '../components/Card';
@@ -288,6 +289,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   // 插入芯片二次确认：点选目标牌后弹出（防误触），确认才真正发送插入
   const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [codexOpen, setCodexOpen] = useState(false);
   const [infoCard, setInfoCard] = useState<string | null>(null); // 牌局记录中点击的牌 def id
   const [oppItems, setOppItems] = useState<{ name: string; defs: string[] } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
@@ -711,6 +713,9 @@ export function BloodTable({ view }: { view: BloodView }) {
           <span className="brand">血色牌局</span>
           <span>
             房间 <b>{view.code}</b> · 第 {view.round + 1} 回合 · 目标 {view.target} 车票
+            <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setCodexOpen(true)}>
+              📖 图鉴
+            </button>
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
             </button>
@@ -2583,6 +2588,7 @@ export function BloodTable({ view }: { view: BloodView }) {
         playerName={view.players.find((p) => p.seat === view.me.seat)?.name}
       />
     )}
+      {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
     </div>
   );
 }

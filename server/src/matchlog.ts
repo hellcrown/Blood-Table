@@ -124,6 +124,42 @@ export function recordMatch(entry: MatchEntry): void {
   }
 }
 
+export interface CharLeaderRow {
+  charId: string;
+  games: number;
+  wins: number;
+  /** 胜率（百分比，1 位小数） */
+  winRate: number;
+  /** 平均名次 */
+  avgRank: number;
+}
+
+/** 角色胜率榜（公开接口用）：仅统计血色局，出场 ≥ minGames 才计入；按胜率降序（并列按出场多者在前） */
+export function matchCharLeaderboard(minGames = 5): CharLeaderRow[] {
+  const agg = new Map<string, { games: number; wins: number; rankSum: number }>();
+  for (const m of list) {
+    if (m.mode !== 'blood') continue;
+    for (const pl of m.players) {
+      if (!pl.charId) continue;
+      const a = agg.get(pl.charId) ?? { games: 0, wins: 0, rankSum: 0 };
+      a.games++;
+      a.rankSum += pl.rank;
+      if (pl.rank === 1) a.wins++;
+      agg.set(pl.charId, a);
+    }
+  }
+  return [...agg.entries()]
+    .filter(([, a]) => a.games >= minGames)
+    .map(([charId, a]) => ({
+      charId,
+      games: a.games,
+      wins: a.wins,
+      winRate: Math.round((a.wins / a.games) * 1000) / 10,
+      avgRank: Math.round((a.rankSum / a.games) * 100) / 100,
+    }))
+    .sort((x, y) => y.winRate - x.winRate || y.games - x.games);
+}
+
 /** 管理端：全部记录（内存副本） */
 export function listMatches(): MatchEntry[] {
   return list.slice();

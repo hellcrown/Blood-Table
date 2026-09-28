@@ -115,4 +115,40 @@ describe('对局记录落库 matchlog', () => {
     expect(fs.readFileSync(file, 'utf-8')).toBe('');
     fs.rmSync(dir, { recursive: true, force: true });
   });
+
+  it('角色胜率榜：minGames 过滤 + 胜率排序', async () => {
+    const { initMatchStore, recordMatch, matchCharLeaderboard } = await import('../src/matchlog');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'matchlog-lb-'));
+    initMatchStore(path.join(dir, 'matches.jsonl'));
+
+    // 一场 2 人血色局：seat 由参数指定名次
+    const mk = (charId: string, rank: number, seat: number) => ({
+      endedAt: Date.now(),
+      mode: 'blood' as const,
+      seatCount: 2,
+      winnerSeat: rank === 1 ? seat : 1 - seat,
+      players: [
+        { name: '甲', seat, rank, charId },
+        { name: '乙', seat: 1 - seat, rank: rank === 1 ? 2 : 1, charId: 'clerk' },
+      ],
+    });
+    for (let i = 0; i < 6; i++) recordMatch({ ...mk('dealer', i % 2 === 0 ? 1 : 2, 0) }); // 6 局 3 冠 = 50%
+    for (let i = 0; i < 5; i++) recordMatch({ ...mk('tarot', 1, 0) }); // 5 局 5 冠 = 100%
+    for (let i = 0; i < 2; i++) recordMatch({ ...mk('miner', 1, 0) }); // 仅 2 局 → 过滤
+
+    const board = matchCharLeaderboard(5);
+    expect(board[0]?.charId).toBe('tarot');
+    expect(board[0]?.winRate).toBe(100);
+    expect(board[0]?.avgRank).toBe(1);
+    const dealer = board.find((r) => r.charId === 'dealer');
+    expect(dealer?.winRate).toBe(50);
+    expect(dealer?.avgRank).toBe(1.5);
+    expect(board.find((r) => r.charId === 'miner')).toBeUndefined();
+    // clerk 陪跑 13 局（6+5+2 每场都有），仅在 dealer 落败的 3 局夺冠
+    const clerk = board.find((r) => r.charId === 'clerk');
+    expect(clerk?.games).toBe(13);
+    expect(clerk?.wins).toBe(3);
+    expect(clerk?.winRate).toBe(23.1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
