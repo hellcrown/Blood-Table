@@ -208,6 +208,7 @@ export function createBloodGame(
     itemBoundary: null,
     deferredDecisions: [],
     settleQueue: [],
+    playHooks: [],
     eraserType: null,
     irisGuess: null,
     final: null,
@@ -412,9 +413,14 @@ function grantLaundryOnReshuffle(gs: BloodState): void {
 
 /** 重洗前：从玩家弃牌区挑出磁力线圈宿主牌（返回待置于堆顶的牌；洗牌后再放回，否则会被洗进堆中部） */
 function extractCoilCards(p: BPlayer): BCard[] {
+  const hasCoil = (ch: ChipInst): boolean => {
+    if (ch.off) return false;
+    if (BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'magCoil') return true;
+    return ch.copiedFx?.k === 'magCoil'; // 复制芯片复制的线圈同样回顶
+  };
   const out: BCard[] = [];
   for (const c of [...p.discard]) {
-    if (p.chips.some((ch) => ch.on === c.id && !ch.off && BLOOD_MARKET_BY_ID.get(ch.def)?.effect.k === 'magCoil')) {
+    if (p.chips.some((ch) => ch.on === c.id && hasCoil(ch))) {
       p.discard = p.discard.filter((d) => d.id !== c.id);
       out.push(c);
     }
@@ -908,15 +914,17 @@ function startPlayPhase(gs: BloodState, now: number): void {
 
 /* ---------------- 出牌阶段 ---------------- */
 
-/** 牌的最终点数（含强化芯片修正，钳制 2-14；王牌为 0） */
+/** 牌的最终点数（含强化芯片与弹簧临时修正，钳制 2-14；王牌为 0） */
 export function finalRank(p: BPlayer, c: BCard): number {
   if (c.s == null || c.r === 0) return 0;
   let r = c.r;
   for (const ch of p.chips.filter((x) => x.on === c.id)) {
+    if (ch.off) continue;
     const eff = BLOOD_MARKET_BY_ID.get(ch.def)?.effect;
-    if (eff && eff.k === 'rankMod') r = Math.min(14, Math.max(2, r + eff.mod));
+    if (eff && eff.k === 'rankMod') r += eff.mod;
+    if (ch.springMod) r += ch.springMod; // 弹簧 ±X 与对决评估口径一致
   }
-  return r;
+  return Math.min(14, Math.max(2, r));
 }
 
 /** 出牌区最终花色是否全为黑色（joker/变色类芯片可宣告为黑即算；瞎掰王宣告成立时按宣告牌） */
@@ -1031,24 +1039,36 @@ export function bPlay(gs: BloodState, playerId: string, cardIds: string[], now: 
   p.locked = true;
   p.lastAction = '已出牌';
   pushLog(gs, 'action', `${pname(p)} 已暗扣 ${played.length} 张`);
-  // 出牌阶段结束的角色钩子（出牌区已被暗扣，尚可发动弃置/询问类技能）
+  // 出牌阶段结束的角色钩子（出牌区已被暗扣，尚可发动弃置/询问类技能）。
+  // 队列化：竞猜等挂起存活时不再被 !secretPending 门静默吞掉，逐个出队执行
   const ch = effChar(p);
-  if (ch === 'designer' && p.play.length > 0 && !gs.secretPending) {
-    gs.secretPending = { seat: p.id, kind: 'designerDiscard' };
-    gs.deadline = now + BLOOD_TURN_MS;
-  } else if (ch === 'student' && p.play.length > 0 && !gs.secretPending) {
-    gs.secretPending = { seat: p.id, kind: 'studentDump' };
-    gs.deadline = now + BLOOD_TURN_MS;
-  } else if (ch === 'bluffer' && p.play.length > 0 && !gs.secretPending) {
-    gs.secretPending = { seat: p.id, kind: 'blufferDeclare' };
-    gs.deadline = now + BLOOD_TURN_MS;
+  if (ch === 'designer' && p.play.length > 0) {
+    gs.playHooks.push({ seat: p.id, kind: 'designerDiscard' });
+  } else if (ch === 'student' && p.play.length > 0) {
+    gs.playHooks.push({ seat: p.id, kind: 'studentDump' });
+  } else if (ch === 'bluffer' && p.play.length > 0) {
+    gs.playHooks.push({ seat: p.id, kind: 'blufferDeclare' });
   }
+  processPlayHooks(gs, now);
   if (allDone(gs, (x) => x.locked)) tryStartReveal(gs, now);
+}
+
+/** 出队下一个出牌期角色钩子（无挂起时）；挂起存活则等其解决后再出队 */
+function processPlayHooks(gs: BloodState, now: number): void {
+  if (gs.secretPending || gs.playHooks.length === 0) return;
+  const next = gs.playHooks.shift()!;
+  const p = gs.players.find((x) => x.id === next.seat);
+  if (!p) {
+    processPlayHooks(gs, now);
+    return;
+  }
+  gs.secretPending = { seat: next.seat, kind: next.kind };
+  gs.deadline = now + BLOOD_TURN_MS;
 }
 
 /** 对决启动：存在未决的角色互动（高中生/设计师/特工/瞎掰王）时暂缓，待其结束后启动 */
 function tryStartReveal(gs: BloodState, now: number): void {
-  if (gs.secretPending) return;
+  if (gs.secretPending || gs.playHooks.length > 0) return;
   // 特工：全员锁定后（出牌区已确定）询问交换出牌区
   const agent = gs.players.find((p) => effChar(p) === 'agent' && !p.agentUsed);
   if (agent) {
@@ -1065,8 +1085,9 @@ function tryStartReveal(gs: BloodState, now: number): void {
   startReveal(gs, now);
 }
 
-/** 角色互动（出牌后）结束：若全员已锁定则启动对决 */
+/** 角色互动（出牌后）结束：出队剩余钩子；若全员已锁定则启动对决 */
 function afterPlayHookResolved(gs: BloodState, now: number): void {
+  processPlayHooks(gs, now);
   if (gs.phase === 'play' && allDone(gs, (x) => x.locked)) tryStartReveal(gs, now);
 }
 
@@ -1245,7 +1266,9 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
       p.blood += eff.blood;
       pushLog(gs, 'action', `${pname(p)} 的【${def.name}】发动：获得 ${eff.blood} 血筹`);
     } else if (eff.k === 'revealSteal') {
-      gs.stealPending = { seat: p.id, blood: eff.blood };
+      // 同玩家多张镀层（夺）合并为一次掠夺（总额），避免后者覆盖前者少结算
+      if (gs.stealPending && gs.stealPending.seat === p.id) gs.stealPending.blood += eff.blood;
+      else gs.stealPending = { seat: p.id, blood: eff.blood };
       pushLog(gs, 'action', `${pname(p)} 的【${def.name}】发动：需选择掠夺目标`);
     }
   }
@@ -1338,6 +1361,8 @@ export function bRevealChipTarget(
   if (!myChip || myChip.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
   const target = bySeat(gs, seat);
   if (!target) throw new BloodError('BAD_TARGET', '目标不存在');
+  // 复制自己的芯片会让同一效果结算两次（settleWin/revealGain 翻倍等），禁止
+  if (d.t === 'copy' && target.id === p.id) throw new BloodError('BAD_TARGET', '不能复制自己的芯片');
   // 只能作用于目标出牌区的芯片：宿主牌 id 可被枚举，不限区域等于探测暗置弃牌区/复制未上场芯片
   const targetChip = target.chips.find(
     (ch) => ch.on === cardId && ch.def === defId && !ch.off && target.play.some((card) => card.id === ch.on),
@@ -1355,12 +1380,24 @@ export function bRevealChipTarget(
       p.blood += srcFx.blood;
       pushLog(gs, 'action', `【复制芯片】发动：${pname(p)} 获得 ${srcFx.blood} 血筹`);
     } else if (srcFx.k === 'revealSteal') {
-      gs.stealPending = { seat: p.id, blood: srcFx.blood };
-      pushLog(gs, 'action', `【复制芯片】发动：${pname(p)} 需选择掠夺目标`);
+      // 与原版镀层（夺）同规则：无合法目标直接落空（否则 stealPending 无解会卡死亮牌窗口）
+      const anyValid = gs.players.some((o) => o.id !== p.id && o.blood >= srcFx.blood);
+      if (anyValid) {
+        gs.stealPending = { seat: p.id, blood: srcFx.blood };
+        pushLog(gs, 'action', `【复制芯片】发动：${pname(p)} 需选择掠夺目标`);
+      } else {
+        pushLog(gs, 'action', `【复制芯片】掠夺无合法目标，落空`);
+      }
     } else if (srcFx.k === 'shieldFx') {
       const rest = (pend.queue ?? []).slice();
       const shieldDecision: RevealDecision = { t: 'shield', chipId: myChip.id, cardId: d.cardId, defId: 'shield' };
       gs.secretPending = { ...pend, kind: 'revealDecide', queue: [shieldDecision, ...rest], decision: shieldDecision };
+      return;
+    } else if (srcFx.k === 'springFx') {
+      // 复制到的弹簧同样当场决策 ±X（springMod 记在复制芯片实例上，chipEffectsFor 会消费）
+      const rest = (pend.queue ?? []).slice();
+      const springDecision: RevealDecision = { t: 'spring', chipId: myChip.id, cardId: d.cardId, defId: 'spring' };
+      gs.secretPending = { ...pend, kind: 'revealDecide', queue: [springDecision, ...rest], decision: springDecision };
       return;
     }
   } else {
@@ -1382,6 +1419,7 @@ export function bSkipDecision(gs: BloodState, playerId: string, now: number): vo
 /** 消磁枪：使用者选定要失效的目标芯片 */
 export function bDemagPick(gs: BloodState, playerId: string, cardId: string, defId: string, now: number): void {
   void now;
+  if (gs.phase !== 'reveal') throw new BloodError('BAD_PHASE', '消磁枪只能在对决阶段使用');
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'demagPick' || pend.seat !== playerId) {
     throw new BloodError('PENDING', '当前没有待选择的消磁目标');
@@ -1573,6 +1611,7 @@ export function bUseItem(gs: BloodState, playerId: string, itemId: string | null
   p.items = p.items.filter((i) => i.id !== itemId);
   // 防护屏障询问：受害者为亮牌顺序中的下家暂不可知，按目标选择后再拦截（demagTarget 分支内处理）
   gs.secretPending = { seat: p.id, kind: 'demagTarget', defId: item.def };
+  gs.deadline = now + BLOOD_TURN_MS; // 消磁链（选来源→选芯片）整段重置窗口，防中途超时泄漏脏挂起
   pushLog(gs, 'action', `${pname(p)} 使用【消磁枪】：请选择要失效的强化芯片来源`);
 }
 
@@ -1968,6 +2007,13 @@ function settle(gs: BloodState, now: number): void {
     a.discard = a.discard.filter((c) => !gs.agentSwap!.bCards.includes(c.id));
     a.discard.push(...backA);
     b.discard.push(...backB);
+    // 芯片随宿主牌换回原属主（与交换时对应）
+    const aSet = new Set(gs.agentSwap.aCards);
+    const bSet = new Set(gs.agentSwap.bCards);
+    const aChips = a.chips.filter((ch) => aSet.has(ch.on));
+    const bChips = b.chips.filter((ch) => bSet.has(ch.on));
+    a.chips = a.chips.filter((ch) => !aSet.has(ch.on)).concat(bChips);
+    b.chips = b.chips.filter((ch) => !bSet.has(ch.on)).concat(aChips);
     pushLog(gs, 'action', `🤝 ${pname(a)} 与 ${pname(b)}【特工】归还交换的出牌区`);
     gs.agentSwap = null;
   }
@@ -2191,6 +2237,8 @@ function isChipInsertable(p: BPlayer, card: BCard, def: import('@shared/bloodCar
   if (p.chips.some((c) => c.on === card.id)) return false;
   if (def.noJoker && card.s == null) return false; // 不可插入JOKER中
   if (def.effect.k === 'rankMod') {
+    // 点数芯片不得插入王：否则王失去万能性被钉成低牌（规则书未定义该交互，直接禁止）
+    if (card.s == null) return false;
     const v = card.r + def.effect.mod;
     return v >= 2 && v <= 14;
   }
@@ -2629,6 +2677,8 @@ export function bRefreshPick(gs: BloodState, playerId: string, slots: number[], 
   pushLog(gs, 'action', `${pname(p)} 使用【再来一批】换掉 ${moved.length} 张黑市牌`);
   refillMarket(gs);
   gs.secretPending = null;
+  // 黑市重排后 slot 索引失效：走私客的标记随之作废（按 defId 追踪需泄漏原价信息，保守清空）
+  if (moved.length > 0) gs.smugglerMark = null;
   // 可立即再进行一次购买：不推进回合
 }
 
@@ -3062,6 +3112,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         if (gs.secretPending.defId) gs.recycle.push(gs.secretPending.defId);
         pushLog(gs, 'action', '宣告超时，效果落空弃置');
         gs.secretPending = null;
+        processPlayHooks(gs, now); // 竞猜超时后补出队角色钩子
       }
       for (const p of gs.players) {
         if (gs.phase !== 'play') break;
@@ -3107,6 +3158,14 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (gs.secretPending?.kind === 'barrierAsk') {
         pushLog(gs, 'action', '【防护屏障】询问超时，视为允许生效');
         resolveBarrier(gs, false, now);
+        return true;
+      }
+      // 消磁枪二级选芯片超时：落空弃置（不处理会泄漏脏 pending 卡死 settle）
+      if (gs.secretPending?.kind === 'demagPick') {
+        if (gs.secretPending.defId) gs.recycle.push(gs.secretPending.defId);
+        pushLog(gs, 'action', '【消磁枪】选择超时，效果落空弃置');
+        gs.secretPending = null;
+        nextRevealOrSettle(gs, now);
         return true;
       }
       const p = bySeat(gs, gs.turnSeat ?? -1);
@@ -3443,6 +3502,7 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
       }
       // 使用者自选目标玩家的具体芯片
       gs.secretPending = { seat: p.id, kind: 'demagPick', defId: pend.defId ?? 'demag', targetSeat: t.id };
+      gs.deadline = now + BLOOD_TURN_MS; // 二级选芯片重置窗口（同消磁链整体时限）
       pushLog(gs, 'action', `【消磁枪】${pname(p)} 请选择 ${pname(t)} 出牌区要失效的芯片`);
       return;
     }
@@ -3572,7 +3632,8 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
       bSecretDelete(gs, p.id, [], now);
       return;
     case 'violentTarget':
-      bViolent(gs, p.id, -1, now);
+      // 托管按金科玉律默认对自己发动（删自己堆顶 3 张），而非直接落空
+      bViolent(gs, p.id, p.seat, now);
       return;
     case 'refreshPick':
       bRefreshPick(gs, p.id, [], now);
@@ -3859,6 +3920,8 @@ export function bGamblerGuess(gs: BloodState, playerId: string, seat: number, no
   gs.gamblerGuess = { by: playerId, seat };
   gs.secretPending = null;
   pushLog(gs, 'action', `🎲 ${pname(p)}【职业赌徒】竞猜 ${pname(t)} 本回合夺魁${t.id === p.id ? '（猜自己）' : ''}`);
+  processPlayHooks(gs, now); // 竞猜期间出牌者的角色钩子在此补出队
+  if (gs.phase === 'play' && allDone(gs, (x) => x.locked)) tryStartReveal(gs, now);
 }
 
 /** 炸弹客：换牌阶段前宣告 0-2 中的一个数字 X，获得 X 血筹 */
@@ -3984,6 +4047,13 @@ export function bAgentDecide(gs: BloodState, playerId: string, accept: boolean, 
     const tmp = agent.play;
     agent.play = t.play;
     t.play = tmp;
+    // 芯片随宿主牌换属主：否则评估与结算（镀层/自毁等按属主出牌区判定）双双丢失
+    const aSet = new Set(aCards);
+    const bSet = new Set(bCards);
+    const aChips = agent.chips.filter((ch) => bSet.has(ch.on));
+    const bChips = t.chips.filter((ch) => aSet.has(ch.on));
+    agent.chips = agent.chips.filter((ch) => !bSet.has(ch.on)).concat(bChips);
+    t.chips = t.chips.filter((ch) => !aSet.has(ch.on)).concat(aChips);
     gs.agentSwap = { a: agent.id, b: t.id, aCards, bCards };
     pushLog(gs, 'action', `🤝 ${pname(t)} 接受交换：双方出牌区互换（结算结束时归还）`);
   } else {

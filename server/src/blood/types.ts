@@ -275,6 +275,8 @@ export interface BloodState {
   deferredDecisions: { seat: string; decision: RevealDecision }[];
   /** 结算阶段的角色互动队列（魅魔/票贩子/炸鸡店老板） */
   settleQueue: { seat: string; kind: 'succubusSteal' | 'scalperDeal' | 'fryerDel' }[];
+  /** 出牌阶段结束的角色钩子队列（设计师/高中生/瞎掰王）：出牌即入队，避免被竞猜等挂起挡掉 */
+  playHooks: { seat: string; kind: 'designerDiscard' | 'studentDump' | 'blufferDeclare' }[];
   /** 抢跑：本局是否已发放首次夺魁奖励 */
   firstChampDone: boolean;
   /** 连胜：上一回合夺魁者 id（null=无）与当前连击数 */

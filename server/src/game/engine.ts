@@ -230,11 +230,11 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
     }
     case 'allin': {
       const to = p.bet + p.chips;
-      if (to > gs.currentBet) {
-        // 全下加注不受最小加注/短全下限制
+      if (to > gs.currentBet && legal.canRaise) {
+        // 全下加注不受最小加注限制（但受 shortAllIn「已行动者不可再加注」约束，防绕过）
         doRaise(gs, p, to, true);
       } else {
-        // 全下跟注
+        // 全下跟注（含被 shortAllIn 限制只能跟的场景）
         const amount = p.chips;
         p.chips = 0;
         p.bet += amount;
@@ -316,6 +316,16 @@ function closeBettingRound(gs: GState, now: number): void {
   gs.shortAllIn = false;
 
   if (gs.phase === 'river') {
+    showdown(gs, now);
+    return;
+  }
+  // 对手已全部全下时无人能跟注：跳过剩余下注街直接发牌摊牌（防向空池白投筹码）
+  if (canActPlayers(gs).length <= 1 && activePlayers(gs).length >= 2) {
+    const idx0 = STREET_ORDER.indexOf(gs.phase as (typeof STREET_ORDER)[number]);
+    for (let i = idx0 + 1; i < STREET_ORDER.length; i++) {
+      gs.phase = STREET_ORDER[i];
+      dealCommunity(gs);
+    }
     showdown(gs, now);
     return;
   }

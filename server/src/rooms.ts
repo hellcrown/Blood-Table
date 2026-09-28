@@ -317,7 +317,7 @@ export class RoomManager {
         this.handleAct(room, session, msg);
         return;
       case 'nextHand':
-        this.handleNextHand(room);
+        this.handleNextHand(room, session);
         return;
       case 'rematch':
         this.handleRematch(room, session);
@@ -831,8 +831,14 @@ export class RoomManager {
     }
     const player =
       g && room.mode === 'classic' ? (g as GState).players.find((p) => p.id === session.id) : undefined;
-    if (g && player && player.inHand && !player.folded && BETTING_PHASES.has(g.phase)) {
-      // 手牌进行中：标记断线，等结算后移除；到其回合会自动弃牌
+    if (
+      g &&
+      player &&
+      BETTING_PHASES.has(g.phase) &&
+      ((player.inHand && !player.folded) || player.committed > 0)
+    ) {
+      // 手牌进行中：标记断线，等结算后移除；到其回合会自动弃牌。
+      // 已弃牌但本手有投入（committed>0）同样延后移除——即时删除会让其投入随玩家从池中凭空消失。
       room.pendingRemove.add(session.id);
       session.connected = false;
       if (session.ws) {
@@ -881,6 +887,12 @@ export class RoomManager {
         room.game = engine.createGame(room.settings, room.maxPlayers, players);
       }
       if (room.game.phase !== 'waiting') return;
+      // 复盘等待期新入座的玩家补进对局（否则其座位不可见、开局也不发牌，且人数不足会让 startHand 抛错卡死房间）
+      const cg = room.game as GState;
+      for (const s of room.sessions.values()) {
+        if (s.spectator || cg.players.some((p) => p.id === s.id)) continue;
+        engine.addPlayer(cg, { id: s.id, name: s.name, seat: s.seat, chips: room.settings.startChips });
+      }
       engine.startHand(room.game, now);
       room.matchLogged = false;
       room.gameStartedAt = now;
@@ -1003,6 +1015,7 @@ export class RoomManager {
   private handleReplaceBot(room: Room, session: Session, msg: Extract<C2S, { t: 'replaceBot' }>): void {
     if (room.mode !== 'blood' || !room.game) throw new GameError('IN_GAME', '当前没有可接替的对局');
     const bs = room.game as BloodState;
+    if (bs.phase === 'gameover') throw new GameError('IN_GAME', '对局已结束，请等待房主返回房间');
     if (!session.spectator) throw new GameError('NOT_SPECTATOR', '你不是观战者');
     const seat = Math.floor(msg.seat);
     const bot = [...room.sessions.values()].find((s) => s.bot && s.seat === seat);
@@ -1112,7 +1125,8 @@ export class RoomManager {
     this.broadcast(room);
   }
 
-  private handleNextHand(room: Room): void {
+  private handleNextHand(room: Room, session: Session): void {
+    if (session.spectator) return; // 观战者不能替全桌跳过结算等待
     const g = room.game;
     if (!g || room.mode !== 'classic' || (g as GState).phase !== 'result') return;
     this.reconcileRemoved(room);

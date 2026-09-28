@@ -129,7 +129,8 @@ describe('下注规则', () => {
     expect(legalFirst.canCall).toBe(true);
     expect(legalFirst.callAmount).toBe(50);
     act(gs, first, { k: 'call' });
-    expect(gs.phase).toBe('turn'); // 双方全下/匹配后发转牌
+    // 对手已全下：跳过剩余下注街直接发完公共牌摊牌（防向无人能跟的池白投筹码）
+    expect(gs.phase).toBe('result');
   });
 
   it('超时托管：可让牌则让牌，面对下注则弃牌', () => {

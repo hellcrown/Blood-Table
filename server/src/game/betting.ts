@@ -35,8 +35,8 @@ export function nextWithChips(gs: GState, fromSeat: number): GPlayer | null {
 export function roundComplete(gs: GState): boolean {
   const act = canActPlayers(gs);
   if (act.length === 0) return true;
-  // 只剩一名可行动者且已匹配当前注（其余全下或弃牌）→ 无需再行动
-  if (act.length === 1) return act[0].bet >= gs.currentBet;
+  // 只剩一名可行动者：还须已行动过（大盲选项——盲注不算行动，全员平跟时 BB 仍须获得让牌/加注权）
+  if (act.length === 1) return act[0].acted && act[0].bet >= gs.currentBet;
   return act.every((p) => p.acted && p.bet >= gs.currentBet);
 }
 

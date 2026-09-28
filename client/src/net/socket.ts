@@ -120,9 +120,15 @@ class Net {
         this.errorListeners.forEach((l) => l(msg.code, msg.msg));
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws === ws) this.ws = null;
       this.setStatus('closed');
+      // 被更新的连接顶掉（同 token 双标签页互踢）：清凭据回大厅，停止重连避免互踢死循环
+      if (ev.code === 4000) {
+        this.clearToken();
+        this.setView(null);
+        return;
+      }
       this.scheduleReconnect();
     };
   }

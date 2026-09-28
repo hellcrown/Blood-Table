@@ -93,13 +93,14 @@ export function evalBloodHand(cards: EvalCard[]): BloodHandResult {
       }
       const bestRank = [...rankFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
       const bestSuit = [...suitFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      // 全灵活手牌（无固定牌可参照）时取最高点与黑桃，恒不劣于盲取首个候选
+      const fallbackRank = bestRank ?? 14;
+      const fallbackSuit: Suit = bestSuit ?? 's';
       options = options.map((o) => [
         // 优先复制“最多点数 + 最多花色”的组合（凑同花多条），再退而求其次
-        (bestRank != null && bestSuit != null
-          ? o.find((p) => p.r === bestRank && p.s === bestSuit)
-          : undefined) ??
-          (bestRank != null ? o.find((p) => p.r === bestRank) : undefined) ??
-          (bestSuit != null ? o.find((p) => p.s === bestSuit) : undefined) ??
+        o.find((p) => p.r === fallbackRank && p.s === fallbackSuit) ??
+          o.find((p) => p.r === fallbackRank) ??
+          o.find((p) => p.s === fallbackSuit) ??
           o[0],
       ]);
       product = options.length;
@@ -240,6 +241,7 @@ export function toEvalCard(
 
 /**
  * 仿制印章：将带印章的牌候选改为“出牌区其他牌的基础牌面（无视其芯片、不含JOKER）”的并集。
+ * 仅排除自身宿主——对方印章牌的宿主基础牌面同样是合法仿制目标（互仿 = 互换基础面，良定义）。
  * 近似实现：点数×花色取并集的笛卡尔积（可能包含实际不存在的点花组合），供评估取最优。
  */
 export function applyImitate(
@@ -248,15 +250,16 @@ export function applyImitate(
   imitate: boolean[],
 ): EvalCard[] {
   if (!imitate.some(Boolean)) return cards;
-  const ranks = new Set<number>();
-  const suits = new Set<Suit>();
-  raws.forEach((raw, i) => {
-    if (imitate[i] || raw.s == null) return;
-    ranks.add(raw.r);
-    suits.add(raw.s);
+  return cards.map((c, i) => {
+    if (!imitate[i]) return c;
+    const ranks = new Set<number>();
+    const suits = new Set<Suit>();
+    raws.forEach((raw, j) => {
+      if (j === i || raw.s == null) return;
+      ranks.add(raw.r);
+      suits.add(raw.s);
+    });
+    if (ranks.size === 0) return c; // 没有可仿制的目标（出牌区只有自己/JOKER）
+    return { ...c, ranks: [...ranks].sort((a, b) => a - b), suits: [...suits] };
   });
-  if (ranks.size === 0) return cards; // 没有可仿制的目标（出牌区只有自己/JOKER）
-  const rs = [...ranks].sort((a, b) => a - b);
-  const ss = [...suits];
-  return cards.map((c, i) => (imitate[i] ? { ...c, ranks: rs, suits: ss } : c));
 }
