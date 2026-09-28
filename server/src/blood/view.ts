@@ -148,8 +148,9 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
     case 'play':
       return p.locked ? { k: 'wait' } : { k: 'play' };
     case 'reveal': {
-      if (gs.turnSeat !== p.seat) return { k: 'wait' };
+      // 掠夺优先于座位窗口判断：复制芯片的延迟决策发生在全员摊牌后（turnSeat 已不指向持有者）
       if (gs.stealPending && gs.stealPending.seat === p.id) return { k: 'steal' };
+      if (gs.turnSeat !== p.seat) return { k: 'wait' };
       if (p.items.some((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'demagNullify')) {
         return { k: 'revealItem' };
       }

@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, createHash, timingSafeEqual } from 'node:crypto';
 import type { RawData, WebSocket } from 'ws';
 import type { C2S, GameMode, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
@@ -105,11 +105,18 @@ function cleanName(raw: unknown, fallbackSeed: number): string {
   return s || `玩家${fallbackSeed % 100}`;
 }
 
+/** 恒时比较（哈希后定长对比），防逐字符比较的时序侧信道 */
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
 /** 房间密码校验（无密码房间恒通过）；返回 null=通过，否则为错误码 */
 export function verifyRoomPassword(room: Pick<Room, 'password'>, password: unknown): 'WRONG_PASSWORD' | null {
   if (!room.password) return null;
   const pw = typeof password === 'string' ? password : '';
-  return pw === room.password ? null : 'WRONG_PASSWORD';
+  return safeEqual(pw, room.password) ? null : 'WRONG_PASSWORD';
 }
 
 /** 每连接消息令牌桶（持续 ~6条/秒，突发 30；正常游戏远低于此） */
@@ -121,6 +128,38 @@ function takeMessageSlot(ws: WebSocket): boolean {
     msgBuckets.set(ws, bucket);
   }
   return bucket.take();
+}
+
+/** 数值参数安全钳制：客户端可发任意 JSON，NaN/Infinity 一旦入库会污染整局筹码与座位校验 */
+function clampInt(v: unknown, min: number, max: number, fallback: number): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** 数组参数边界校验：客户端可发任意 JSON（数字/对象/null），非字符串数组一律按规范错误拒绝，防引擎内 TypeError */
+function strArr(v: unknown): string[] {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
+    throw new blood.BloodError('BAD_MSG', '参数格式错误');
+  }
+  return v as string[];
+}
+
+/** 通用数组校验（元素为对象时用，如 bBlufferDeclare 的宣告列表） */
+function arrOf(v: unknown): unknown[] {
+  if (v == null) return [];
+  if (!Array.isArray(v)) throw new blood.BloodError('BAD_MSG', '参数格式错误');
+  return v;
+}
+
+/** 数字数组校验（黑市栏位序号等） */
+function numArr(v: unknown): number[] {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'number' || !Number.isFinite(x))) {
+    throw new blood.BloodError('BAD_MSG', '参数格式错误');
+  }
+  return v as number[];
 }
 
 export class RoomManager {
@@ -285,16 +324,16 @@ export class RoomManager {
         blood.bPickChar(bs, pid, msg.charId, now);
         break;
       case 'bSetup':
-        blood.bSetup(bs, pid, msg.removed ?? [], now);
+        blood.bSetup(bs, pid, strArr(msg.removed), now);
         break;
       case 'bSwap':
-        blood.bSwap(bs, pid, msg.cardIds ?? [], (msg as { drawCount?: number }).drawCount, now);
+        blood.bSwap(bs, pid, strArr(msg.cardIds), (msg as { drawCount?: number }).drawCount, now);
         break;
       case 'bSwapStop':
         blood.bSwapStop(bs, pid, now);
         break;
       case 'bPlay':
-        blood.bPlay(bs, pid, msg.cardIds ?? [], now);
+        blood.bPlay(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bUseItem':
         blood.bUseItem(bs, pid, msg.itemId ?? null, now);
@@ -321,7 +360,7 @@ export class RoomManager {
         blood.bEraserClaim(bs, pid, msg.cat, now);
         break;
       case 'bPreciseDel':
-        blood.bPreciseDel(bs, pid, msg.cardIds ?? [], now);
+        blood.bPreciseDel(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bPullChip':
         blood.bPullChip(bs, pid, msg.cardId, now);
@@ -357,19 +396,19 @@ export class RoomManager {
         blood.bInsertSkip(bs, pid, now);
         break;
       case 'bSecretDelete':
-        blood.bSecretDelete(bs, pid, msg.cardIds ?? [], now);
+        blood.bSecretDelete(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bViolent':
         blood.bViolent(bs, pid, msg.seat, now);
         break;
       case 'bRefreshPick':
-        blood.bRefreshPick(bs, pid, msg.slots ?? [], now);
+        blood.bRefreshPick(bs, pid, numArr(msg.slots), now);
         break;
       case 'bPassBuy':
         blood.bPassBuy(bs, pid, now);
         break;
       case 'bRemove':
-        blood.bRemove(bs, pid, msg.cardIds ?? [], now);
+        blood.bRemove(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bRemoveDone':
         blood.bRemoveDone(bs, pid, now);
@@ -394,7 +433,7 @@ export class RoomManager {
         blood.bStudentDump(bs, pid, (msg as { accept?: boolean }).accept ?? false, (msg as { cardId?: string }).cardId, now);
         break;
       case 'bDesignerDiscard':
-        blood.bDesignerDiscard(bs, pid, msg.cardIds ?? [], now);
+        blood.bDesignerDiscard(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bDogTarget':
         blood.bDogTarget(bs, pid, msg.seat, now);
@@ -409,25 +448,25 @@ export class RoomManager {
         blood.bFryerDraw(bs, pid, now);
         break;
       case 'bFryerDel':
-        blood.bFryerDel(bs, pid, msg.cardIds ?? [], (msg as { done?: boolean }).done ?? false, now);
+        blood.bFryerDel(bs, pid, strArr(msg.cardIds), (msg as { done?: boolean }).done ?? false, now);
         break;
       case 'bCurseHide':
         blood.bCurseHide(bs, pid, (msg as { cardId?: string }).cardId ?? '', now);
         break;
       case 'bCurseTake':
-        blood.bCurseTake(bs, pid, msg.cardIds ?? [], now);
+        blood.bCurseTake(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bUndertakerSwap':
-        blood.bUndertakerSwap(bs, pid, msg.cardIds ?? [], now);
+        blood.bUndertakerSwap(bs, pid, strArr(msg.cardIds), now);
         break;
       case 'bGodPeekChoice':
         blood.bGodPeekChoice(bs, pid, (msg as { mode?: 'extra' | 'blood' }).mode ?? 'blood', now);
         break;
       case 'bDetectivePick':
-        blood.bDetectivePick(bs, pid, (msg as { mode?: 'top' | 'bottom' | 'skip' }).mode ?? 'skip', msg.cardIds ?? [], now);
+        blood.bDetectivePick(bs, pid, (msg as { mode?: 'top' | 'bottom' | 'skip' }).mode ?? 'skip', strArr(msg.cardIds), now);
         break;
       case 'bHackerSetup':
-        blood.bHackerSetup(bs, pid, msg.removed ?? [], now);
+        blood.bHackerSetup(bs, pid, strArr(msg.removed), now);
         break;
       case 'bSmugglerMark':
         blood.bSmugglerMark(bs, pid, (msg as { slot?: number }).slot ?? -1, now);
@@ -469,7 +508,9 @@ export class RoomManager {
         blood.bBlufferDeclare(
           bs,
           pid,
-          (msg as { declared?: { id: string; r: number; s: Suit | null }[] }).declared ?? [],
+          arrOf(
+            (msg as { declared?: { id: string; r: number; s: Suit | null }[] }).declared,
+          ) as { id: string; r: number; s: Suit | null }[],
           now,
         );
         break;
@@ -819,13 +860,13 @@ export class RoomManager {
     if (g && room.mode === 'blood') throw new GameError('IN_GAME', '对局进行中不能修改设置');
     if (g && g.phase !== 'waiting') throw new GameError('IN_GAME', '对局进行中不能修改设置');
     const s = room.settings;
-    if (msg.sb != null) s.sb = Math.max(1, Math.floor(msg.sb));
-    if (msg.bb != null) s.bb = Math.max(2, Math.floor(msg.bb));
-    if (msg.startChips != null) s.startChips = Math.max(20, Math.floor(msg.startChips));
+    if (msg.sb != null) s.sb = clampInt(msg.sb, 1, 1_000_000, s.sb);
+    if (msg.bb != null) s.bb = clampInt(msg.bb, 2, 1_000_000, s.bb);
+    if (msg.startChips != null) s.startChips = clampInt(msg.startChips, 20, 1_000_000, s.startChips);
     if (s.bb < s.sb) s.bb = s.sb;
     if (s.startChips < s.bb) s.startChips = s.bb;
     if (msg.maxPlayers != null) {
-      const mp = Math.min(4, Math.max(2, Math.floor(msg.maxPlayers)));
+      const mp = clampInt(msg.maxPlayers, 2, 4, room.maxPlayers);
       const stranded = [...room.sessions.values()].some((x) => x.seat >= mp);
       if (stranded) throw new GameError('SEATS_OCCUPIED', '有玩家坐在更大号座位，无法缩小房间');
       room.maxPlayers = mp;
@@ -1025,7 +1066,11 @@ export class RoomManager {
   private handleAct(room: Room, session: Session, msg: Extract<C2S, { t: 'act' }>): void {
     const g = room.game;
     if (!g || room.mode !== 'classic') throw new GameError('NO_GAME', '对局尚未开始');
-    engine.applyAction(g as GState, session.seat, msg.action, Date.now());
+    if (session.spectator) throw new GameError('SPECTATING', '观战中不能执行玩家操作');
+    // 按会话身份定位玩家（而非直接信任 seat），观战者/已移除会话无法替座行动
+    const p = (g as GState).players.find((x) => x.id === session.id);
+    if (!p) throw new GameError('NO_SEAT', '你不在当前对局中');
+    engine.applyAction(g as GState, p.seat, msg.action, Date.now());
     this.broadcast(room);
   }
 

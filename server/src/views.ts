@@ -66,7 +66,8 @@ export function buildView(room: Room, viewerId: string | null): TableView {
   const revealAll = g.phase === 'result' || g.phase === 'gameover';
   const players: SeatView[] = g.players.map((p) => {
     const self = p.id === viewerId;
-    const revealed = revealAll && p.inHand && !p.folded;
+    // 无人跟注（其余全弃牌）的手牌不亮赢家底牌，只有真实摊牌才公开
+    const revealed = g.showdown && revealAll && p.inHand && !p.folded;
     return {
       id: p.id,
       name: p.name,

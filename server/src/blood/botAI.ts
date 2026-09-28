@@ -593,8 +593,10 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'steal': {
+      // 掠夺金额可能是 2+（复制芯片），只查 >=1 会选出血筹不足的目标被引擎拒绝
+      const need = gs.stealPending?.blood ?? 1;
       const t = richestOpp(gs, p);
-      if (t && t.blood >= 1) {
+      if (t && t.blood >= need) {
         blood.bSteal(gs, p.id, t.seat, now);
         return true;
       }
@@ -757,7 +759,8 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
     }
     case 'pinpointVictim': {
       const rank = prompt.rank ?? 0;
-      const matches = p.discard.filter((c) => c.r === rank).sort((a, b) => a.r - b.r);
+      // 引擎按最终点数（含芯片修正）校验，按基础点数选牌会被拒绝
+      const matches = p.discard.filter((c) => blood.finalRank(p, c) === rank).sort((a, b) => a.r - b.r);
       if (matches[0]) {
         blood.bPinpointVictimPick(gs, p.id, matches[0].id, now);
         return true;
@@ -943,7 +946,11 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'cleanerDel': {
-      const t = mostTicketsOpp(gs, p);
+      // cardId 为空时引擎从目标抽牌堆随机删；目标抽牌堆/弃牌区全空会被拒绝，改为选有牌可删的目标
+      const cands = gs.players
+        .filter((o) => o.id !== p.id && (o.draw.length > 0 || o.discard.length > 0))
+        .sort((a, b) => b.tickets - a.tickets);
+      const t = cands[0];
       if (t) {
         blood.bCleanerDel(gs, p.id, t.seat, '', now);
         return true;
@@ -1116,7 +1123,12 @@ function actRemove(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bo
 /* ---- 对决期芯片决策 ---- */
 function actRevealDecide(gs: BloodState, p: BPlayer, t: string | undefined, chipId: string, now: number): boolean {
   if (t === 'spring') {
-    if (p.blood >= 5) blood.bSpringUse(gs, p.id, chipId, 2, now);
+    // ±2 可能越界（2-14 钳制）：按宿主牌最终点数选可用修正量，无可用量则跳过
+    const chip = p.chips.find((c) => c.id === chipId);
+    const card = chip ? p.play.find((c) => c.id === chip.on) : undefined;
+    const base = card ? blood.finalRank(p, card) : 0;
+    const mod = base + 2 <= 14 ? 2 : base + 1 <= 14 ? 1 : base - 1 >= 2 ? -1 : 0;
+    if (mod !== 0 && p.blood >= Math.abs(mod)) blood.bSpringUse(gs, p.id, chipId, mod, now);
     else blood.bSkipDecision(gs, p.id, now);
     return true;
   }

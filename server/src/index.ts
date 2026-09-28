@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchStats } from './matchlog';
@@ -46,6 +46,13 @@ function issueAdminToken(): string {
   const token = randomBytes(24).toString('hex');
   adminTokens.set(token, now + 24 * 3600_000);
   return token;
+}
+
+/** 恒时比较：哈希后定长对比，避免逐字符比较的时序侧信道泄漏密钥/密码 */
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
 }
 
 function isAdmin(req: http.IncomingMessage): boolean {
@@ -103,6 +110,15 @@ function isTailscaleIp(ip: string): boolean {
   return m != null && Number(m[1]) >= 64 && Number(m[1]) <= 127;
 }
 
+/** 私有网段（含 IPv6 本机/ULA）：公网访客不应拿到服务器的内网地址清单 */
+function isPrivateIp(ip: string): boolean {
+  if (ip.startsWith('::ffff:')) return isPrivateIp(ip.slice(7)); // IPv4-mapped
+  if (ip === '::1' || ip.startsWith('fc') || ip.startsWith('fd')) return true;
+  if (/^127\./.test(ip)) return true;
+  if (isTailscaleIp(ip)) return true;
+  return /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
 /** 本机地址：Tailscale 虚拟内网 + 常规局域网 IPv4（可能有多块网卡/虚拟网卡，全部列出） */
 const { tailscaleIps, lanIps } = (() => {
   const tailscale: string[] = [];
@@ -132,20 +148,17 @@ const MIME: Record<string, string> = {
 function serveStatic(pathname: string, res: http.ServerResponse): void {
   const root = CLIENT_DIST;
   const rel = pathname === '/' ? '/index.html' : pathname;
-  let filePath = path.normalize(path.join(root, rel));
-  if (!filePath.startsWith(root)) {
+  const filePath0 = path.normalize(path.join(root, rel));
+  // 必须仍在静态根目录内（带分隔符边界，防同名前缀目录）；URL 构造器已归一化 ..，此处双保险
+  if (!filePath0.startsWith(root + path.sep)) {
     res.writeHead(403);
     res.end('Forbidden');
     return;
   }
+  let filePath = filePath0;
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     // SPA 回退
     filePath = path.join(root, 'index.html');
-  }
-  if (!fs.existsSync(filePath)) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('前端尚未构建：请先执行 npm run build（开发模式请访问 Vite 端口 5173）');
-    return;
   }
   const ext = path.extname(filePath).toLowerCase();
   res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
@@ -177,8 +190,10 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/info') {
+    // 内网地址清单只下发给内网来源：公网访客拿到它纯属服务器信息泄漏
+    const priv = isPrivateIp(clientIp(req));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ port: PORT, lan: lanIps, tailscale: tailscaleIps }));
+    res.end(JSON.stringify({ port: PORT, lan: priv ? lanIps : [], tailscale: priv ? tailscaleIps : [] }));
     return;
   }
   if (url.pathname === '/api/admin/login' && req.method === 'POST') {
@@ -202,7 +217,7 @@ const server = http.createServer((req, res) => {
       } catch {
         /* 忽略解析失败 */
       }
-      if (key !== ADMIN_KEY) {
+      if (!safeEqual(key, ADMIN_KEY)) {
         recordLoginFail(req);
         send(401, { ok: false, msg: '管理密码错误' });
         return;

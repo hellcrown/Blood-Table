@@ -611,20 +611,22 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成当前角色技能抉择');
   if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
   const tarot = effChar(p) === 'tarot';
-  // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）
-  const draw = tarot ? Math.max(0, Math.min(2, Math.floor(drawCount ?? 0))) : 0;
+  // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）；drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）
+  const dc = Number(drawCount ?? 0);
+  const draw = tarot && Number.isFinite(dc) ? Math.max(0, Math.min(2, Math.floor(dc))) : 0;
   const maxN = Math.min(tarot ? 2 : charSwapMax(effChar(p)), p.hand.length + draw);
   if (cardIds.length > maxN) {
     throw new BloodError('TOO_MANY', tarot ? '塔罗师每次换牌最多弃置2张' : effChar(p) === 'idol' ? '弃置张数不能超过手牌数' : '每次换牌最多弃置3张');
   }
+  // 先完成弃牌校验再执行任何状态变更（防畸形 cardIds 抛错后留下「已抽牌未弃牌」的脏状态）
+  const set = new Set(cardIds);
+  const discardCards = p.hand.filter((c) => set.has(c.id));
+  if (discardCards.length !== cardIds.length) throw new BloodError('BAD_CARD', '手牌不存在');
   if (draw > 0) {
     const drawn = drawN(gs, p, draw);
     p.hand.push(...drawn);
     pushLog(gs, 'action', `${pname(p)}【塔罗师】先抽牌：${drawn.map(bloodCardText).join(' ') || '（牌库已空）'}`);
   }
-  const set = new Set(cardIds);
-  const discardCards = p.hand.filter((c) => set.has(c.id));
-  if (discardCards.length !== cardIds.length) throw new BloodError('BAD_CARD', '手牌不存在');
   p.hand = p.hand.filter((c) => !set.has(c.id));
   p.discard.push(...discardCards);
 
@@ -907,7 +909,7 @@ function startPlayPhase(gs: BloodState, now: number): void {
 /* ---------------- 出牌阶段 ---------------- */
 
 /** 牌的最终点数（含强化芯片修正，钳制 2-14；王牌为 0） */
-function finalRank(p: BPlayer, c: BCard): number {
+export function finalRank(p: BPlayer, c: BCard): number {
   if (c.s == null || c.r === 0) return 0;
   let r = c.r;
   for (const ch of p.chips.filter((x) => x.on === c.id)) {
@@ -1336,7 +1338,10 @@ export function bRevealChipTarget(
   if (!myChip || myChip.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
   const target = bySeat(gs, seat);
   if (!target) throw new BloodError('BAD_TARGET', '目标不存在');
-  const targetChip = target.chips.find((ch) => ch.on === cardId && ch.def === defId && !ch.off);
+  // 只能作用于目标出牌区的芯片：宿主牌 id 可被枚举，不限区域等于探测暗置弃牌区/复制未上场芯片
+  const targetChip = target.chips.find(
+    (ch) => ch.on === cardId && ch.def === defId && !ch.off && target.play.some((card) => card.id === ch.on),
+  );
   if (!targetChip) throw new BloodError('BAD_TARGET', '目标芯片不存在或已失效');
 
   if (d.t === 'copy') {
@@ -1382,7 +1387,10 @@ export function bDemagPick(gs: BloodState, playerId: string, cardId: string, def
     throw new BloodError('PENDING', '当前没有待选择的消磁目标');
   }
   const t = gs.players.find((x) => x.id === pend.targetSeat)!;
-  const chip = t.chips.find((ch) => ch.on === cardId && ch.def === defId && !ch.off);
+  // 同 bRevealChipTarget：只允许消磁目标出牌区上的芯片（防枚举探测暗区）
+  const chip = t.chips.find(
+    (ch) => ch.on === cardId && ch.def === defId && !ch.off && t.play.some((card) => card.id === ch.on),
+  );
   if (!chip) throw new BloodError('BAD_TARGET', '目标芯片不存在或已失效');
   chip.off = true;
   const def = BLOOD_MARKET_BY_ID.get(defId)!;
@@ -2325,7 +2333,8 @@ function processMarketDef(
       const topDef = BLOOD_MARKET_BY_ID.get(topId)!;
       pushLog(gs, 'action', `【${def.name}】发动：${pname(p)} 免费获得牌堆顶的【${topDef.name}】`);
       gs.announce = { defId: topId, buyerSeat: p.seat, at: Date.now() };
-      processMarketDef(gs, p, topDef, true, insertInto);
+      // 不透传本次购买的 insertInto：免费牌是另一张牌，插入合法性未校验，失败会吞掉已支付的费用与芯片
+      processMarketDef(gs, p, topDef, true);
       return;
     }
     case 'privilegeBonus': {
@@ -4133,6 +4142,7 @@ export function bFryerDel(gs: BloodState, playerId: string, cardIds: string[], d
   p.fryerDelCount += cards.length;
   p.discard = p.discard.filter((c) => !set.has(c.id));
   p.removed.push(...cards);
+  purgeChipsOn(gs, p, new Set(cards.map((c) => c.id))); // 与其他删牌路径一致：删除牌上的芯片同步回收
   gainChefDeleteThrees(gs, p, cards);
   if (cards.length > 0) {
     pushLog(gs, 'action', `🍗 ${pname(p)}【炸鸡店老板】支付 ${cards.length} 血筹删除本回合打出的牌：${cards.map(bloodCardText).join(' ')}`);
@@ -4303,7 +4313,8 @@ export function bVagrantDraw(gs: BloodState, playerId: string, seat: number, now
   if (!t || t.id === playerId || t.draw.length < 2) throw new BloodError('BAD_TARGET', '目标抽牌堆不足2张');
   const taken = t.draw.splice(-2, 2);
   p.hand.push(...taken);
-  pushLog(gs, 'action', `🚉 ${pname(p)}【无业游民】从 ${pname(t)} 的抽牌堆抽取：${taken.map(bloodCardText).join(' ')}`);
+  // 同捣蛋鬼：暗抽入手的牌不公示牌面
+  pushLog(gs, 'action', `🚉 ${pname(p)}【无业游民】从 ${pname(t)} 的抽牌堆抽取 ${taken.length} 张牌`);
   checkSwapEnd(gs, now);
 }
 
@@ -4324,8 +4335,9 @@ export function bDogTarget(gs: BloodState, playerId: string, seat: number, now: 
   const t = bySeat(gs, seat);
   if (!t) throw new BloodError('BAD_TARGET', '目标无效');
   const roll = randomInt(1, 7);
+  // 掷出 1 点删 0 张：n=0 时 splice(-0) 等价 splice(0) 会删光整副抽牌堆，必须跳过
   const n = Math.max(0, roll - 1);
-  const take = t.draw.splice(-Math.min(n, t.draw.length));
+  const take = n > 0 && t.draw.length > 0 ? t.draw.splice(-Math.min(n, t.draw.length)) : [];
   t.removed.push(...take);
   purgeChipsOn(gs, t, new Set(take.map((c) => c.id)));
   pushLog(
@@ -4537,7 +4549,8 @@ export function bImpDraw(gs: BloodState, playerId: string, seat: number, now: nu
   if (!t || t.id === playerId || t.draw.length === 0) throw new BloodError('BAD_TARGET', '抽牌来源无效');
   const c = t.draw.pop()!;
   p.hand.push(c);
-  pushLog(gs, 'action', `🃏 ${pname(p)}【捣蛋鬼】从 ${pname(t)} 的抽牌堆抽走 ${bloodCardText(c)}`);
+  // 抽牌堆是暗置牌，入手手牌后为隐藏信息：日志只公示来源与张数，不公示牌面
+  pushLog(gs, 'action', `🃏 ${pname(p)}【捣蛋鬼】从 ${pname(t)} 的抽牌堆抽走 1 张牌`);
   const cap = charHandCap('imp');
   if (p.hand.length < cap && gs.players.some((o) => o.id !== p.id && o.draw.length > 0)) {
     gs.deadline = now + BLOOD_TURN_MS;
@@ -4611,12 +4624,10 @@ export function bCleanerDel(gs: BloodState, playerId: string, seat: number, card
     card = t.draw[randomInt(0, t.draw.length)];
     fromDraw = true;
   } else {
-    const inDraw = t.draw.find((c) => c.id === cardId);
+    // 只允许指定弃牌区的明牌；牌 id 可被客户端枚举推算，命中暗置抽牌堆等于定点拆除对手暗牌
     const inDiscard = t.discard.find((c) => c.id === cardId);
-    const found = inDraw ?? inDiscard;
-    if (!found) throw new BloodError('BAD_CARD', '目标牌不在该玩家的抽牌堆/弃牌区');
-    card = found;
-    fromDraw = inDraw != null;
+    if (!inDiscard) throw new BloodError('BAD_CARD', '目标牌不在该玩家的弃牌区');
+    card = inDiscard;
   }
   if (fromDraw) {
     t.draw = t.draw.filter((c) => c.id !== card.id);

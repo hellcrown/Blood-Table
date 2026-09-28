@@ -46,6 +46,7 @@ export function createGame(settings: RoomSettings, seatCount: number, players: P
     result: null,
     resultAt: null,
     final: null,
+    showdown: false,
   };
   for (const p of players) addPlayer(gs, p);
   return gs;
@@ -103,6 +104,7 @@ export function startHand(gs: GState, now: number = Date.now()): void {
   gs.deck = shuffle(newDeck());
   gs.result = null;
   gs.resultAt = null;
+  gs.showdown = false;
   gs.currentBet = 0;
   gs.minRaise = gs.settings.bb;
   gs.shortAllIn = false;
@@ -185,6 +187,11 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
   if (gs.toActSeat !== seat) throw new GameError('NOT_YOUR_TURN', '还没轮到你行动');
   const p = bySeat(gs, seat);
   if (!p) throw new GameError('NO_SEAT', '座位不存在');
+  // 客户端消息无运行时类型保证：畸形 action（null/未知 k）原先是静默过回合或 TypeError，必须显式拒绝
+  const knownK = ['fold', 'check', 'call', 'raise', 'allin'];
+  if (action == null || typeof action !== 'object' || !knownK.includes((action as { k?: unknown }).k as string)) {
+    throw new GameError('BAD_ACTION', '无效动作');
+  }
   p.wasAuto = false; // 真人行动：清除超时托管标记
   const legal = legalActionsFor(gs, seat);
   if (!legal) throw new GameError('NOT_YOUR_TURN', '你当前无法行动');
@@ -238,6 +245,9 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
       }
       break;
     }
+    default:
+      // 上方已校验 k 合法性，此处兜底（类型收窄 + 防未来新增分支漏实现）
+      throw new GameError('BAD_ACTION', '无效动作');
   }
   proceed(gs, now);
 }
@@ -357,6 +367,7 @@ export function suitChar(s: Card['s']): string {
 function showdown(gs: GState, now: number): void {
   gs.phase = 'result';
   gs.resultAt = now;
+  gs.showdown = true;
   const contenders = activePlayers(gs);
   for (const p of contenders) {
     const best = bestHand([...p.hole, ...gs.community]);
@@ -365,11 +376,11 @@ function showdown(gs: GState, now: number): void {
   }
   settlePots(gs, contenders, now, true);
 }
-
 /** 其余玩家全弃牌时直接赢池 */
 function awardUncontested(gs: GState, now: number): void {
   gs.phase = 'result';
   gs.resultAt = now;
+  gs.showdown = false; // 无人跟注不摊牌：赢家的底牌保持暗置
   const winner = activePlayers(gs)[0];
   const amount = gs.players.reduce((s, p) => s + p.committed, 0);
   winner.chips += amount;
@@ -420,7 +431,7 @@ function buildResult(gs: GState, now: number): void {
   const rows = gs.players
     .filter((p) => p.committed > 0 || p.inHand)
     .map((p) => {
-      const revealed = p.inHand && !p.folded;
+      const revealed = gs.showdown && p.inHand && !p.folded;
       return {
         seat: p.seat,
         name: p.name,

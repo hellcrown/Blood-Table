@@ -61,4 +61,6 @@ export interface GState {
   result: HandResultView | null;
   resultAt: number | null;
   final: GameOverView | null;
+  /** 本手是否经过摊牌（其余全弃牌的无人跟注局不亮赢家底牌） */
+  showdown: boolean;
 }
