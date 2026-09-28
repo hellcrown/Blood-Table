@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { playSfx } from '../audio/sound';
 import { loadLastRoom, net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
 import { CodexModal } from '../components/CodexModal';
@@ -6,6 +7,7 @@ import { FeedbackModal } from '../components/FeedbackModal';
 import { LeaderboardModal } from '../components/LeaderboardModal';
 import { TutorialModal } from '../components/TutorialModal';
 import { ChangelogModal } from '../components/ChangelogModal';
+import { SettingsModal } from '../components/SettingsModal';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -22,6 +24,7 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [boardOpen, setBoardOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
 
   /** 复制 QQ 群号到剪贴板（https 下可用；失败时按钮文本本身仍展示群号） */
@@ -64,6 +67,7 @@ export function Lobby({ connected }: { connected: boolean }) {
   }, [code]);
 
   const create = () => {
+    playSfx('click');
     net.saveName(name.trim());
     net.send({
       t: 'create',
@@ -82,10 +86,12 @@ export function Lobby({ connected }: { connected: boolean }) {
   });
 
   const join = () => {
+    playSfx('click');
     net.saveName(name.trim());
     net.send(joinMsg(code.trim().toUpperCase()));
   };
   const spectate = () => {
+    playSfx('click');
     net.saveName(name.trim());
     net.send({
       t: 'spectate',
@@ -262,6 +268,10 @@ export function Lobby({ connected }: { connected: boolean }) {
       <button className="admin-link" style={{ bottom: 42 }} onClick={() => setAdminOpen(true)}>
         管理员
       </button>
+      <button className="admin-link" style={{ bottom: 70 }} onClick={() => setSettingsOpen(true)}>
+        ⚙ 音量
+      </button>
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={name.trim() || undefined} />
       )}

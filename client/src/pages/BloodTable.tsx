@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { playSfx } from '../audio/sound';
 import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
 import { applyCharEval } from '@shared/bloodChars';
 import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
@@ -6,6 +7,7 @@ import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
 import { net } from '../net/socket';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { CodexModal } from '../components/CodexModal';
+import { SettingsModal } from '../components/SettingsModal';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { CharDetail, CharPortrait } from '../components/CharCard';
 import { CardView } from '../components/Card';
@@ -290,6 +292,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoCard, setInfoCard] = useState<string | null>(null); // 牌局记录中点击的牌 def id
   const [oppItems, setOppItems] = useState<{ name: string; defs: string[] } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
@@ -303,6 +306,33 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [sortMode, setSortMode] = useState<SortMode>('none');
   const lockRef = useRef(0);
   const logRef = useRef<HTMLDivElement | null>(null);
+
+  // ---- 音效钩子（克制挂点：亮牌/结算/终局/购买宣告，音量面板可全局关闭） ----
+  const prevPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = view.phase;
+    if (!prev || prev === view.phase) return;
+    if (view.phase === 'reveal') playSfx('reveal');
+    else if (view.phase === 'settle') playSfx('ticket');
+  }, [view.phase]);
+
+  const prevFinalRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = view.final ? `w${view.final.winnerSeat}` : null;
+    const prev = prevFinalRef.current;
+    prevFinalRef.current = key;
+    if (!key || key === prev) return;
+    playSfx(key === `w${view.me.seat}` ? 'win' : 'lose');
+  }, [view.final]);
+
+  const prevAnnAtRef = useRef(0);
+  useEffect(() => {
+    const at = view.announce?.at ?? 0;
+    const prev = prevAnnAtRef.current;
+    prevAnnAtRef.current = at;
+    if (at && at !== prev) playSfx('coin');
+  }, [view.announce]);
 
   // 黑市宣告特效数据（按效果类型定制）
   const annDef = view.announce ? BLOOD_MARKET_BY_ID.get(view.announce.defId) : undefined;
@@ -715,6 +745,9 @@ export function BloodTable({ view }: { view: BloodView }) {
             房间 <b>{view.code}</b> · 第 {view.round + 1} 回合 · 目标 {view.target} 车票
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setCodexOpen(true)}>
               📖 图鉴
+            </button>
+            <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setSettingsOpen(true)}>
+              ⚙
             </button>
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
@@ -2589,6 +2622,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       />
     )}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

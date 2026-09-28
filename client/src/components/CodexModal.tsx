@@ -30,12 +30,15 @@ function MarketCardFace({ def }: { def: BloodMarketDef }) {
 export function CodexModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<'chars' | 'cards'>('chars');
   const [charPool, setCharPool] = useState<'all' | 'basic' | 'exp'>('all');
+  const [diff, setDiff] = useState<'all' | 1 | 2 | 3>('all');
   const [kind, setKind] = useState<'all' | MarketKind>('all');
   const [withExp, setWithExp] = useState(true);
   const [detail, setDetail] = useState<string | null>(null);
 
-  const chars = BLOOD_CHARS.filter((c) =>
-    charPool === 'all' ? true : charPool === 'basic' ? !!c.basic : !c.basic,
+  const chars = BLOOD_CHARS.filter(
+    (c) =>
+      (charPool === 'all' ? true : charPool === 'basic' ? !!c.basic : !c.basic) &&
+      (diff === 'all' || c.difficulty === diff),
   );
   const allCards = [...BLOOD_MARKET_DEFS, ...BLOOD_MARKET_EXPANSION_DEFS];
   const cards = allCards.filter((d) => (withExp || !d.expansion) && (kind === 'all' || d.kind === kind));
@@ -60,6 +63,11 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
                 {chip(charPool === 'all', `全部 ${BLOOD_CHARS.length}`, () => setCharPool('all'))}
                 {chip(charPool === 'basic', `基础 ${BLOOD_CHARS.filter((c) => c.basic).length}`, () => setCharPool('basic'))}
                 {chip(charPool === 'exp', `拓展 ${BLOOD_CHARS.filter((c) => !c.basic).length}`, () => setCharPool('exp'))}
+                <span className="codex-sep" />
+                {chip(diff === 'all', '全部难度', () => setDiff('all'))}
+                {chip(diff === 1, '★ 入门', () => setDiff(1))}
+                {chip(diff === 2, '★★ 进阶', () => setDiff(2))}
+                {chip(diff === 3, '★★★ 硬核', () => setDiff(3))}
               </>
             ) : (
               <>
@@ -93,7 +101,7 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="hint codex-note">
           {tab === 'chars'
-            ? '点击角色卡查看技能详情；「部分实装」角色的自动化范围见详情页说明'
+            ? '点击角色卡查看技能详情；难度 = 技能理解成本+操作复杂度+失误惩罚（★入门 / ★★进阶 / ★★★硬核）；「部分实装」角色的自动化范围见详情页说明'
             : '价格为牌面原价（窥天师天意 -2、魏王芯片 -2 等角色折扣另计）；×N 为牌库中该牌张数'}
         </p>
       </div>

@@ -3655,3 +3655,70 @@ body {
   font-size: 13px;
   line-height: 1.8;
 }
+
+/* ---------- 角色难度徽标 ---------- */
+
+.char-diff {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 10px;
+  color: #ffd98a;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(216, 169, 78, 0.4);
+  border-radius: 6px;
+  padding: 1px 6px;
+  letter-spacing: 1px;
+}
+
+.char-detail-panel .char-diff {
+  position: static;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.codex-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line);
+  margin: 0 4px;
+}
+
+/* ---------- 音量设置面板 ---------- */
+
+.vol-panel {
+  width: min(480px, 94vw);
+}
+
+.vol-row {
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.vol-row:last-of-type {
+  border-bottom: none;
+}
+
+.vol-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.vol-label b {
+  color: var(--gold);
+}
+
+.vol-row input[type='range'] {
+  width: 100%;
+  accent-color: #d8a94e;
+  cursor: pointer;
+}
+
+.vol-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}

@@ -7,6 +7,12 @@ function implLabel(def: BloodCharDef): string | null {
   return null;
 }
 
+/** 难度星标文案（1=入门 2=进阶 3=硬核） */
+export function diffLabel(def: BloodCharDef): string | null {
+  if (!def.difficulty) return null;
+  return '难度 ' + '★'.repeat(def.difficulty);
+}
+
 /** 角色立绘卡（当前以 emoji + 主题渐变呈现，后续可替换为手绘立绘） */
 export function CharPortrait({
   def,
@@ -32,6 +38,7 @@ export function CharPortrait({
         {def.tags.length > 0 && <span className="char-tags">{def.tags.join(' · ')}</span>}
       </div>
       {impl && <span className={`char-impl ${def.impl}`}>{impl}</span>}
+      {diffLabel(def) && <span className="char-diff">{diffLabel(def)}</span>}
     </div>
   );
 }
@@ -61,6 +68,7 @@ export function CharDetail({
           <h3>
             {def.emoji} {def.name}
             {impl && <span className={`char-impl ${def.impl}`}>{impl}</span>}
+            {diffLabel(def) && <span className="char-diff">{diffLabel(def)}</span>}
           </h3>
           <div className="char-tags-line">{def.tags.map((t) => `【${t}】`).join(' ') || '【常驻】'}</div>
           <p className="char-skill-text">{def.text}</p>

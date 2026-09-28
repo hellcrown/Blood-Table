@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { playSfx } from './audio/sound';
 import { net } from './net/socket';
 import { Lobby } from './pages/Lobby';
 import { Room } from './pages/Room';
@@ -16,6 +17,7 @@ export default function App() {
     const offS = net.onStatus(setStatus);
     const offE = net.onError((_code, msg) => {
       setToast(msg);
+      playSfx('error');
       window.setTimeout(() => setToast(null), 2600);
     });
     net.start();
