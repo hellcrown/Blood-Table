@@ -4,6 +4,7 @@ import { AdminPanel } from '../components/AdminPanel';
 import { CodexModal } from '../components/CodexModal';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { LeaderboardModal } from '../components/LeaderboardModal';
+import { TutorialModal } from '../components/TutorialModal';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -18,6 +19,7 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
 
   /** 复制 QQ 群号到剪贴板（https 下可用；失败时按钮文本本身仍展示群号） */
@@ -216,6 +218,9 @@ export function Lobby({ connected }: { connected: boolean }) {
         {!connected && <p className="hint">正在连接服务器…</p>}
 
         <div className="lobby-links">
+          <button className="btn small primary" onClick={() => setTutorialOpen(true)}>
+            📚 教程
+          </button>
           <button className="btn small ghost" onClick={() => setCodexOpen(true)}>
             📖 图鉴
           </button>
@@ -257,6 +262,7 @@ export function Lobby({ connected }: { connected: boolean }) {
       )}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
+      {tutorialOpen && <TutorialModal onClose={() => setTutorialOpen(false)} />}
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
   );

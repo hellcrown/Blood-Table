@@ -3570,3 +3570,57 @@ body {
 .lb-panel {
   width: min(680px, 94vw);
 }
+
+/* ---------- 新手教程弹窗 ---------- */
+
+.tutorial-panel {
+  width: min(640px, 94vw);
+}
+
+.tutorial-page h4 {
+  margin: 14px 0 6px;
+  color: var(--gold);
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.tutorial-section:first-child h4 {
+  margin-top: 0;
+}
+
+.tutorial-page ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.85;
+}
+
+.tutorial-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.tutorial-dots {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.tutorial-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.tutorial-dots i.done {
+  background: rgba(216, 169, 78, 0.45);
+}
+
+.tutorial-dots i.on {
+  background: var(--gold);
+}
