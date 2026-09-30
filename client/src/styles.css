@@ -489,7 +489,8 @@ select:focus {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0,1fr)：允许列收缩到内容以下，防止 nowrap 内容把最后一列挤出面板被裁 */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1364,7 +1365,7 @@ select:focus {
   }
 
   .settings-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .log-panel {
@@ -3042,7 +3043,12 @@ body {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  white-space: nowrap; /* 标签与提示不折行（房间密码/拓展选将等短标签此前会竖排换字） */
+  white-space: nowrap; /* 标签文字不竖排换字 */
+  min-width: 0; /* 网格内允许收缩 */
+}
+
+.charpick-toggle .hint {
+  white-space: normal; /* 提示文字可以换行（否则 4 列网格被撑爆、目标票数被裁） */
 }
 
 .charpick-toggle input[type='checkbox'] {
