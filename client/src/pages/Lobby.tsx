@@ -264,7 +264,7 @@ export function Lobby({ connected }: { connected: boolean }) {
       <button className="admin-link" onClick={() => setAdminOpen(true)}>
         管理员
       </button>
-      <button className="admin-link" style={{ bottom: 42 }} onClick={() => setSettingsOpen(true)}>
+      <button className="admin-link" style={{ bottom: 'calc(42px + var(--sab))' }} onClick={() => setSettingsOpen(true)}>
         ⚙ 音量
       </button>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

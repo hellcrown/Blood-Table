@@ -1,4 +1,9 @@
 :root {
+  /* 刘海/手势条安全区（viewport-fit=cover 下生效；无刘海设备为 0） */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
   --bg: #16060a;
   --panel: #241014;
   --panel-2: #2e1519;
@@ -22,6 +27,7 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  box-sizing: border-box; /* body 安全区内边距计入 100% 高度，不产生溢出滚动 */
 }
 
 body {
@@ -31,6 +37,8 @@ body {
   color: var(--text);
   font-family: system-ui, 'Microsoft YaHei', 'PingFang SC', sans-serif;
   overflow: hidden;
+  /* 刘海/手势条安全区：普通流内容整体避开（fixed 元素各自处理） */
+  padding: var(--sat) var(--sar) var(--sab) var(--sal);
 }
 
 .app {
@@ -166,7 +174,7 @@ select:focus {
   background: #7c3a1d;
   color: #ffe9c9;
   text-align: center;
-  padding: 5px;
+  padding: calc(5px + var(--sat)) 5px 5px;
   font-size: 13px;
 }
 
@@ -212,8 +220,8 @@ select:focus {
 
 .toast {
   position: fixed;
-  top: 44px;
-  left: 50%;
+  top: calc(44px + var(--sat));
+  left: calc(50% + var(--sal) / 2 - var(--sar) / 2);
   transform: translateX(-50%);
   z-index: 60;
   background: #3c151d;
@@ -847,8 +855,8 @@ select:focus {
 
 .log-panel {
   position: fixed;
-  left: 14px;
-  bottom: 120px;
+  left: calc(14px + var(--sal));
+  bottom: calc(120px + var(--sab));
   width: 300px;
   max-height: 200px;
   overflow: hidden;
@@ -884,6 +892,7 @@ select:focus {
 .overlay {
   position: fixed;
   inset: 0;
+  padding: var(--sat) var(--sar) var(--sab) var(--sal);
   background: rgba(8, 2, 4, 0.62);
   backdrop-filter: blur(3px);
   display: flex;
@@ -1401,7 +1410,7 @@ select:focus {
 /* 左缘小箭头：收起/展开记录侧栏（手机端为抽屉把手） */
 .blood-side-toggle {
   position: fixed;
-  left: 0;
+  left: var(--sal);
   top: 45%;
   z-index: 56;
   width: 22px;
@@ -1659,7 +1668,7 @@ body {
 
 .announce-float {
   position: fixed;
-  top: 84px;
+  top: calc(84px + var(--sat));
   left: 50%;
   transform: translateX(-50%);
   z-index: 15;
@@ -1717,7 +1726,7 @@ body {
 
 .announce-float {
   position: fixed;
-  top: 84px;
+  top: calc(84px + var(--sat));
   left: 50%;
   transform: translateX(-50%);
   z-index: 15;
@@ -2317,8 +2326,8 @@ body {
 
 .ladder-toggle {
   position: fixed;
-  right: 14px;
-  bottom: 14px;
+  right: calc(14px + var(--sar));
+  bottom: calc(14px + var(--sab));
   z-index: 25;
   background: var(--panel);
   border: 1px solid var(--gold-dim);
@@ -2335,8 +2344,8 @@ body {
 
 .ladder-panel {
   position: fixed;
-  right: 14px;
-  bottom: 52px;
+  right: calc(14px + var(--sar));
+  bottom: calc(52px + var(--sab));
   z-index: 25;
   width: min(420px, calc(100% - 28px));
   max-height: 60vh;
@@ -3046,8 +3055,8 @@ body {
 
 .admin-link {
   position: fixed;
-  left: 14px;
-  bottom: 14px;
+  left: calc(14px + var(--sal));
+  bottom: calc(14px + var(--sab));
   border: none;
   background: none;
   color: rgba(255, 255, 255, 0.35);
