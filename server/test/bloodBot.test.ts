@@ -617,20 +617,20 @@ describe('血色机器人 · 公开服务器防护', () => {
     vi.useRealTimers();
   });
 
-  it('建房配额：单 IP 最多同时 3 间', () => {
+  it('建房配额：单 IP 最多同时 5 间', () => {
     const mgr = new RoomManager();
     const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
     const rooms = m.rooms as unknown as Map<string, unknown>;
-    // 同 IP 三条并发连接各建一间
-    for (let i = 0; i < 3; i++) {
+    // 同 IP 五条并发连接各建一间
+    for (let i = 0; i < 5; i++) {
       m.handleCreate(stubWsIp('9.9.9.9'), { t: 'create', name: '甲', maxPlayers: 2, mode: 'blood' });
     }
-    expect(rooms.size).toBe(3);
-    // 第 4 条连接再建 → 触发单 IP 上限
+    expect(rooms.size).toBe(5);
+    // 第 6 条连接再建 → 触发单 IP 上限
     expect(() =>
       m.handleCreate(stubWsIp('9.9.9.9'), { t: 'create', name: '甲', maxPlayers: 2, mode: 'blood' }),
-    ).toThrow('每个 IP 同时最多创建 3 个房间');
-    expect(rooms.size).toBe(3);
+    ).toThrow('每个 IP 同时最多创建 5 个房间');
+    expect(rooms.size).toBe(5);
   });
 
   it('观战：不占座位、开局被排除、可入座转玩家、离开即移除', () => {

@@ -171,6 +171,10 @@ let publicStatsCache: { at: number; body: string } | null = null;
 const manager = new RoomManager();
 
 const server = http.createServer((req, res) => {
+  // 基础安全头（对全部响应生效，含静态与 API）
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname === '/api/stats/chars' && req.method === 'GET') {
     if (publicStatsCache && Date.now() - publicStatsCache.at < 60_000) {

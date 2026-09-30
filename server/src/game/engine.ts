@@ -234,15 +234,15 @@ export function applyAction(gs: GState, seat: number, action: PlayerAction, now:
         // 全下加注不受最小加注限制（但受 shortAllIn「已行动者不可再加注」约束，防绕过）
         doRaise(gs, p, to, true);
       } else {
-        // 全下跟注（含被 shortAllIn 限制只能跟的场景）
-        const amount = p.chips;
-        p.chips = 0;
+        // 全下跟注：按跟注额支付（shortAllIn 限制下的补齐是普通跟注，不得把超额筹码全栈推入）
+        const amount = legal.callAmount;
+        p.chips -= amount;
         p.bet += amount;
         p.committed += amount;
-        p.allIn = true;
+        if (p.chips === 0) p.allIn = true;
         p.acted = true;
-        p.lastAction = `全下跟注 ${p.bet}`;
-        pushLog(gs, 'action', `${p.name} 全下跟注 ${p.bet}`);
+        p.lastAction = p.allIn ? `全下跟注 ${p.bet}` : `跟注 ${amount}`;
+        pushLog(gs, 'action', `${p.name} ${p.lastAction}`);
       }
       break;
     }
@@ -333,14 +333,10 @@ function closeBettingRound(gs: GState, now: number): void {
   gs.phase = STREET_ORDER[idx + 1];
   dealCommunity(gs);
 
-  const first = nextActor(gs, gs.buttonSeat);
-  if (first) {
-    gs.toActSeat = first.seat;
-    gs.deadline = now + TURN_MS;
-  } else {
-    // 全员全下：继续发牌直至摊牌
-    closeBettingRound(gs, now);
-  }
+  // 此处 canAct 必 ≥ 2（≤1 时已在上方 run-out 直发摊牌），必有下一位行动者
+  const first = nextActor(gs, gs.buttonSeat)!;
+  gs.toActSeat = first.seat;
+  gs.deadline = now + TURN_MS;
 }
 
 function dealCommunity(gs: GState): void {

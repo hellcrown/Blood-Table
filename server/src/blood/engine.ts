@@ -2015,13 +2015,13 @@ function settle(gs: BloodState, now: number): void {
     a.discard = a.discard.filter((c) => !gs.agentSwap!.bCards.includes(c.id));
     a.discard.push(...backA);
     b.discard.push(...backB);
-    // 芯片随宿主牌换回原属主（与交换时对应）
+    // 芯片随宿主牌换回原属主：a 的芯片（挂在 aCards 上，交换时随牌到了 b 处）收回，b 同理
     const aSet = new Set(gs.agentSwap.aCards);
     const bSet = new Set(gs.agentSwap.bCards);
-    const aChips = a.chips.filter((ch) => aSet.has(ch.on));
-    const bChips = b.chips.filter((ch) => bSet.has(ch.on));
-    a.chips = a.chips.filter((ch) => !aSet.has(ch.on)).concat(bChips);
-    b.chips = b.chips.filter((ch) => !bSet.has(ch.on)).concat(aChips);
+    const backToA = b.chips.filter((ch) => aSet.has(ch.on));
+    const backToB = a.chips.filter((ch) => bSet.has(ch.on));
+    a.chips = a.chips.filter((ch) => !bSet.has(ch.on)).concat(backToA);
+    b.chips = b.chips.filter((ch) => !aSet.has(ch.on)).concat(backToB);
     pushLog(gs, 'action', `🤝 ${pname(a)} 与 ${pname(b)}【特工】归还交换的出牌区`);
     gs.agentSwap = null;
   }
@@ -4059,13 +4059,14 @@ export function bAgentDecide(gs: BloodState, playerId: string, accept: boolean, 
     const tmp = agent.play;
     agent.play = t.play;
     t.play = tmp;
-    // 芯片随宿主牌换属主：否则评估与结算（镀层/自毁等按属主出牌区判定）双双丢失
+    // 芯片随宿主牌换属主：特工的芯片（挂在 aCards 上）交给目标，目标的芯片（挂在 bCards 上）交给特工。
+    // 评估与结算（镀层/自毁等按属主出牌区判定）才能正确生效
     const aSet = new Set(aCards);
     const bSet = new Set(bCards);
-    const aChips = agent.chips.filter((ch) => bSet.has(ch.on));
-    const bChips = t.chips.filter((ch) => aSet.has(ch.on));
-    agent.chips = agent.chips.filter((ch) => !bSet.has(ch.on)).concat(bChips);
-    t.chips = t.chips.filter((ch) => !aSet.has(ch.on)).concat(aChips);
+    const toT = agent.chips.filter((ch) => aSet.has(ch.on));
+    const toA = t.chips.filter((ch) => bSet.has(ch.on));
+    agent.chips = agent.chips.filter((ch) => !aSet.has(ch.on)).concat(toA);
+    t.chips = t.chips.filter((ch) => !bSet.has(ch.on)).concat(toT);
     gs.agentSwap = { a: agent.id, b: t.id, aCards, bCards };
     pushLog(gs, 'action', `🤝 ${pname(t)} 接受交换：双方出牌区互换（结算结束时归还）`);
   } else {

@@ -571,6 +571,10 @@ export class RoomManager {
       case 'backToRoom': {
         if (room.hostId && room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
         if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
+        // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
+        for (const s of [...room.sessions.values()]) {
+          if (!s.bot && !s.connected) this.removeSession(room, s);
+        }
         room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
         this.broadcast(room);
         break;
@@ -966,7 +970,7 @@ export class RoomManager {
     };
     room.sessions.set(bot.id, bot);
     room.botBrains.set(bot.id, createBrain());
-    room.botNextAct.set(bot.id, 0);
+    room.botNextAct.set(bot.id, Date.now() + randomInt(300, 1500)); // 随机错开节拍，避免多 bot 房同 tick 碰撞放大卡顿
     this.broadcast(room);
   }
 

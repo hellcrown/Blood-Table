@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { evalBloodHand, applyImitate, type EvalCard } from '@shared/bloodEval';
 import type { BloodState, BPlayer } from '../src/blood/types';
-import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank } from '../src/blood/engine';
+import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, bAgentAsk, bAgentDecide } from '../src/blood/engine';
+import { createGame, startHand, applyAction } from '../src/game/engine';
+import { legalActionsFor } from '../src/game/betting';
 
 const NOW = 1000;
 
@@ -162,5 +164,61 @@ describe('深查修复 · 视图层', () => {
     const view = buildBloodView(room as never, gs, 'p0');
     const played = view.players.find((p) => p.seat === 1)?.played ?? [];
     expect(played[0]?.chipIds).toEqual(['calib1']); // off 的 calib2 不下发
+  });
+});
+describe('第四轮回修', () => {
+  it('德州 allin 在 shortAllIn 限制下为普通跟注（不得超额全栈推入）', () => {
+    const players = [
+      { id: 'a', name: '甲', seat: 0, chips: 1000 },
+      { id: 'b', name: '乙', seat: 1, chips: 1000 },
+      { id: 'c', name: '丙', seat: 2, chips: 1000 },
+    ];
+    const gs = createGame({ sb: 5, bb: 10, startChips: 1000 }, 3, players);
+    startHand(gs, NOW);
+    while (gs.toActSeat != null && gs.phase === 'preflop') {
+      const legal = legalActionsFor(gs, gs.toActSeat)!;
+      applyAction(gs, gs.toActSeat, legal.canCheck ? { k: 'check' } : { k: 'call' }, NOW + 100);
+    }
+    expect(gs.phase).toBe('flop');
+    const first = gs.toActSeat!;
+    applyAction(gs, first, { k: 'raise', to: 200 }, NOW + 200);
+    const second = gs.toActSeat!;
+    applyAction(gs, second, { k: 'fold' }, NOW + 250); // 第三人弃牌出局
+    const last = gs.toActSeat!;
+    gs.players.find((p) => p.seat === last)!.chips = 250;
+    applyAction(gs, last, { k: 'allin' }, NOW + 300); // 250 > 200，短全下
+    expect(gs.currentBet).toBe(250);
+    expect(gs.shortAllIn).toBe(true);
+    // 回到加注者：已行动且被 shortAllIn 限制，allin 应为普通跟注 50（不得把 800 全栈推入）
+    expect(gs.toActSeat).toBe(first);
+    applyAction(gs, first, { k: 'allin' }, NOW + 400);
+    const firstP = gs.players.find((p) => p.seat === first)!;
+    // 语义断言：只跟 50，未全下（全栈推入的旧行为会 allIn=true 且 chips=0）；
+    // call 后立即 run-out 摊牌，筹码为结算后值（可能赢池），不断言具体数额
+    expect(firstP.allIn).toBe(false);
+    expect(firstP.committed).toBe(260); // 确定性总投入：盲注 10 + 加注 200 + 跟注 50（未全栈推入 1000）
+  });
+
+  it('特工交换：芯片随宿主牌转移属主（此前集合写反恒为空集）', () => {
+    const gs = makeGame(['agent', 'dealer']);
+    gs.phase = 'play';
+    const [a, b] = gs.players;
+    a.hand = a.draw.splice(-1);
+    b.hand = b.draw.splice(-1);
+    const aCard = a.hand[0];
+    const bCard = b.hand[0];
+    a.chips = [{ id: 'chA', def: 'calib1', on: aCard.id }];
+    b.chips = [{ id: 'chB', def: 'calib2', on: bCard.id }];
+    gs.playHooks = [];
+    bPlay(gs, a.id, [aCard.id], NOW);
+    bPlay(gs, b.id, [bCard.id], NOW);
+    expect(gs.secretPending?.kind).toBe('agentAsk');
+    bAgentAsk(gs, a.id, 1, NOW + 100);
+    expect(gs.secretPending?.kind).toBe('agentDecide');
+    bAgentDecide(gs, b.id, true, NOW + 200);
+    // 2 人局内 reveal→结算同步走完：agentSwap 已归还清空，芯片应各回原主（集合写反时这里会交叉错主）
+    expect(gs.agentSwap).toBeNull();
+    expect(a.chips.map((c) => c.id)).toEqual(['chA']);
+    expect(b.chips.map((c) => c.id)).toEqual(['chB']);
   });
 });

@@ -47,12 +47,12 @@ describe('玩家反馈存储', () => {
     expect(listFeedback().length).toBe(0);
   });
 
-  it('限流：同 IP 每小时最多 5 条，不同 IP 不受影响', () => {
+  it('限流：同 IP 每小时最多 10 条，不同 IP 不受影响', () => {
     initFeedbackStore(file);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       expect(submitFeedback({ text: `问题${i}` }, '2.2.2.2', NOW)).toBeNull();
     }
-    expect(submitFeedback({ text: '第 6 条' }, '2.2.2.2', NOW)).toBe('RATE_LIMITED');
+    expect(submitFeedback({ text: '第 11 条' }, '2.2.2.2', NOW)).toBe('RATE_LIMITED');
     expect(submitFeedback({ text: '另一个 IP 的反馈' }, '3.3.3.3', NOW)).toBeNull();
   });
 
