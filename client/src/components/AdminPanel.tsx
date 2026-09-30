@@ -276,7 +276,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                 </table>
               )}
             </div>
-            <div className="admin-feedback">
+            <div className="admin-feedback admin-stats">
               <div className="admin-feedback-head">
                 <b>📊 对局统计</b>
                 <span className="spacer" />

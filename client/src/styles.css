@@ -3062,6 +3062,9 @@ body {
 
 .admin-panel {
   width: min(560px, 92vw);
+  /* 内容（房间列表+对局统计+反馈）超出屏幕时面板整体可滚动 */
+  max-height: 88vh;
+  overflow-y: auto;
 }
 
 .admin-login-row {
@@ -3256,6 +3259,17 @@ body {
   margin-top: 12px;
   border-top: 1px solid var(--gold-dim);
   padding-top: 10px;
+}
+
+/* 对局统计板块：独立滚动（角色胜率表 + 最近对局列表可能很长） */
+.admin-stats {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.admin-stats .feedback-list {
+  max-height: none; /* 内嵌最近对局列表不单独限高，交给外层统一滚动 */
 }
 .admin-feedback-head {
   display: flex;
