@@ -350,10 +350,12 @@ initMatchStore(path.resolve(process.cwd(), 'data', 'matches.jsonl'));
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
 // 1200 ≈ 千人同时在线余量（1GB 内存实测 1000 连接约占 150-250MB，先于内存见顶的是这个常量）
 const MAX_TOTAL_CONNS = 1200;
-const MAX_CONNS_PER_IP = 10;
+// 单 IP 并发上限：放宽以容忍 CGNAT（运营商出口大量用户共享同一公网 IP，曾因 /ws 缺 XFF 全站挤在 127.0.0.1 而形同虚设）；
+// 全局 1200 与新建频率限速仍兜底
+const MAX_CONNS_PER_IP = 30;
 const ipConns = new Map<string, number>();
 const ipNewConn = new IpTable(
-  () => new SlidingWindow(60_000, 15),
+  () => new SlidingWindow(60_000, 30), // 单 IP 新建连接 30/分：CGNAT 出口多人同时打开属正常流量
   (w, now) => w.idle(now),
 );
 setInterval(() => ipNewConn.prune(), 5 * 60_000).unref();

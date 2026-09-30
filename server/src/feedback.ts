@@ -30,7 +30,7 @@ const MAX_CONTACT = 50;
 let file: string | null = null;
 const list: FeedbackEntry[] = [];
 const ipLimit = new IpTable(
-  () => new SlidingWindow(3_600_000, 5),
+  () => new SlidingWindow(3_600_000, 10), // 单 IP 每小时 10 条：放宽以容忍 CGNAT 共享出口
   (w, now) => w.idle(now),
 );
 setInterval(() => ipLimit.prune(), 30 * 60_000).unref();
