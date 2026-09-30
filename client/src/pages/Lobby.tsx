@@ -238,6 +238,9 @@ export function Lobby({ connected }: { connected: boolean }) {
           >
             {qqCopied ? '✓ 已复制群号' : '💬 QQ交流群 730193109'}
           </button>
+          <button className="btn small ghost" onClick={() => setFeedbackOpen(true)}>
+            📨 反馈
+          </button>
           <button className="btn small ghost" onClick={() => setLogOpen(true)}>
             📜 更新日志
           </button>
@@ -258,13 +261,10 @@ export function Lobby({ connected }: { connected: boolean }) {
           </a>
         </p>
       </div>
-      <button className="admin-link" onClick={() => setFeedbackOpen(true)}>
-        反馈
-      </button>
-      <button className="admin-link" style={{ bottom: 42 }} onClick={() => setAdminOpen(true)}>
+      <button className="admin-link" onClick={() => setAdminOpen(true)}>
         管理员
       </button>
-      <button className="admin-link" style={{ bottom: 70 }} onClick={() => setSettingsOpen(true)}>
+      <button className="admin-link" style={{ bottom: 42 }} onClick={() => setSettingsOpen(true)}>
         ⚙ 音量
       </button>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
