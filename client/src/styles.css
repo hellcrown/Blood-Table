@@ -200,7 +200,7 @@ select:focus {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 16px;
+  padding: max(10px, calc(10px + var(--sat))) max(16px, calc(16px + var(--sar))) 10px max(16px, calc(16px + var(--sal)));
   border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.25);
   font-size: 14px;
@@ -240,7 +240,8 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  /* 保底 28px 顶部间距：个别国产浏览器/WebView 的 env() 报 0 但内容仍被挖孔压住（有刘海且 env 正常时取更大值） */
+  padding: max(24px, calc(20px + var(--sat))) 20px max(20px, calc(20px + var(--sab)));
   overflow: auto;
 }
 
