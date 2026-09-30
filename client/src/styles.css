@@ -269,10 +269,6 @@ select:focus {
   margin-left: 8px;
 }
 
-.title-dot {
-  color: var(--red);
-}
-
 .subtitle {
   color: var(--text-dim);
   margin: 8px 0 24px;

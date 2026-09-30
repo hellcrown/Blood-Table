@@ -110,7 +110,7 @@ export function Lobby({ connected }: { connected: boolean }) {
     <div className="lobby">
       <div className="lobby-card">
         <h1 className="title">
-          血色牌局<span className="title-dot">·</span>
+          血色牌局
           <small>德州扑克联机</small>
         </h1>
         <p className="subtitle">2-4 人 · 建房后把房间码告诉朋友即可开局</p>
