@@ -17,7 +17,7 @@ const ROOM_IDLE_MS = 5 * 60_000; // 全员断线 5 分钟后删除房间（保�
 const MAX_ALLBOT_ROOMS = 10; // 全机器人房间数量上限（超出后 bot 停止行动，等待空房回收）
 const BETTING_PHASES = new Set(['preflop', 'flop', 'turn', 'river']);
 export const MAX_ROOMS = 400; // 房间总数上限（防脚本刷房耗内存；千人在线 ÷ 4 人房 ≈ 250 房，留余量）
-const MAX_ROOMS_PER_IP = 3; // 单 IP 同时拥有的房间上限
+const MAX_ROOMS_PER_IP = 5; // 单 IP 同时拥有的房间上限（留 CGNAT 余量：移动网络大量用户共享出口 IP）
 const MAX_JOIN_PER_MIN = 30;
 const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买
 const MAX_SPECTATORS = 10; // 单房间观战人数上限 // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买 // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
@@ -628,7 +628,7 @@ export class RoomManager {
     if (this.rooms.size >= MAX_ROOMS) throw new GameError('ROOM_LIMIT', '房间数已达上限，请稍后再试');
     const owned = [...this.rooms.values()].filter((r) => r.ownerIp === ip).length;
     if (owned >= MAX_ROOMS_PER_IP) {
-      throw new GameError('ROOM_LIMIT', '每个 IP 同时最多创建 3 个房间，请先解散旧房间');
+      throw new GameError('ROOM_LIMIT', `每个 IP 同时最多创建 ${MAX_ROOMS_PER_IP} 个房间，请先解散旧房间`);
     }
     this.detachBinding(ws);
     const mode: GameMode = msg.mode === 'blood' ? 'blood' : 'classic';
