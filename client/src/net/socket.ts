@@ -140,11 +140,22 @@ class Net {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer != null) return;
+    // 抖动 1.4-1.8：服务器重启后众多掉线客户端不会在同一瞬间挤上来（防惊群）
+    const jitter = 1.4 + Math.random() * 0.4;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
-      this.reconnectDelay = Math.min(Math.round(this.reconnectDelay * 1.6), 5000);
+      this.reconnectDelay = Math.min(Math.round(this.reconnectDelay * jitter), 5000);
       this.connect();
     }, this.reconnectDelay);
+  }
+
+  /** 网络恢复/回到前台：若当前断线则清掉退避等待立即重连 */
+  forceReconnectIfClosed(): void {
+    if (this.ws || this.reconnectTimer == null) return;
+    window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectDelay = 800;
+    this.connect();
   }
 
   send(msg: C2S): void {
@@ -205,6 +216,14 @@ class Net {
     this.status = s;
     this.statusListeners.forEach((l) => l(s));
   }
+}
+
+// 网络恢复 / 手机息屏回到前台：断线状态下立即重连（不等退避计时器走完）
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => net.forceReconnectIfClosed());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') net.forceReconnectIfClosed();
+  });
 }
 
 export const net = new Net();
