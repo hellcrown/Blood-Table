@@ -238,15 +238,16 @@ select:focus {
 .lobby {
   flex: 1;
   display: flex;
-  align-items: center;
   justify-content: center;
-  /* 保底 28px 顶部间距：个别国产浏览器/WebView 的 env() 报 0 但内容仍被挖孔压住（有刘海且 env 正常时取更大值） */
+  /* 不用 align-items:center：手机上卡片比屏幕高时顶部（标题/取名框）会滚不回来；
+     改用卡片 margin:auto —— 有空间居中，超高时从顶部开始可正常滚动 */
   padding: max(24px, calc(20px + var(--sat))) 20px max(20px, calc(20px + var(--sab)));
   overflow: auto;
 }
 
 .lobby-card {
   width: min(560px, 100%);
+  margin: auto; /* flex 容器内居中；手机上卡片超高时回落顶部、随 .lobby 正常滚动（取名框不再够不到） */
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -897,13 +898,16 @@ select:focus {
   background: rgba(8, 2, 4, 0.62);
   backdrop-filter: blur(3px);
   display: flex;
-  align-items: center;
   justify-content: center;
+  /* 不用 align-items:center：flex 居中溢出时顶部不可滚动到达（小屏上面板超高会被裁）。
+     面板用 margin:auto 居中——空间足够时居中，溢出时回落到顶部且可滚动 */
+  overflow-y: auto;
   z-index: 20;
 }
 
 .panel {
   width: min(460px, calc(100% - 40px));
+  margin: auto; /* 遮罩内垂直水平居中；面板超高时自动回落顶部，配合遮罩滚动 */
   background: var(--panel);
   border: 1px solid var(--gold-dim);
   border-radius: 16px;
