@@ -301,6 +301,8 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       ? {
           rows: gs.result.rows.map((r) => {
             const owner = gs.players.find((x) => x.seat === r.seat);
+            // 瞎掰王宣告行：演出按无芯片宣告牌评估（与引擎口径一致），失效芯片也不显示
+            const bluffRow = gs.bluffer?.seat === owner?.id;
           return {
             seat: r.seat,
             name: r.name,
@@ -317,7 +319,10 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
                       id: c.id,
                       r: c.r,
                       s: c.s,
-                      chipIds: (owner?.chips ?? []).filter((ch) => ch.on === c.id).map((ch) => ch.def),
+                      chipIds:
+                        bluffRow || !owner
+                          ? []
+                          : owner.chips.filter((ch) => ch.on === c.id && !ch.off).map((ch) => ch.def),
                     })),
             };
           }),

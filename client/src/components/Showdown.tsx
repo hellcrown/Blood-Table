@@ -271,7 +271,9 @@ export function Showdown({
 
         <div className="sd-controls">
           <span className="sd-hint">
-            {final
+            {mySeat == null || mySeat < 0
+              ? '🔭 观战中 · 可点击画面加速演示'
+              : final
               ? phase < 3
                 ? '点击画面可加速演示'
                 : '点击画面或按钮继续'
@@ -281,37 +283,39 @@ export function Showdown({
                   ? '点击画面可加速演示 · 按钮可提前确认'
                   : '点击画面或按钮立即确认 · 倒计时结束自动关闭'}
           </span>
-          <button
-            className="btn small"
-            disabled={myConfirmed && !final}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (final) {
-                if (phase < 3) setPhase(3);
-                else onClose?.();
-                return;
-              }
-              if (phase < 3) {
-                setPhase(3);
-                return;
-              }
-              if (myConfirmed) {
-                onClose?.();
-                return;
-              }
-              onConfirm();
-            }}
-          >
-            {final
-              ? phase < 3
-                ? '跳过动画'
-                : '继续'
-              : myConfirmed
-                ? '已确认'
-                : phase < 3
-                  ? '提前确认'
-                  : '确认'}
-          </button>
+          {mySeat != null && mySeat >= 0 && (
+            <button
+              className="btn small"
+              disabled={myConfirmed && !final}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (final) {
+                  if (phase < 3) setPhase(3);
+                  else onClose?.();
+                  return;
+                }
+                if (phase < 3) {
+                  setPhase(3);
+                  return;
+                }
+                if (myConfirmed) {
+                  onClose?.();
+                  return;
+                }
+                onConfirm();
+              }}
+            >
+              {final
+                ? phase < 3
+                  ? '跳过动画'
+                  : '继续'
+                : myConfirmed
+                  ? '已确认'
+                  : phase < 3
+                    ? '提前确认'
+                    : '确认'}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -1651,7 +1651,7 @@ function settle(gs: BloodState, now: number): void {
       id: c.id,
       r: c.r,
       s: c.s,
-      chipIds: bluffActive ? [] : p.chips.filter((ch) => ch.on === c.id).map((ch) => ch.def),
+      chipIds: bluffActive ? [] : p.chips.filter((ch) => ch.on === c.id && !ch.off).map((ch) => ch.def),
     }));
     return {
       seat: p.seat,
@@ -2122,8 +2122,12 @@ function processSettleQueue(gs: BloodState, now: number): void {
       return;
     }
   }
-  // 队列清空：若全员已确认对决展示则进入购买阶段
-  if (gs.phase === 'settle' && allDone(gs, (x) => x.sdSeen)) startBuyPhase(gs, now);
+  // 队列清空：全员已确认则进入购买阶段；未确认则确保确认窗口不少于 30s
+  // （挂起互动会把 deadline 重置为 60s 交互窗，解决后只补短不缩短——演示时长部分仍受保护）
+  if (gs.phase === 'settle') {
+    if (allDone(gs, (x) => x.sdSeen)) startBuyPhase(gs, now);
+    else if ((gs.deadline ?? 0) < now + BLOOD_SD_WAIT_MS) gs.deadline = now + BLOOD_SD_WAIT_MS;
+  }
 }
 
 /** 玩家看完对决演示：全员确认后立即统一进入购买阶段（倒计时同步；30s 上限由超时托管兜底） */

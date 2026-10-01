@@ -405,8 +405,14 @@ setInterval(() => {
   }
 }, 30_000).unref();
 
-// 房间驱动：超时托管 / 结算推进 / 空房清理
-setInterval(() => manager.tickAll(), 500).unref();
+// 房间驱动：超时托管 / 结算推进 / 空房清理（兜底 try/catch：tick 内未预期异常不得击穿进程）
+setInterval(() => {
+  try {
+    manager.tickAll();
+  } catch (e) {
+    console.error('[tick] 房间驱动异常:', e);
+  }
+}, 500).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log('==========================================');

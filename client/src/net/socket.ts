@@ -106,10 +106,15 @@ class Net {
       if (msg.t === 'hello') {
         this.token = msg.token;
         this.playerId = msg.playerId;
-        sessionStorage.setItem(TOKEN_KEY, msg.token);
+        try {
+          sessionStorage.setItem(TOKEN_KEY, msg.token);
+        } catch {
+          /* 隐私模式：token 仅内存持有，刷新需重新加入 */
+        }
       } else if (msg.t === 'state') {
         const code = typeof msg.view?.code === 'string' ? msg.view.code : null;
-        if (code && code !== this.notedCode) {
+        // code 变化或 lastRoom 被他处清空/覆盖（多标签页共享）时重写，自愈
+        if (code && (code !== this.notedCode || loadLastRoom()?.code !== code)) {
           this.notedCode = code;
           saveLastRoom(code);
         }
@@ -121,6 +126,7 @@ class Net {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
           this.clearToken();
+          this.notedCode = null; // 同步重置：否则重进同房间时首条 state 不写 lastRoom，横幅失效
           this.setView(null);
           if (msg.code !== 'TOKEN_INVALID') clearLastRoom(); // 房间已解散/被请离：清除「回到房间」；仅 token 失效时保留（房间可能还在，可重新加入）
           if (msg.code === 'KICKED') this.errorListeners.forEach((l) => l(msg.code, msg.msg)); // 被请离要给出原因
@@ -176,6 +182,7 @@ class Net {
   leaveRoom(): void {
     this.send({ t: 'leave' });
     this.clearToken();
+    this.notedCode = null; // 同步重置：否则重进同房间时首条 state 不写 lastRoom，横幅失效
     clearLastRoom();
     this.setView(null);
   }
@@ -198,7 +205,11 @@ class Net {
   }
 
   saveName(name: string): void {
-    localStorage.setItem(NAME_KEY, name);
+    try {
+      localStorage.setItem(NAME_KEY, name);
+    } catch {
+      /* 隐私模式/禁存储：昵称不持久化，不影响对局 */
+    }
   }
 
   loadName(): string {

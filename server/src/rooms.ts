@@ -251,7 +251,9 @@ export class RoomManager {
       send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
       return;
     }
-    if (typeof msg.t !== 'string') {
+    // null/非对象消息（如字面量 "null"）也按 BAD_MSG 拒绝——解引用必须在 try 内或先行判空，
+    // 否则 uncaughtException 会击穿整个进程（远程未认证即可触发）
+    if (msg == null || typeof msg.t !== 'string') {
       send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
       return;
     }
@@ -355,8 +357,10 @@ export class RoomManager {
     const now = Date.now();
     const pid = session.id;
     // 未入局会话（对局开始后才入座的玩家）不得执行对局动作：
-    // 否则各 b* 函数的 find(...)! 非空断言会 TypeError→INTERNAL，被刷时日志洪水且与真实故障不可区分
-    if (!bs.players.some((p) => p.id === pid)) {
+    // 否则各 b* 函数的 find(...)! 非空断言会 TypeError→INTERNAL，被刷时日志洪水且与真实故障不可区分。
+    // 豁免 bRematch/backToRoom：房主可能不在对局玩家内（对局中入座接任），终局后仍需可操作，否则房间锁死
+    const inGame = bs.players.some((p) => p.id === pid);
+    if (!inGame && msg.t !== 'bRematch' && msg.t !== 'backToRoom') {
       throw new blood.BloodError('NO_PLAYER', '你不在当前对局中（等待下一局开始）');
     }
     switch (msg.t) {
@@ -587,10 +591,10 @@ export class RoomManager {
         break;
       }
       case 'backToRoom': {
-        // hostId 为空（房主离场且无在线真人接任）时由第一个调用者接任，避免任意会话（含观战）可清对局
+        if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
+        // hostId 为空（房主离场且无在线真人接任）时由首个调用者接任——校验全部通过后才接任，失败不留副作用
         if (!room.hostId) room.hostId = session.id;
         if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
-        if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
         // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
         for (const s of [...room.sessions.values()]) {
           if (!s.bot && !s.connected) this.removeSession(room, s);
