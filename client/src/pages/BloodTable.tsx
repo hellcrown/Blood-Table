@@ -512,7 +512,7 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   // 自己的角色技能对评估的修正（特型演员/枪手/杂技演员/女仆）
   const mySeatView = view.players.find((p) => p.seat === view.me.seat);
-  const myCharId = view.me.tempChar || mySeatView?.charId || null;
+  const myCharId = mySeatView?.charOff ? null : view.me.tempChar || mySeatView?.charId || null;
   const toEvalMe = (cv: BloodCardView): EvalCard => applyCharEval([toEval(cv)], myCharId)[0];
 
   const playHint = useMemo(() => {

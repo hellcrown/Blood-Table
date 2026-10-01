@@ -52,6 +52,8 @@ export interface SeatView {
   isButton: boolean;
   role: 'sb' | 'bb' | null;
   lastAction: string | null;
+  /** 本街是否已行动（短全下限制判定用） */
+  acted?: boolean;
   hasCards: boolean;
   /** 自己的底牌，或摊牌后公开的底牌；其余情况为 null */
   hole: Card[] | null;
@@ -103,6 +105,8 @@ export interface TableView {
   minRaiseTo: number; // 最小加注到的额度（当前注 + 最小加注幅度）
   toActSeat: number | null;
   deadline: number | null; // 行动截止 epoch ms
+  /** 短全下限制：已行动者只能跟/弃（客户端下注控件据此收起加注） */
+  shortAllIn?: boolean;
   log: LogLine[];
   result: HandResultView | null;
   final: GameOverView | null;

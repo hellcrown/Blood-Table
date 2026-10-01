@@ -1852,7 +1852,8 @@ function settle(gs: BloodState, now: number): void {
         pushLog(gs, 'action', `${pname(me)}【我的名字？】有人打出【${gs.mynameText}】：获得 2 血筹`);
       }
     }
-    switch (p.charId) {
+    // effChar：无面人临时技能（tempChar）同样触发结算判定
+    switch (effChar(p)) {
       case 'miner':
         if (allSuitsMatch(gs, p, 'black')) {
           p.blood += settleGainBlood(gs, p, 3);
@@ -1931,7 +1932,7 @@ function settle(gs: BloodState, now: number): void {
   const playedIdsByP = new Map<string, string[]>();
   const selfDestructPids = new Set<string>();
   for (const p of gs.players) {
-    if (effChar(p) === 'gunner') gunnerFours.set(p.id, p.play.filter((c) => c.r === 4).map((c) => c.id));
+    if (effChar(p) === 'gunner') gunnerFours.set(p.id, p.play.filter((c) => finalRank(p, c) === 4).map((c) => c.id));
     if (
       p.chips
         .filter((ch) => p.play.some((card) => card.id === ch.on) && !ch.off)
@@ -4145,12 +4146,18 @@ export function bBlufferChallenge(gs: BloodState, playerId: string, challenge: b
   gs.secretPending = null;
   if (bl.challengers.length > 0) {
     bl.challenged = true;
-    // 核对出牌区与宣告是否完全一致
+    // 核对出牌区与宣告是否一致：按「修正后的候选」判定——真 JOKER/芯片改写/角色改写后的诚实宣告不算不一致
     const actual = bluffer.play.slice().sort((a, b) => a.id.localeCompare(b.id));
     const said = bl.declared.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const evCards = evalCardsFor(bluffer, gs);
     const consistent =
       actual.length === said.length &&
-      actual.every((c, i) => c.id === said[i].id && c.r === said[i].r && c.s === said[i].s);
+      actual.every((c, i) => {
+        if (c.id !== said[i].id) return false;
+        const ev = evCards.find((e) => e.id === c.id);
+        if (!ev) return c.r === said[i].r && c.s === said[i].s;
+        return said[i].s != null && ev.ranks.includes(said[i].r) && ev.suits.includes(said[i].s);
+      });
     if (consistent) {
       for (const cid of bl.challengers) {
         const c = gs.players.find((x) => x.id === cid)!;

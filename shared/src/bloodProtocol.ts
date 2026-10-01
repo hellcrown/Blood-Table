@@ -22,6 +22,8 @@ export interface BloodSeatView {
   charId: string | null;
   /** 无面人：当前临时技能（公开信息，仅血色模式） */
   tempChar?: string | null;
+  /** 暂时失忆：本回合角色技能失效（客户端提示口径用） */
+  charOff?: boolean;
   handCount: number;
   drawCount: number;
   itemCount: number;

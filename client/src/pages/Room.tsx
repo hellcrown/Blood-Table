@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RoomSettings, SeatView, TableView } from '@shared/protocol';
 import { net } from '../net/socket';
 
@@ -33,6 +33,7 @@ export function Room({ view }: { view: TableView }) {
   const [targetTicketsInput, setTargetTicketsInput] = useState(String(view.targetTickets || ''));
   // 房间密码草稿：服务端不下发密码本体，仅显示是否已设置
   const [pwDraft, setPwDraft] = useState('');
+  const pwDirtyRef = useRef(false); // 本轮 focus 后是否实际编辑过（防 blur 误清已设密码/Enter 后二次提交）
   const [pwMsg, setPwMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -138,6 +139,8 @@ export function Room({ view }: { view: TableView }) {
   /** 房主提交密码（失焦触发）：空串清除密码 */
   const commitPassword = () => {
     if (!isHost) return;
+    if (!pwDirtyRef.current) return; // 未编辑过（纯 blur/重复触发）：不提交
+    pwDirtyRef.current = false;
     const pw = pwDraft.trim();
     if (!pw && !view.hasPassword) return; // 无变化
     update({ password: pw });
@@ -386,7 +389,10 @@ export function Room({ view }: { view: TableView }) {
                 maxLength={12}
                 placeholder={view.hasPassword ? '已设置（输入新密码可修改）' : '未设置（可选）'}
                 disabled={!isHost}
-                onChange={(e) => setPwDraft(e.target.value)}
+                onChange={(e) => {
+                  pwDirtyRef.current = true;
+                  setPwDraft(e.target.value);
+                }}
                 onBlur={commitPassword}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') commitPassword();

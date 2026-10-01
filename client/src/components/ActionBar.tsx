@@ -56,7 +56,9 @@ function BetControls({
   const toCall = Math.max(0, view.currentBet - me.bet);
   const maxTo = me.bet + me.chips;
   const minTo = Math.min(view.minRaiseTo, maxTo);
-  const canRaise = maxTo > view.currentBet;
+  // 短全下限制：自己已行动且面临跟注时只能跟/弃（与服务端 blockedByShortAllIn 同口径）
+  const blockedByShortAllIn = !!view.shortAllIn && !!me.acted && toCall > 0;
+  const canRaise = maxTo > view.currentBet && !blockedByShortAllIn;
   const [raiseTo, setRaiseTo] = useState(minTo);
   const [showRaise, setShowRaise] = useState(false);
 

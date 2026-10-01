@@ -178,6 +178,8 @@ export function Showdown({
       onClose?.();
       return;
     }
+    // 观战者：可加速演示，但确认按钮/确认消息仅限参局玩家
+    if (mySeat == null || mySeat < 0) return;
     if (!myConfirmed) onConfirm();
   };
 
