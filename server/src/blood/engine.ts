@@ -4810,13 +4810,5 @@ export function bCeoDecide(gs: BloodState, playerId: string, accept: boolean, no
   gs.deadline = now + BLOOD_TURN_MS;
 }
 
-export function bloodRematch(gs: BloodState, now: number, charExpansion = false, expansion = false): BloodState {
-  return createBloodGame(
-    gs.seatCount,
-    gs.players.map((p) => ({ id: p.id, name: p.name, seat: p.seat })),
-    now,
-    charExpansion,
-    expansion,
-    { targetTickets: gs.target }, // 重开保留自定义目标票数
-  );
-}
+// 注：重开新局（再来一场）由 rooms.ts 按房间当前会话构建 createBloodGame——
+// 旧版 bloodRematch 从旧局 players 构建，会排除对局中入座的玩家（含接任房主），已删除。

@@ -20,7 +20,7 @@ export const MAX_ROOMS = 400; // 房间总数上限（防脚本刷房耗内存�
 const MAX_ROOMS_PER_IP = 5; // 单 IP 同时拥有的房间上限（留 CGNAT 余量：移动网络大量用户共享出口 IP）
 const MAX_JOIN_PER_MIN = 30;
 const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买
-const MAX_SPECTATORS = 10; // 单房间观战人数上限 // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买 // 单 IP 每分钟加入/建房尝试上限（防房间码枚举）
+const MAX_SPECTATORS = 10; // 单房间观战人数上限
 
 declare module 'ws' {
   interface WebSocket {
@@ -75,6 +75,8 @@ export interface Room {
   matchLogged: boolean;
   /** 当前对局开始时间（局时长统计用） */
   gameStartedAt: number | null;
+  /** 周期驱动连续异常计数（成功一次即清零；连续超限强制回收该房间） */
+  tickFails?: number;
 }
 
 function send(ws: WebSocket | null, msg: S2C): void {
@@ -148,10 +150,12 @@ function strArr(v: unknown): string[] {
   return v as string[];
 }
 
-/** 通用数组校验（元素为对象时用，如 bBlufferDeclare 的宣告列表） */
+/** 通用数组校验（元素须为非 null 对象，如 bBlufferDeclare 的宣告列表——null 元素会在引擎 map(d=>d.id) 处 TypeError→INTERNAL） */
 function arrOf(v: unknown): unknown[] {
   if (v == null) return [];
-  if (!Array.isArray(v)) throw new blood.BloodError('BAD_MSG', '参数格式错误');
+  if (!Array.isArray(v) || v.some((x) => x == null || typeof x !== 'object')) {
+    throw new blood.BloodError('BAD_MSG', '参数格式错误');
+  }
   return v;
 }
 
@@ -577,7 +581,12 @@ export class RoomManager {
         blood.bCleanerDel(bs, pid, msg.seat, (msg as { cardId?: string }).cardId ?? '', now);
         break;
       case 'bRematch': {
-        if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
+        if (room.hostId !== session.id) {
+          // 房主空缺或房主会话已断线（关标签页未走离开流程）时，终局后由首个可操作者接任，防房间锁死
+          const hostSess = room.hostId ? room.sessions.get(room.hostId) : undefined;
+          if (bs.phase !== 'gameover' || hostSess?.connected) throw new GameError('NOT_HOST', '只有房主可以再来一场');
+          room.hostId = session.id;
+        }
         if (bs.phase !== 'gameover') return;
         room.botBrains.clear(); // 记忆只在单局内有效
         room.botNextAct.clear();
@@ -585,15 +594,24 @@ export class RoomManager {
         for (const s of room.sessions.values()) {
           if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
         }
-        room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion); // 重开保留自定义目标
+        // 从房间当前会话重建对局（而非旧局 players）：对局中入座者不再被排除在重开局之外；
+        // 目标票数沿用房间设置（0=按新人数默认），与 handleStart 开局口径一致
+        const players = [...room.sessions.values()]
+          .filter((s) => !s.spectator)
+          .sort((a, b) => a.seat - b.seat)
+          .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+        room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
+          targetTickets: room.targetTickets || undefined,
+        });
         room.matchLogged = false;
         room.gameStartedAt = now;
         break;
       }
       case 'backToRoom': {
         if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
-        // hostId 为空（房主离场且无在线真人接任）时由首个调用者接任——校验全部通过后才接任，失败不留副作用
-        if (!room.hostId) room.hostId = session.id;
+        // hostId 空缺或房主会话已断线（关标签页未走离开流程）时由首个调用者接任——校验全部通过后才接任，失败不留副作用
+        const hostSess = room.hostId ? room.sessions.get(room.hostId) : undefined;
+        if (!room.hostId || !hostSess?.connected) room.hostId = session.id;
         if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
         // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
         for (const s of [...room.sessions.values()]) {
@@ -1126,10 +1144,6 @@ export class RoomManager {
         session.spectator ? '对局进行中暂不能入座，请等待下一局开始' : '对局进行中不能换座位',
       );
     }
-    if (session.spectator) {
-      session.spectator = false; // 观战转玩家
-      if (!room.hostId) room.hostId = session.id;
-    }
     const seat = Math.floor(msg.seat);
     if (!Number.isInteger(seat) || seat < 0 || seat >= room.maxPlayers) {
       throw new GameError('BAD_SEAT', '座位号无效');
@@ -1137,6 +1151,11 @@ export class RoomManager {
     if (seat === session.seat) return;
     if ([...room.sessions.values()].some((s) => s.seat === seat)) {
       throw new GameError('SEAT_TAKEN', '该座位已有人');
+    }
+    // 观战转玩家：全部校验通过后才翻转标志，失败不得留副作用（否则留下 seat=-1 的伪玩家会话）
+    if (session.spectator) {
+      session.spectator = false;
+      if (!room.hostId) room.hostId = session.id;
     }
     session.seat = seat;
     const player = g?.players.find((p) => p.id === session.id);
@@ -1189,10 +1208,18 @@ export class RoomManager {
     }
   }
 
-  private handleRematch(room: Room, session: Session): void {    const g = room.game;
+  private handleRematch(room: Room, session: Session): void {
+    const g = room.game;
     if (!g || room.mode !== 'classic') return;
     const cg = g as GState;
-    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');
+    if (room.hostId !== session.id) {
+      const hostSess = room.hostId ? room.sessions.get(room.hostId) : undefined;
+      // 终局且房主断线（关标签页）/空缺时由首个在场真人接任（观战者不接任）；其余保持 NOT_HOST 口径
+      if (cg.phase !== 'gameover' || hostSess?.connected || session.spectator) {
+        throw new GameError('NOT_HOST', '只有房主可以再来一场');
+      }
+      room.hostId = session.id;
+    }
     if (cg.phase !== 'gameover') return;
     for (const s of room.sessions.values()) {
       if (s.spectator) continue; // 观战者（seat=-1）不能进入牌局，否则成为幽灵玩家导致牌局死锁
@@ -1206,38 +1233,72 @@ export class RoomManager {
 
   /* ---------------- 周期驱动 ---------------- */
 
+  /**
+   * 全房间周期驱动。异常必须按房间隔离：try 包在整个循环外时，一个确定性抛错的「毒房间」
+   * 会每 500ms 复发一次，Map 迭代序在其后的所有房间从此不再被驱动，且其自身永远走不到空房回收。
+   */
   tickAll(): void {
     const now = Date.now();
     for (const room of [...this.rooms.values()]) {
-      const g = room.game;
-      let changed = false;
-      if (g && room.mode === 'blood') {
-        changed = blood.bloodTick(g as BloodState, now);
-        if (!changed) changed = this.runBots(room, g as BloodState, now);
-      } else if (g) {
-        const cg = g as GState;
-        if (cg.phase === 'result' && cg.resultAt != null && now >= cg.resultAt + RESULT_MS) {
-          this.reconcileRemoved(room);
-          engine.requestNextHand(cg, now);
-          changed = true;
-        } else {
-          changed = engine.tick(cg, now);
+      try {
+        this.tickRoom(room, now);
+        room.tickFails = 0;
+      } catch (e) {
+        room.tickFails = (room.tickFails ?? 0) + 1;
+        console.error(`[tick] 房间 ${room.code} 驱动异常(${room.tickFails}):`, e);
+        // 连续抛错判定为毒房间：强制回收，防日志洪水与全局停摆
+        if ((room.tickFails ?? 0) >= 3) {
+          console.error(`[tick] 房间 ${room.code} 连续异常，强制回收`);
+          this.disposeRoom(room);
         }
       }
-      // 回收只看真实玩家：机器人在线不阻止空房回收
-      const connectedCount = [...room.sessions.values()].filter((s) => s.connected && !s.bot).length;
-      if (connectedCount === 0) {
-        if (!room.emptySince) room.emptySince = now;
-        if (now - room.emptySince >= ROOM_IDLE_MS) {
-          for (const s of room.sessions.values()) this.tokenIndex.delete(s.token);
-          this.rooms.delete(room.code);
-          continue;
-        }
-      } else {
-        room.emptySince = 0;
-      }
-      if (changed) this.broadcast(room);
     }
+  }
+
+  private tickRoom(room: Room, now: number): void {
+    const g = room.game;
+    let changed = false;
+    if (g && room.mode === 'blood') {
+      changed = blood.bloodTick(g as BloodState, now);
+      if (!changed) changed = this.runBots(room, g as BloodState, now);
+    } else if (g) {
+      const cg = g as GState;
+      if (cg.phase === 'result' && cg.resultAt != null && now >= cg.resultAt + RESULT_MS) {
+        this.reconcileRemoved(room);
+        engine.requestNextHand(cg, now);
+        changed = true;
+      } else {
+        changed = engine.tick(cg, now);
+      }
+    }
+    // 回收只看真实玩家：机器人在线不阻止空房回收
+    const connectedCount = [...room.sessions.values()].filter((s) => s.connected && !s.bot).length;
+    if (connectedCount === 0) {
+      if (!room.emptySince) room.emptySince = now;
+      if (now - room.emptySince >= ROOM_IDLE_MS) {
+        this.disposeRoom(room);
+        return;
+      }
+    } else {
+      room.emptySince = 0;
+    }
+    if (changed) this.broadcast(room);
+  }
+
+  /** 解散房间：令牌全部失效并通知在线会话回大厅（空房回收为静默版，在线会话本身为空） */
+  private disposeRoom(room: Room): void {
+    for (const s of room.sessions.values()) {
+      this.tokenIndex.delete(s.token);
+      if (s.ws && s.connected) {
+        send(s.ws, { t: 'error', code: 'ROOM_CLOSED', msg: '房间出现异常已被关闭，请重新加入' });
+        try {
+          s.ws.close(4002, 'cleared');
+        } catch {
+          /* 忽略 */
+        }
+      }
+    }
+    this.rooms.delete(room.code);
   }
 
   private reconcileRemoved(room: Room): void {

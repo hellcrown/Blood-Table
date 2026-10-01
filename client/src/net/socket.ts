@@ -213,7 +213,18 @@ class Net {
   }
 
   loadName(): string {
-    return localStorage.getItem(NAME_KEY) ?? '';
+    try {
+      // 与服务端 cleanName 同口径：滤控制/零宽字符并限长——历史版本或手工改写的脏值不得直达输入框与服务器
+      return (
+        localStorage
+          .getItem(NAME_KEY)
+          ?.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029\ufeff]/g, '')
+          .trim()
+          .slice(0, 12) ?? ''
+      );
+    } catch {
+      return ''; // 隐私模式/禁存储
+    }
   }
 
   onView(l: ViewListener): () => void {

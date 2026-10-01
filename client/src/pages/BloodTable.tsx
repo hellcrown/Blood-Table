@@ -925,7 +925,9 @@ export function BloodTable({ view }: { view: BloodView }) {
               }`}
               onClick={
                 reactMode && !spectating
-                  ? () => {
+                  ? (e) => {
+                      // 互动模式下点面板内操作按钮（掠夺/指定目标等）只走按钮自身动作，不同时误发互动
+                      if ((e.target as HTMLElement).closest('button')) return;
                       send({ t: 'react', seat: opp.seat, kind: reactMode });
                       setReactMode(null);
                     }
@@ -2021,7 +2023,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                 {view.prompt.k === 'auctionPick' && (
                   <div className="act-row wrap">
                     {(view.prompt.options ?? []).map((defId, i) => (
-                      <button key={defId} className="btn primary" onClick={() => send({ t: 'bAuctionPick', idx: i })}>
+                      <button
+                        key={`${defId}-${i}`}
+                        className="btn primary"
+                        onClick={() => send({ t: 'bAuctionPick', idx: i })}
+                      >
                         暗置【{BLOOD_MARKET_BY_ID.get(defId)?.name}】并开始叫价
                       </button>
                     ))}
@@ -2043,7 +2049,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                     />
                     <button
                       className="btn primary"
-                      disabled={auctionAmt <= (view.prompt.amount ?? 0) || auctionAmt > view.me.blood}
+                      disabled={
+                        !Number.isFinite(auctionAmt) ||
+                        auctionAmt <= (view.prompt.amount ?? 0) ||
+                        auctionAmt > view.me.blood
+                      }
                       onClick={() => send({ t: 'bAuctionBid', amount: auctionAmt })}
                     >
                       叫价
@@ -2178,7 +2188,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       />
                       <button
                         className="btn primary"
-                        disabled={ceoSeat < 0 || ceoAmt < 1 || ceoAmt > view.me.blood}
+                        disabled={!Number.isFinite(ceoAmt) || ceoSeat < 0 || ceoAmt < 1 || ceoAmt > view.me.blood}
                         onClick={() => send({ t: 'bCeoGive', seat: ceoSeat, amount: ceoAmt })}
                       >
                         给予并等待回应

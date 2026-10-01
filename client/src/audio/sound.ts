@@ -217,7 +217,15 @@ function heartbeatThump(c: AudioContext, out: AudioNode, vol: number, strong: bo
 export function startBgm(): void {
   if (bgmVol <= 0) return;
   const c = ensureCtx();
-  if (!c || c.state !== 'running' || bgmNodes) return;
+  if (!c || bgmNodes) return;
+  if (c.state !== 'running') {
+    // 首次手势刚创建 AudioContext，ensureCtx 触发的 resume 尚未完成：
+    // 等恢复后补开一次，否则用户第一次拖 BGM 滑杆会无声
+    void c.resume().then(() => {
+      if (bgmVol > 0 && !bgmNodes) startBgm();
+    });
+    return;
+  }
   try {
     const gain = c.createGain();
     gain.gain.value = bgmVol;

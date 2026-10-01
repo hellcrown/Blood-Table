@@ -301,8 +301,9 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       ? {
           rows: gs.result.rows.map((r) => {
             const owner = gs.players.find((x) => x.seat === r.seat);
-            // 瞎掰王宣告行：演出按无芯片宣告牌评估（与引擎口径一致），失效芯片也不显示
-            const bluffRow = gs.bluffer?.seat === owner?.id;
+            // 瞎掰王宣告行：未被质疑时演出按无芯片宣告牌评估（与引擎口径一致），失效芯片也不显示；
+            // 被质疑后引擎按真实出牌区+芯片结算，该行芯片角标口径随之放开
+            const bluffRow = gs.bluffer != null && gs.bluffer.seat === owner?.id && !gs.bluffer.challenged;
           return {
             seat: r.seat,
             name: r.name,

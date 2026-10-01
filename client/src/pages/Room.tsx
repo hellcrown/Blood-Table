@@ -274,7 +274,7 @@ export function Room({ view }: { view: TableView }) {
                   value={settings.sb}
                   disabled={!isHost}
                   onChange={(e) => setSettings({ ...settings, sb: Number(e.target.value) })}
-                  onBlur={() => isHost && update({ sb: settings.sb })}
+                  onBlur={() => isHost && Number.isFinite(settings.sb) && update({ sb: settings.sb })}
                 />
               </label>
               <label>
@@ -285,7 +285,7 @@ export function Room({ view }: { view: TableView }) {
                   value={settings.bb}
                   disabled={!isHost}
                   onChange={(e) => setSettings({ ...settings, bb: Number(e.target.value) })}
-                  onBlur={() => isHost && update({ bb: settings.bb })}
+                  onBlur={() => isHost && Number.isFinite(settings.bb) && update({ bb: settings.bb })}
                 />
               </label>
               <label>
@@ -296,7 +296,7 @@ export function Room({ view }: { view: TableView }) {
                   value={settings.startChips}
                   disabled={!isHost}
                   onChange={(e) => setSettings({ ...settings, startChips: Number(e.target.value) })}
-                  onBlur={() => isHost && update({ startChips: settings.startChips })}
+                  onBlur={() => isHost && Number.isFinite(settings.startChips) && update({ startChips: settings.startChips })}
                 />
               </label>
               <label>

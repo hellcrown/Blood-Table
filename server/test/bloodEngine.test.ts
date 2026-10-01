@@ -34,7 +34,6 @@ import {
   bDemagPick,
   bPinpointVictimPick,
   bloodTick,
-  bloodRematch,
   createBloodGame,
   evalForPlayer,
   bestFive,
@@ -55,6 +54,18 @@ function make2p(): BloodState {
     bPickChar(gs, p.id, 'dealer', NOW);
   }
   return gs;
+}
+
+/** 重开新局（模拟 rooms.ts bRematch：按旧局玩家/设置重建，目标票数沿用） */
+function rematchLikeRoom(gs: BloodState, charExpansion = false): BloodState {
+  return createBloodGame(
+    gs.seatCount,
+    gs.players.map((p) => ({ id: p.id, name: p.name, seat: p.seat })),
+    NOW,
+    charExpansion,
+    false,
+    { targetTickets: gs.target },
+  );
 }
 
 function setupDone(gs: BloodState): void {
@@ -188,7 +199,7 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
   it('再来一场：完全重置', () => {
     const gs = make2p();
     setupDone(gs);
-    const fresh = bloodRematch(gs, NOW);
+    const fresh = rematchLikeRoom(gs);
     expect(fresh.phase).toBe('pick'); // 重置后重新选将
     for (const p of fresh.players) {
       expect(p.charOptions.length).toBe(2);
@@ -308,7 +319,7 @@ describe('血色引擎 · 选将与角色技能', () => {
       true,
     );
     // 再来一场保持基础池（仍进入选将）
-    const fresh = bloodRematch(gs, NOW, false);
+    const fresh = rematchLikeRoom(gs, false);
     expect(fresh.phase).toBe('pick');
     expect(fresh.players.every((p) => p.charOptions.length === 2)).toBe(true);
   });
@@ -1105,7 +1116,7 @@ describe('血色引擎 · 抢跑与连胜（速攻计分）', () => {
     expect(gs.phase).toBe('gameover');
     expect(gs.final!.winnerSeat).toBe(0);
     // 重开局：连胜/抢跑重置，目标保留
-    const again = bloodRematch(gs, NOW);
+    const again = rematchLikeRoom(gs);
     expect(again.firstChampDone).toBe(false);
     expect(again.champStreak).toBe(0);
     expect(again.lastChampSeat).toBeNull();

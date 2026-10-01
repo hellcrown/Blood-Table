@@ -87,6 +87,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [rooms, setRooms] = useState<RoomInfo[] | null>(null);
+  const [roomsError, setRoomsError] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackInfo[] | null>(null);
   const [feedbackError, setFeedbackError] = useState('');
@@ -156,15 +157,20 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   }, [token, loadFeedback, loadMatches]);
 
   const loadRooms = useCallback(async (t: string) => {
-    const r = await fetch('/api/admin/rooms', { headers: { Authorization: `Bearer ${t}` } });
-    if (r.status === 401) {
-      sessionStorage.removeItem(TOKEN_KEY);
-      setToken(null);
-      setError('登录已过期，请重新输入密码');
-      return;
+    try {
+      const r = await fetch('/api/admin/rooms', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      const data = (await r.json()) as { rooms?: RoomInfo[] };
+      setRooms(data.rooms ?? []);
+      setRoomsError('');
+    } catch {
+      setRoomsError('房间列表加载失败，请重试');
     }
-    const data = (await r.json()) as { rooms?: RoomInfo[] };
-    setRooms(data.rooms ?? []);
   }, []);
 
   useEffect(() => {
@@ -247,7 +253,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <div className="admin-rooms">
-              {rooms == null && <p className="hint">加载中…</p>}
+              {rooms == null && !roomsError && <p className="hint">加载中…</p>}
+              {roomsError && <p className="admin-error">{roomsError}</p>}
               {rooms != null && rooms.length === 0 && <p className="hint">当前没有房间</p>}
               {rooms != null && rooms.length > 0 && (
                 <table className="admin-table">
