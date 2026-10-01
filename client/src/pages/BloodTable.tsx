@@ -51,7 +51,19 @@ function playFlyFx(kind: 'flower' | 'egg', fromSeat: number, toSeat: number): vo
       splat.className = 'fx-splat';
       splat.textContent = '💥';
       toEl.appendChild(splat);
-      window.setTimeout(() => splat.remove(), 800);
+      window.setTimeout(() => splat.remove(), 1000);
+      // 蛋液滑落：数道蛋黄滴痕从撞击点向下滑，错峰拖尾
+      const drips = [-30, -12, 8, 28];
+      drips.forEach((off, i) => {
+        const d = document.createElement('span');
+        d.className = 'fx-drip';
+        d.style.left = `calc(50% + ${off + (Math.random() * 10 - 5)}px)`;
+        d.style.setProperty('--fall', `${70 + Math.random() * 55}px`);
+        d.style.setProperty('--dur', `${1.1 + Math.random() * 0.5}s`);
+        d.style.setProperty('--delay', `${0.1 + i * 0.08}s`);
+        toEl.appendChild(d);
+        window.setTimeout(() => d.remove(), 2200);
+      });
     } else {
       const pop = document.createElement('span');
       pop.className = 'fx-pop';
