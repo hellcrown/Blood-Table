@@ -14,7 +14,7 @@ export function bySeat(gs: GState, seat: number): GPlayer | null {
   return gs.players.find((p) => p.seat === seat) ?? null;
 }
 
-/** 从 fromSeat 起顺时针找第一个满足条件的玩家（不含 fromSeat 本身） */
+/** 从 fromSeat 起顺时针找第一个满足条件的玩家（扫描含 fromSeat 自身；找不到才返回 null） */
 export function nextPlayer(gs: GState, fromSeat: number, pred: (p: GPlayer) => boolean): GPlayer | null {
   for (let i = 1; i <= gs.seatCount; i++) {
     const p = bySeat(gs, (fromSeat + i) % gs.seatCount);

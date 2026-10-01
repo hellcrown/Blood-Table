@@ -3,6 +3,8 @@ import { evalBloodHand, applyImitate, type EvalCard } from '@shared/bloodEval';
 import type { BloodState, BPlayer } from '../src/blood/types';
 import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, bAgentAsk, bAgentDecide } from '../src/blood/engine';
 import { createGame, startHand, applyAction } from '../src/game/engine';
+import { RoomManager } from '../src/rooms';
+import { BloodError } from '../src/blood/engine';
 import { legalActionsFor } from '../src/game/betting';
 
 const NOW = 1000;
@@ -220,5 +222,36 @@ describe('第四轮回修', () => {
     expect(gs.agentSwap).toBeNull();
     expect(a.chips.map((c) => c.id)).toEqual(['chA']);
     expect(b.chips.map((c) => c.id)).toEqual(['chB']);
+  });
+});
+
+describe('第五轮 · 对抗性协议', () => {
+  it('对局进行中入座的会话发 b* 动作 → 干净的 NO_PLAYER（非 INTERNAL TypeError）', () => {
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = (m as unknown as { rooms: Map<string, { code: string; sessions: Map<string, { id: string }>; game: unknown }> }).rooms;
+    const stub = (ip: string, sent: unknown[] = []) =>
+      ({ readyState: 0, OPEN: 0, send: (d: string) => sent.push(JSON.parse(d)), on: () => {}, close: () => {}, ip }) as never;
+
+    const sent1: unknown[] = [];
+    m.handleCreate(stub('7.7.7.1', sent1), { t: 'create', name: '甲', maxPlayers: 3, mode: 'blood' });
+    const room = [...rooms.values()][0];
+    const hostSession = [...room.sessions.values()][0];
+    const sent2: unknown[] = [];
+    m.handleJoin(stub('7.7.7.2', sent2), { t: 'join', code: room.code, name: '乙' });
+    m.handleStart(room, hostSession);
+    expect(room.game).not.toBeNull();
+
+    // 对局开始后第三人才入座：session 存在但不在于 bs.players
+    const sent3: unknown[] = [];
+    m.handleJoin(stub('7.7.7.3', sent3), { t: 'join', code: room.code, name: '丙' });
+    const session3 = [...room.sessions.values()].at(-1)!;
+
+    expect(() =>
+      (m as unknown as { handleBlood: (r: unknown, s: unknown, msg: unknown) => void }).handleBlood(room, session3, {
+        t: 'bSwap',
+        cardIds: [],
+      }),
+    ).toThrowError(BloodError);
   });
 });

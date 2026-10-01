@@ -249,6 +249,10 @@ export class RoomManager {
       send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
       return;
     }
+    if (typeof msg.t !== 'string') {
+      send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
+      return;
+    }
     try {
       this.dispatch(ws, msg);
     } catch (e) {
@@ -345,6 +349,11 @@ export class RoomManager {
     const bs = g as BloodState;
     const now = Date.now();
     const pid = session.id;
+    // 未入局会话（对局开始后才入座的玩家）不得执行对局动作：
+    // 否则各 b* 函数的 find(...)! 非空断言会 TypeError→INTERNAL，被刷时日志洪水且与真实故障不可区分
+    if (!bs.players.some((p) => p.id === pid)) {
+      throw new blood.BloodError('NO_PLAYER', '你不在当前对局中（等待下一局开始）');
+    }
     switch (msg.t) {
       case 'bPickChar':
         blood.bPickChar(bs, pid, msg.charId, now);
@@ -563,21 +572,26 @@ export class RoomManager {
         if (bs.phase !== 'gameover') return;
         room.botBrains.clear(); // 记忆只在单局内有效
         room.botNextAct.clear();
+        // 重开同样补节拍偏移（addBot 的错开被 clear 掉了）
+        for (const s of room.sessions.values()) {
+          if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
+        }
         room.game = blood.bloodRematch(bs, now, room.charExpansion, room.expansion); // 重开保留自定义目标
         room.matchLogged = false;
         room.gameStartedAt = now;
         break;
       }
       case 'backToRoom': {
-        if (room.hostId && room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
+        // hostId 为空（房主离场且无在线真人接任）时由第一个调用者接任，避免任意会话（含观战）可清对局
+        if (!room.hostId) room.hostId = session.id;
+        if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
         if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
         // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
         for (const s of [...room.sessions.values()]) {
           if (!s.bot && !s.connected) this.removeSession(room, s);
         }
         room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
-        this.broadcast(room);
-        break;
+        break; // switch 收尾统一 broadcast，不再重复
       }
       default:
         send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
@@ -877,6 +891,10 @@ export class RoomManager {
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
       room.botBrains.clear(); // 记忆只在单局内有效（不做跨局学习）
       room.botNextAct.clear();
+      // 开局给各 bot 随机节拍偏移（addBot 时的错开会被这里清掉，重新错开防同 tick 对齐）
+      for (const s of room.sessions.values()) {
+        if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
+      }
       room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
         targetTickets: room.targetTickets || undefined,
       });

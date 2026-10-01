@@ -4092,6 +4092,9 @@ export function bBlufferDeclare(
   }
   const p = gs.players.find((x) => x.id === playerId)!;
   if (declared.length !== p.play.length) throw new BloodError('BAD_COUNT', '须对出牌区每张牌逐一宣告');
+  if (new Set(declared.map((d) => d.id)).size !== declared.length) {
+    throw new BloodError('BAD_CARD', '宣告存在重复的牌');
+  }
   const playIds = new Set(p.play.map((c) => c.id));
   for (const d of declared) {
     if (!playIds.has(d.id)) throw new BloodError('BAD_CARD', '宣告的牌不在你的出牌区');
