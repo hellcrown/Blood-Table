@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { playSfx } from '../audio/sound';
+import type { FxEvent } from '../net/socket';
 import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
 import { applyCharEval } from '@shared/bloodChars';
 import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
@@ -14,9 +15,55 @@ import { CardView } from '../components/Card';
 import { BCard, cardLabel, effLabel, effRankOf, sortHandByType } from '../components/BloodCard';
 import { Showdown, type ShowdownRow } from '../components/Showdown';
 
+/** 鲜花/鸡蛋飞行动画：从 from 座位面板中心飞向 to 座位面板中心；鸡蛋落地震动+糊脸 */
+function playFlyFx(kind: 'flower' | 'egg', fromSeat: number, toSeat: number): void {
+  const fromEl = document.querySelector<HTMLElement>(`[data-seat="${fromSeat}"]`);
+  const toEl = document.querySelector<HTMLElement>(`[data-seat="${toSeat}"]`);
+  if (!fromEl || !toEl) return;
+  const a = fromEl.getBoundingClientRect();
+  const b = toEl.getBoundingClientRect();
+  playSfx('tap');
+  const el = document.createElement('div');
+  el.className = 'fx-fly';
+  el.textContent = kind === 'flower' ? '🌸' : '🥚';
+  el.style.left = `${a.left + a.width / 2 - 16}px`;
+  el.style.top = `${a.top + a.height / 2 - 16}px`;
+  document.body.appendChild(el);
+  const dx = b.left + b.width / 2 - (a.left + a.width / 2);
+  const dy = b.top + b.height / 2 - (a.top + a.height / 2);
+  const arc = kind === 'flower' ? -60 : -40; // 上抛弧线
+  el.animate(
+    [
+      { transform: 'translate(0,0) scale(1)' },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 + arc}px) scale(1.15)`, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.9)` },
+    ],
+    { duration: 650, easing: 'ease-in-out' },
+  ).onfinish = () => {
+    el.remove();
+    if (kind === 'egg') {
+      playSfx('lock');
+      toEl.classList.remove('fx-shake');
+      void toEl.offsetWidth; // 重启动画
+      toEl.classList.add('fx-shake');
+      window.setTimeout(() => toEl.classList.remove('fx-shake'), 600);
+      const splat = document.createElement('span');
+      splat.className = 'fx-splat';
+      splat.textContent = '💥';
+      toEl.appendChild(splat);
+      window.setTimeout(() => splat.remove(), 800);
+    } else {
+      const pop = document.createElement('span');
+      pop.className = 'fx-pop';
+      pop.textContent = '🌸';
+      toEl.appendChild(pop);
+      window.setTimeout(() => pop.remove(), 900);
+    }
+  };
+}
+
 /** 牌型天梯（高→低），与规则书牌型提示卡一致 */
-const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [
-  { name: '七条', desc: '7 张点数相同的牌', chipOnly: true },
+const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { name: '七条', desc: '7 张点数相同的牌', chipOnly: true },
   { name: '同花六条', desc: '6 张点数、花色皆相同', chipOnly: true },
   { name: '六条', desc: '6 张点数相同的牌', chipOnly: true },
   { name: '同花五条', desc: '5 张点数、花色皆相同', chipOnly: true },
@@ -293,6 +340,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 鲜花/鸡蛋互动：选中的互动类型（再点对方面板发送） */
+  const [reactMode, setReactMode] = useState<'flower' | 'egg' | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null); // 牌局记录中点击的牌 def id
   const [oppItems, setOppItems] = useState<{ name: string; defs: string[] } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
@@ -343,6 +392,13 @@ export function BloodTable({ view }: { view: BloodView }) {
     prevAnnAtRef.current = at;
     if (at && at !== prev) playSfx('coin');
   }, [view.announce]);
+
+  // ---- 鲜花/鸡蛋飞行特效：全桌广播，从发送者面板飞向目标面板；鸡蛋落地震动 + 糊脸 ----
+  useEffect(() => {
+    return net.onFx(({ kind, from, to }) => {
+      playFlyFx(kind, from, to);
+    });
+  }, []);
 
   // 黑市宣告特效数据（按效果类型定制）
   const annDef = view.announce ? BLOOD_MARKET_BY_ID.get(view.announce.defId) : undefined;
@@ -774,6 +830,24 @@ export function BloodTable({ view }: { view: BloodView }) {
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setSettingsOpen(true)}>
               ⚙
             </button>
+            {!spectating && (
+              <>
+                <button
+                  className={`btn tiny ${reactMode === 'flower' ? 'primary' : 'ghost'}`}
+                  title="给对局中的玩家送一朵鲜花：点后再点对方面板发送"
+                  onClick={() => setReactMode((m) => (m === 'flower' ? null : 'flower'))}
+                >
+                  🌸
+                </button>
+                <button
+                  className={`btn tiny ${reactMode === 'egg' ? 'primary' : 'ghost'}`}
+                  title="向对局中的玩家扔一个鸡蛋：点后再点对方面板发送"
+                  onClick={() => setReactMode((m) => (m === 'egg' ? null : 'egg'))}
+                >
+                  🥚
+                </button>
+              </>
+            )}
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
             </button>
@@ -833,7 +907,18 @@ export function BloodTable({ view }: { view: BloodView }) {
           {opponents.map((opp) => (
             <div
               key={opp.seat}
-              className={`bp-panel seat-${opp.seat % 4} ${oppRingArea(opp.seat, view)} ${view.turnSeat === opp.seat ? 'to-act' : ''}`}
+              data-seat={opp.seat}
+              className={`bp-panel seat-${opp.seat % 4} ${oppRingArea(opp.seat, view)} ${view.turnSeat === opp.seat ? 'to-act' : ''} ${
+                reactMode ? 'react-target' : ''
+              }`}
+              onClick={
+                reactMode && !spectating
+                  ? () => {
+                      send({ t: 'react', seat: opp.seat, kind: reactMode });
+                      setReactMode(null);
+                    }
+                  : undefined
+              }
             >
               <div className="bp-head">
                 <span className="bp-name">
@@ -1036,7 +1121,7 @@ export function BloodTable({ view }: { view: BloodView }) {
           </div>
 
           {!spectating && (
-          <div className={`bp-panel mine ring-bottom seat-${view.me.seat % 4} self ${view.turnSeat === view.me.seat ? 'to-act' : ''}`}>
+          <div className={`bp-panel mine ring-bottom seat-${view.me.seat % 4} self ${view.turnSeat === view.me.seat ? 'to-act' : ''}`} data-seat={view.me.seat}>
             <div className="bp-head">
               <span className="bp-name">
                 {me.name}

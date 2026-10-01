@@ -42,6 +42,8 @@ export interface Session {
   bot?: boolean;
   /** 观战者：不占座位、只收视图（seat 恒为 -1） */
   spectator?: boolean;
+  /** 上次鲜花/鸡蛋互动时间（限频用） */
+  lastReact?: number;
 }
 
 export interface Room {
@@ -325,6 +327,9 @@ export class RoomManager {
         return;
       case 'rematch':
         this.handleRematch(room, session);
+        return;
+      case 'react':
+        this.handleReact(room, session, msg);
         return;
       default:
         this.handleBlood(room, session, msg);
@@ -1156,8 +1161,31 @@ export class RoomManager {
     this.broadcast(room);
   }
 
-  private handleRematch(room: Room, session: Session): void {
+  /** 鲜花/鸡蛋互动：校验后向全桌（含观战者）广播飞行特效指令；限频 2s/人 防刷屏 */
+  private handleReact(
+    room: Room,
+    session: Session,
+    msg: Extract<C2S, { t: 'react' }>,
+  ): void {
     const g = room.game;
+    if (room.mode !== 'blood' || !g || !('market' in g)) throw new GameError('NO_GAME', '血色对局尚未开始');
+    const bs = g as BloodState;
+    const from = bs.players.find((p) => p.id === session.id);
+    if (!from) throw new blood.BloodError('NO_PLAYER', '你不在当前对局中');
+    if (msg.kind !== 'flower' && msg.kind !== 'egg') throw new GameError('BAD_MSG', '未知互动类型');
+    const now = Date.now();
+    if (session.lastReact != null && now - session.lastReact < 2000) {
+      throw new GameError('RATE_LIMITED', '互动太频繁，休息一下');
+    }
+    session.lastReact = now;
+    const to = bs.players.find((p) => p.seat === msg.seat);
+    if (!to || to.id === from.id) throw new blood.BloodError('BAD_TARGET', '目标无效');
+    for (const s of room.sessions.values()) {
+      send(s.ws, { t: 'fx', kind: msg.kind, from: from.seat, to: to.seat });
+    }
+  }
+
+  private handleRematch(room: Room, session: Session): void {    const g = room.game;
     if (!g || room.mode !== 'classic') return;
     const cg = g as GState;
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一场');

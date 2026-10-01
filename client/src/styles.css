@@ -1064,6 +1064,7 @@ select:focus {
 }
 
 .bp-panel {
+  position: relative; /* 锚定鲜花/鸡蛋特效层 */
   background: rgba(20, 6, 9, 0.75);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -3751,4 +3752,63 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-top: 4px;
+}
+
+/* ---------- 鲜花/鸡蛋互动 ---------- */
+
+.react-target {
+  cursor: crosshair;
+  outline: 2px dashed var(--gold);
+  outline-offset: 2px;
+}
+
+.fx-fly {
+  position: fixed;
+  z-index: 70;
+  font-size: 32px;
+  line-height: 1;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+}
+
+@keyframes fx-shake-kf {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-7px) rotate(-1deg); }
+  35% { transform: translateX(6px) rotate(1deg); }
+  55% { transform: translateX(-5px); }
+  75% { transform: translateX(4px); }
+}
+
+.fx-shake {
+  animation: fx-shake-kf 0.5s ease-in-out;
+}
+
+.fx-splat {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 34px;
+  pointer-events: none;
+  animation: fx-splat-kf 0.8s ease-out both;
+}
+
+@keyframes fx-splat-kf {
+  0% { transform: scale(0.4); opacity: 0; }
+  25% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1) translateY(10px); opacity: 0; }
+}
+
+.fx-pop {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 30px;
+  pointer-events: none;
+  animation: fx-pop-kf 0.9s ease-out both;
+}
+
+@keyframes fx-pop-kf {
+  0% { transform: scale(0.3); opacity: 0; }
+  30% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1) translateY(-16px); opacity: 0; }
 }

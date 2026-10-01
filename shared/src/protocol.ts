@@ -155,6 +155,7 @@ export type C2S =
   | { t: 'act'; action: PlayerAction }
   | { t: 'nextHand' }
   | { t: 'rematch' }
+  | { t: 'react'; seat: number; kind: 'flower' | 'egg' }
   | { t: 'ping'; n: number }
   | import('./bloodProtocol').BloodAction;
 
@@ -164,5 +165,6 @@ export type S2C =
   | { t: 'hello'; token: string; playerId: string }
   | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView }
   | { t: 'event'; line: LogLine }
+  | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }
   | { t: 'pong'; n: number };

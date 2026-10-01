@@ -7,6 +7,12 @@ export type AnyView = import('@shared/protocol').TableView | BloodView;
 type ViewListener = (v: AnyView | null) => void;
 type ErrorListener = (code: string, msg: string) => void;
 type StatusListener = (s: ConnStatus) => void;
+export interface FxEvent {
+  kind: 'flower' | 'egg';
+  from: number;
+  to: number;
+}
+type FxListener = (fx: FxEvent) => void;
 
 const TOKEN_KEY = 'blood.token';
 const NAME_KEY = 'blood.name';
@@ -57,6 +63,7 @@ class Net {
   private viewListeners = new Set<ViewListener>();
   private errorListeners = new Set<ErrorListener>();
   private statusListeners = new Set<StatusListener>();
+  private fxListeners = new Set<FxListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
   private started = false;
@@ -108,6 +115,8 @@ class Net {
         }
         this.view = msg.view as AnyView;
         this.viewListeners.forEach((l) => l(msg.view as AnyView));
+      } else if (msg.t === 'fx') {
+        this.fxListeners.forEach((l) => l(msg));
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -209,6 +218,12 @@ class Net {
   onStatus(l: StatusListener): () => void {
     this.statusListeners.add(l);
     return () => this.statusListeners.delete(l);
+  }
+
+  /** 鲜花/鸡蛋等全桌互动特效（一次性事件，不入 state/log） */
+  onFx(l: FxListener): () => void {
+    this.fxListeners.add(l);
+    return () => this.fxListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {
