@@ -1120,8 +1120,9 @@ export class RoomManager {
         const brain = room.botBrains.get(bot.id) ?? createBrain();
         room.botBrains.set(bot.id, brain); // 写回：跨回合记忆与长线策略在开局/重开清空后能重新积累
         acted = botAct(brain, gs, bot.id, now);
-      } catch {
-        acted = false; // 决策异常回退：交由超时托管安全默认
+      } catch (e) {
+        acted = false; // 决策异常回退：交由超时托管安全默认（留痕便于发现 bot 决策 bug）
+        console.warn('[bot] 决策异常（回退托管）:', e instanceof Error ? e.message : e);
       }
       if (acted && gs.phase === 'buy' && (gs.announce?.at ?? 0) > buyAnnounceAt) {
         // 购买阶段发生了购买/宣告：全场停顿 5s 再进行下一次购买（含轮到下一位）

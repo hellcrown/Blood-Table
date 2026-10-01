@@ -32,14 +32,10 @@ function playFlyFx(kind: 'flower' | 'egg', fromSeat: number, toSeat: number): vo
   const dx = b.left + b.width / 2 - (a.left + a.width / 2);
   const dy = b.top + b.height / 2 - (a.top + a.height / 2);
   const arc = kind === 'flower' ? -60 : -40; // 上抛弧线
-  el.animate(
-    [
-      { transform: 'translate(0,0) scale(1)' },
-      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 + arc}px) scale(1.15)`, offset: 0.5 },
-      { transform: `translate(${dx}px, ${dy}px) scale(0.9)` },
-    ],
-    { duration: 650, easing: 'ease-in-out' },
-  ).onfinish = () => {
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
     el.remove();
     if (kind === 'egg') {
       playSfx('lock');
@@ -71,7 +67,17 @@ function playFlyFx(kind: 'flower' | 'egg', fromSeat: number, toSeat: number): vo
       toEl.appendChild(pop);
       window.setTimeout(() => pop.remove(), 900);
     }
-  };
+  }
+  const anim = el.animate(
+    [
+      { transform: 'translate(0,0) scale(1)' },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 + arc}px) scale(1.15)`, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.9)` },
+    ],
+    { duration: 650, easing: 'ease-in-out' },
+  );
+  anim.onfinish = finish;
+  window.setTimeout(finish, 900); // 后台标签页个别 WebView 不派发 onfinish：兜底清理
 }
 
 /** 牌型天梯（高→低），与规则书牌型提示卡一致 */
@@ -927,7 +933,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                 reactMode && !spectating
                   ? (e) => {
                       // 互动模式下点面板内操作按钮（掠夺/指定目标等）只走按钮自身动作，不同时误发互动
-                      if ((e.target as HTMLElement).closest('button')) return;
+                      if ((e.target as HTMLElement).closest('button,.log-card')) return;
                       send({ t: 'react', seat: opp.seat, kind: reactMode });
                       setReactMode(null);
                     }
@@ -2110,7 +2116,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <span key={c.id} className="act-row wrap">
                           <span className="hint">{cardLabel(c)} →</span>
                           <select
-                            value={blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r)}
+                            value={blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r)}
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
@@ -2129,7 +2135,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
-                                [c.id]: { r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r), s: e.target.value },
+                                [c.id]: { r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r), s: e.target.value },
                               }))
                             }
                           >
@@ -2149,7 +2155,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                             t: 'bBlufferDeclare',
                             declared: (view.me.playCards ?? []).map((c) => ({
                               id: c.id,
-                              r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : c.r),
+                              r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r),
                               s: (blufferDecl[c.id]?.s ?? c.s ?? 's') as BloodCardView['s'],
                             })),
                           })

@@ -218,7 +218,11 @@ export function updateBrains(brains: Map<string, BotBrain>, botIds: string[], gs
       }
       brain.lastRound.set(-1, gs.round);
     }
-    // 公开的换牌张数（'换牌 N张' 只在换牌阶段存在，标记回合防过期使用）
+    // 公开的换牌张数（'换牌 N张' 只在换牌阶段存在）；新回合开始时清掉上一回合的旧值防过期误用
+    if ((brain.lastRound.get(-2) ?? -1) !== gs.round) {
+      brain.swapped.clear();
+      brain.lastRound.set(-2, gs.round);
+    }
     for (const p of gs.players) {
       if (p.id === id) continue;
       const m = /换牌 (\d+)张/.exec(p.lastAction ?? '');
@@ -364,7 +368,7 @@ function monteCarloWinProb(
   if (deadline && Date.now() > deadline) return 0.35; // 预算耗尽：返回偏保守的中性估计
   const start = Date.now();
   const opps = gs.players.filter((o) => o.id !== me.id && o.locked);
-  if (opps.length === 0) return 1;
+  if (opps.length === 0) return 0.5; // 无可采样对手：中性估计（原 1 会让弱势判定恒假）
   const mine = evalPlay(gs, me, cards);
   let score = 0;
   for (let s = 0; s < samples; s++) {
@@ -571,15 +575,20 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
     case 'itemAsk': {
       // 阶段边界道具询问：按效果各自的价值启发决定使用或跳过
       const eff = BLOOD_MARKET_BY_ID.get(prompt.defId ?? '')?.effect;
-      const best = bestKeep(gs, p, Math.min(5, p.hand.length), curStrategy(brain, p));
+      // 阶段边界牌源：preReveal（喇叭/荷官证/虹膜）时手牌已清空、牌在出牌区；swapEnd（橡皮/密信/干扰器）时在手牌
+      const src = gs.phase === 'revealPre' ? p.play : p.hand;
+      const best = bestKeep(gs, p, Math.min(5, src.length), curStrategy(brain, p), src);
       let use = true;
       switch (eff?.k) {
         case 'secretNoteFx':
           use = p.blood >= 4; // 保留基本血筹储备
           break;
-        case 'eraserFx':
-          use = monteCarloWinProb(gs, brain, p, best) < 0.3; // 自己弱势时压对手牌型
+        case 'eraserFx': {
+          const wp = monteCarloWinProb(gs, brain, p, best);
+          // 手牌弱（或无可采样对手且牌力低于中位）时压对手牌型
+          use = wp < 0.3 || (wp === 0.5 && evalPlay(gs, p, best).pips < 24);
           break;
+        }
         case 'loudspeakerFx':
           use = monteCarloWinProb(gs, brain, p, best) > 0.7;
           break;
@@ -802,7 +811,7 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
     }
     case 'designerDiscard': {
       const ev = evalPlay(gs, p, p.play);
-      const sorted = [...p.play].sort((a, b) => a.r - b.r);
+      const sorted = [...p.play].sort((a, b) => (a.r === 0 ? 99 : a.r) - (b.r === 0 ? 99 : b.r));
       blood.bDesignerDiscard(gs, p.id, ev.cat <= 3 ? sorted.slice(0, 2).map((c) => c.id) : [], now);
       return true;
     }
@@ -898,7 +907,7 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
     case 'facelessPick': {
       const opts = prompt.options ?? [];
       if (opts[0]) blood.bFacelessPick(gs, p.id, opts[0], now);
-      return true;
+      return false;
     }
     case 'blufferDeclare': {
       blood.bBlufferDeclare(
@@ -1122,6 +1131,11 @@ function actRemove(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): bo
 
 /* ---- 对决期芯片决策 ---- */
 function actRevealDecide(gs: BloodState, p: BPlayer, t: string | undefined, chipId: string, now: number): boolean {
+  // 决策排队期间芯片可能被消磁枪/屏蔽器打掉：直接跳过，避免每 tick 重抛同一异常停滞 60s
+  if (p.chips.find((c) => c.id === chipId)?.off) {
+    blood.bSkipDecision(gs, p.id, now);
+    return true;
+  }
   if (t === 'spring') {
     // ±2 可能越界（2-14 钳制）：按宿主牌最终点数选可用修正量，无可用量则跳过
     const chip = p.chips.find((c) => c.id === chipId);

@@ -1846,7 +1846,8 @@ function settle(gs: BloodState, now: number): void {
     const p = bySeat(gs, r.seat)!;
     // 我的名字？：任何玩家（含自己）打出自定义牌型 → 获得 2 血筹
     if (gs.mynameCat != null && r.cat === gs.mynameCat && gs.mynameText) {
-      const me = gs.players.find((x) => x.charId === 'myname');
+      // effChar：失忆/无面人临时态口径与结算 switch 一致
+      const me = gs.players.find((x) => effChar(x) === 'myname');
       if (me) {
         me.blood += 2;
         pushLog(gs, 'action', `${pname(me)}【我的名字？】有人打出【${gs.mynameText}】：获得 2 血筹`);
