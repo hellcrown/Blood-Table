@@ -3785,30 +3785,33 @@ body {
 
 .fx-splat {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  font-size: 34px;
+  top: 50%;
+  left: 50%;
+  font-size: 76px;
+  z-index: 6;
   pointer-events: none;
-  animation: fx-splat-kf 0.8s ease-out both;
+  animation: fx-splat-kf 1s ease-out both;
 }
 
 @keyframes fx-splat-kf {
-  0% { transform: scale(0.4); opacity: 0; }
-  25% { transform: scale(1.25); opacity: 1; }
-  100% { transform: scale(1) translateY(10px); opacity: 0; }
+  0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  30% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+  70% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
 }
 
 .fx-pop {
   position: absolute;
-  top: 6px;
-  right: 10px;
-  font-size: 30px;
+  top: 50%;
+  left: 50%;
+  font-size: 48px;
+  z-index: 6;
   pointer-events: none;
-  animation: fx-pop-kf 0.9s ease-out both;
+  animation: fx-pop-kf 1.1s ease-out both;
 }
 
 @keyframes fx-pop-kf {
-  0% { transform: scale(0.3); opacity: 0; }
-  30% { transform: scale(1.2); opacity: 1; }
-  100% { transform: scale(1) translateY(-16px); opacity: 0; }
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  30% { transform: translate(-50%, -60%) scale(1.25); opacity: 1; }
+  100% { transform: translate(-50%, -140%) scale(1); opacity: 0; }
 }
