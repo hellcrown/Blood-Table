@@ -190,7 +190,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, rooms: manager.roomCount() }));
+    res.end(JSON.stringify({ ok: true, rooms: manager.roomCount(), games: manager.countActiveGames(), draining: manager.isDraining() }));
     return;
   }
   if (url.pathname === '/api/info') {
@@ -406,8 +406,11 @@ setInterval(() => {
 }, 30_000).unref();
 
 // 房间驱动：超时托管 / 结算推进 / 空房清理（兜底 try/catch：tick 内未预期异常不得击穿进程）
+// 排水：deploy.sh 重启前写入 server/.draining 标记，tick 检测后向对局广播更新公告
+const DRAIN_MARKER = path.resolve(process.cwd(), '.draining');
 setInterval(() => {
   try {
+    manager.setDraining(fs.existsSync(DRAIN_MARKER));
     manager.tickAll();
   } catch (e) {
     console.error('[tick] 房间驱动异常:', e);

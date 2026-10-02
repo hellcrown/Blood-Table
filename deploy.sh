@@ -31,6 +31,30 @@ PORT="${PORT:-3000}"
 # 千人并发连接需要大量 fd，Ubuntu 默认软上限 1024 会先爆（EMFILE）；pm2 守护进程继承本 shell 限制，
 # 若守护进程已按旧限制运行，需先 `pm2 kill` 再重新执行本脚本
 ulimit -n 65535 2>/dev/null || ulimit -n "$(ulimit -H)" 2>/dev/null || true
+
+# 4.5 排水（drain）：写入标记 → 服务器向进行中对局广播更新公告 → 等待对局自然结束后再重启。
+# 跳过：DEPLOY_NO_DRAIN=1 bash deploy.sh 或 bash deploy.sh --now；上限：DEPLOY_DRAIN_MAX 秒（默认 900）
+if [ "${1:-}" != "--now" ] && [ "${DEPLOY_NO_DRAIN:-}" != "1" ] && curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
+  touch .draining
+  DRAIN_MAX="${DEPLOY_DRAIN_MAX:-900}"
+  DRAIN_WAITED=0
+  echo "⏳ 检测到部署排水模式：等待进行中的对局结束（上限 ${DRAIN_MAX}s，Ctrl+C 放弃等待；DEPLOY_NO_DRAIN=1 可跳过）"
+  while :; do
+    GAMES=$(curl -sf "http://127.0.0.1:$PORT/api/health" | grep -o '"games":[0-9]*' | grep -o '[0-9]*' || echo 0)
+    if [ "${GAMES:-0}" = "0" ]; then
+      echo "✅ 所有对局已结束（等待 ${DRAIN_WAITED}s），继续部署"
+      break
+    fi
+    if [ "$DRAIN_WAITED" -ge "$DRAIN_MAX" ]; then
+      echo "⚠️ 等待超时（${DRAIN_WAITED}s）仍有 $GAMES 场对局进行：强制重启"
+      break
+    fi
+    sleep 10
+    DRAIN_WAITED=$((DRAIN_WAITED + 10))
+  done
+fi
+rm -f .draining
+
 pm2 delete blood-table >/dev/null 2>&1 || true
 PORT="$PORT" ADMIN_KEY="$ADMIN_KEY_VALUE" pm2 start npm --name blood-table -- start
 pm2 save

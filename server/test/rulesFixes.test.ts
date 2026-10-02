@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { evalBloodHand, applyImitate, type EvalCard } from '@shared/bloodEval';
 import type { BloodState, BPlayer } from '../src/blood/types';
 import { bloodTick, createBloodGame, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, bAgentAsk, bAgentDecide } from '../src/blood/engine';
@@ -253,5 +253,42 @@ describe('第五轮 · 对抗性协议', () => {
         cardIds: [],
       }),
     ).toThrowError(BloodError);
+  });
+});
+
+describe('部署排水', () => {
+  it('countActiveGames：等待房不计/对局房计；setDraining 公告对每个对局只发一次', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const mgr = new RoomManager();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const rooms = (m as unknown as { rooms: Map<string, any> }).rooms;
+    const stub = (ip: string) => ({ readyState: 0, OPEN: 0, send: () => {}, on: () => {}, close: () => {}, ip }) as never;
+
+    m.handleCreate(stub('8.8.8.1'), { t: 'create', name: '甲', maxPlayers: 3, mode: 'blood' });
+    const room = [...rooms.values()][0];
+    const hostSession = [...room.sessions.values()][0];
+    m.handleJoin(stub('8.8.8.2'), { t: 'join', code: room.code, name: '乙' });
+    // 未开局：games = 0
+    expect(mgr.countActiveGames()).toBe(0);
+    mgr.setDraining(true); // 等待房不发公告
+    expect(room.game).toBeNull();
+
+    m.handleStart(room, hostSession);
+    expect(mgr.countActiveGames()).toBe(1);
+    // 排水中开局：立即收到一条公告
+    const notices = () => room.game!.log.filter((l: { text: string }) => l.text.includes('服务器即将更新')).length;
+    expect(notices()).toBe(1);
+
+    // 重复置位/重复 tick 不再追加公告
+    mgr.setDraining(true);
+    mgr.setDraining(true);
+    expect(notices()).toBe(1);
+
+    mgr.setDraining(false); // 关闭清空已公告集合：再次开启会重新公告（新排水轮）
+    mgr.setDraining(true);
+    expect(notices()).toBe(2);
+    mgr.setDraining(false);
+    vi.useRealTimers();
   });
 });

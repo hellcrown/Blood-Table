@@ -170,6 +170,9 @@ function numArr(v: unknown): number[] {
 
 export class RoomManager {
   private rooms = new Map<string, Room>();
+  /** 部署排水：true 时向进行中对局广播一次更新公告（deploy.sh 重启前等待房间清空） */
+  private draining = false;
+  private drainNotified = new Set<string>();
   private tokenIndex = new Map<string, { room: Room; sessionId: string }>();
   private bindings = new WeakMap<WebSocket, { room: Room; session: Session }>();
   /** 单 IP 加入尝试限流（防房间码暴力枚举） */
@@ -939,6 +942,10 @@ export class RoomManager {
       });
       room.matchLogged = false;
       room.gameStartedAt = now;
+      if (this.draining && !this.drainNotified.has(room.code)) {
+        room.game.log.push({ seq: ++room.game.logSeq, kind: 'sys', text: '⚠️ 服务器即将更新维护：本局结束后将短暂重启，重启后需重新建房或加入' });
+        this.drainNotified.add(room.code);
+      }
     } else {
       if (!room.game) {
         const players = [...room.sessions.values()]
@@ -957,6 +964,10 @@ export class RoomManager {
       engine.startHand(room.game, now);
       room.matchLogged = false;
       room.gameStartedAt = now;
+      if (this.draining && !this.drainNotified.has(room.code)) {
+        room.game.log.push({ seq: ++room.game.logSeq, kind: 'sys', text: '⚠️ 服务器即将更新维护：本局结束后将短暂重启，重启后需重新建房或加入' });
+        this.drainNotified.add(room.code);
+      }
     }
     this.broadcast(room);
   }
@@ -1429,6 +1440,38 @@ export class RoomManager {
 
   roomCount(): number {
     return this.rooms.size;
+  }
+
+  /** 进行中对局数（game 非空的房间，含终局未返回——玩家点「返回房间」后自然清零） */
+  countActiveGames(): number {
+    let n = 0;
+    for (const r of this.rooms.values()) {
+      if (r.game != null) n++;
+    }
+    return n;
+  }
+
+  isDraining(): boolean {
+    return this.draining;
+  }
+
+  /** 部署排水开关：置真时向所有进行中对局各推一条更新公告（新开局的对局在 handleStart 里补推） */
+  setDraining(v: boolean): void {
+    if (this.draining === v) return;
+    this.draining = v;
+    if (!v) {
+      this.drainNotified.clear();
+      return;
+    }
+    const line = '⚠️ 服务器即将更新维护：本局结束后将短暂重启，重启后需重新建房或加入';
+    for (const r of this.rooms.values()) {
+      if (r.game == null || this.drainNotified.has(r.code)) continue;
+      r.game.log.push({ seq: ++r.game.logSeq, kind: 'sys', text: line });
+      this.drainNotified.add(r.code);
+    }
+    for (const r of this.rooms.values()) {
+      if (r.game != null) this.broadcast(r);
+    }
   }
 
   /** 一键清空所有房间（管理用途） */

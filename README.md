@@ -59,6 +59,8 @@ cd Blood-Table && bash deploy.sh
 ```
 
 访问 `http://服务器IP:3000` 即玩；更新版本：`git pull && bash deploy.sh`。
+
+> **更新与进行中对局**：deploy.sh 默认进入「排水」模式——先向所有进行中的对局广播更新公告，等待对局自然结束（上限 900 秒，超时强制重启）再重启服务。`DEPLOY_NO_DRAIN=1 bash deploy.sh` 或 `bash deploy.sh --now` 可跳过等待；`DEPLOY_DRAIN_MAX=1800` 可调上限。重启会清空内存中的对局状态（玩家会被送回大厅）。
 前端构建产物 `client/dist` 已随仓库提交，服务器无需构建（1G 内存小机可跑）。
 建仓后执行一次 `pm2 save && pm2 startup` 可开机自启。
 
