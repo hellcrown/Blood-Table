@@ -367,6 +367,9 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [charDetail, setCharDetail] = useState<string | null>(null);
   const [detail, setDetail] = useState<BloodCardView | null>(null);
   const [ladderOpen, setLadderOpen] = useState(false);
+  const [rewardOpen, setRewardOpen] = useState(false);
+  /** 复制/屏蔽目标决策：发送后锁定到下一次 view 更新（防 >250ms 连点落在追加决策上误伤无辜芯片） */
+  const [decisionBusy, setDecisionBusy] = useState(false);
   /** 牌局记录侧栏：宽屏默认展开，手机端默认收起（左缘小箭头切换） */
   const [logOpen, setLogOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900);
   const [annHiddenAt, setAnnHiddenAt] = useState<number | null>(null);
@@ -417,6 +420,10 @@ export function BloodTable({ view }: { view: BloodView }) {
       playFlyFx(kind, from, to);
     });
   }, []);
+
+  useEffect(() => {
+    setDecisionBusy(false);
+  }, [view]);
 
   // 黑市宣告特效数据（按效果类型定制）
   const annDef = view.announce ? BLOOD_MARKET_BY_ID.get(view.announce.defId) : undefined;
@@ -1159,6 +1166,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                 </button>
               )}
               <span className="spacer" />
+              {!spectating && (
+                <button className="tag goal" title="查看名次奖励" onClick={() => setRewardOpen(true)}>
+                  距目标 {Math.max(0, view.target - me.tickets)} 票 🏆
+                </button>
+              )}
               <span className="bp-res">
                 🩸{view.me.blood} · 🎫{me.tickets}
               </span>
@@ -1618,10 +1630,15 @@ export function BloodTable({ view }: { view: BloodView }) {
                             key={`${pl.seat}-${c.id}-${defId}`}
                             className="btn tiny"
                             disabled={
+                              decisionBusy ||
                               (view.prompt.decision?.t === 'copy' && (defId === 'twinLens' || pl.seat === view.me.seat))
                             }
                             title={view.prompt.decision?.t === 'copy' && pl.seat === view.me.seat ? '不能复制自己的芯片' : undefined}
-                            onClick={() => send({ t: 'bRevealChipTarget', seat: pl.seat, cardId: c.id, defId })}
+                            onClick={() => {
+                              if (decisionBusy) return;
+                              setDecisionBusy(true);
+                              send({ t: 'bRevealChipTarget', seat: pl.seat, cardId: c.id, defId });
+                            }}
                           >
                             {pl.seat === view.me.seat ? '自己' : pl.name}·{BLOOD_MARKET_BY_ID.get(defId)?.name}
                           </button>
@@ -2330,6 +2347,33 @@ export function BloodTable({ view }: { view: BloodView }) {
         </div>
       </div>
 
+      {/* 名次奖励（右下角，天梯上方） */}
+      <button className={`reward-toggle ${rewardOpen ? 'open' : ''}`} onClick={() => setRewardOpen(!rewardOpen)}>
+        {rewardOpen ? '收起奖励' : '🏆 奖励'}
+      </button>
+      {rewardOpen && (
+        <div className="reward-panel">
+          <div className="ladder-row ladder-head">
+            <span>名次</span>
+            <span>本回合奖励</span>
+          </div>
+          <div className="ladder-row"><span>🥇 第 1 名</span><span>+4 🎫</span></div>
+          <div className="ladder-row"><span>🥈 第 2 名</span><span>{view.players.length === 2 ? '+4 🩸' : '+2 🎫 +2 🩸'}</span></div>
+          {view.players.length >= 4 && (
+            <div className="ladder-row"><span>🥉 第 3 名</span><span>+1 🎫 +3 🩸</span></div>
+          )}
+          <div className="ladder-row"><span>第 {Math.min(3, view.players.length) + 1} 名</span><span>+4 🩸</span></div>
+          {view.players.length === 2 && (
+            <div className="ladder-row"><span>⚡ 速攻</span><span>首夺魁 +1🎫 · 连胜再 +1🎫</span></div>
+          )}
+          {!spectating && (
+            <div className="ladder-row reward-goal">
+              <span>🚂 距目标还差</span>
+              <span>{Math.max(0, view.target - view.me.tickets)} 🎫</span>
+            </div>
+          )}
+        </div>
+      )}
       {/* 牌型天梯（右下角） */}
       <button className={`ladder-toggle ${ladderOpen ? 'open' : ''}`} onClick={() => setLadderOpen(!ladderOpen)}>
         {ladderOpen ? '收起天梯' : '牌型天梯'}

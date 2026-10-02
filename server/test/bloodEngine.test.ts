@@ -269,7 +269,7 @@ describe('血色引擎 · 3人局兼容', () => {
     const rows = gs.result!.rows;
     const byRank = new Map(rows.map((r) => [r.rank, r]));
     expect(byRank.get(1)!.seat).toBe(0);
-    expect(byRank.get(1)!.gainTickets).toBe(5); // 4 + 抢跑
+    expect(byRank.get(1)!.gainTickets).toBe(4); // 3人局无抢跑/连胜加票
     expect(byRank.get(1)!.gainBlood).toBe(0);
     expect(byRank.get(2)!.seat).toBe(2);
     expect(byRank.get(2)!.gainTickets).toBe(2);

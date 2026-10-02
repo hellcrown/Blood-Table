@@ -1129,23 +1129,6 @@ function chipEffectsFor(p: BPlayer, ch: ChipInst): BloodEffect[] {
 }
 
 /** 亮牌决策队列：弹出当前决策并挂起下一条；队列空则推进窗口 */
-function nextRevealDecision(gs: BloodState, now: number): void {
-  const pend = gs.secretPending;
-  if (!pend || pend.kind !== 'revealDecide') return;
-  const p = gs.players.find((x) => x.id === pend.seat);
-  const queue = (pend.queue ?? []).slice();
-  // 决策排队期间芯片可能被消磁枪/屏蔽器打掉：自动跳过（否则玩家点任何目标都报「不存在」）
-  while (queue.length > 0 && p && p.chips.find((c) => c.id === queue[0].chipId)?.off) {
-    queue.shift();
-  }
-  if (queue.length === 0) {
-    gs.secretPending = null;
-    nextRevealOrSettle(gs, now);
-    return;
-  }
-  gs.secretPending = { ...pend, kind: 'revealDecide', queue: queue.slice(1), decision: queue[0] };
-}
-
 /** 防护屏障：受害者持有屏障则消耗并进入询问窗口，返回 true 表示已拦截 */
 function tryBarrierAsk(gs: BloodState, defenderId: string, attackerId: string, eff: BarrierEffect): boolean {
   const d = gs.players.find((x) => x.id === defenderId)!;
@@ -1319,7 +1302,14 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
 function advanceRevealDecision(gs: BloodState, now: number): void {
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'revealDecide') return;
-  const rest = (pend.queue ?? []).slice();
+  const p = gs.players.find((x) => x.id === pend.seat);
+  // 出队时逐条跳过已失效的决策（排队期间被消磁枪/屏蔽器打掉的芯片），避免弹出必错的询问
+  let rest = (pend.queue ?? []).slice();
+  while (rest.length > 0) {
+    const chip = p?.chips.find((c) => c.id === rest[0].chipId);
+    if (chip && !chip.off) break;
+    rest = rest.slice(1);
+  }
   if (rest.length === 0) {
     gs.secretPending = null;
     const needSteal = gs.stealPending != null && gs.stealPending.seat === pend.seat;
@@ -1617,6 +1607,10 @@ export function bItemAsk(gs: BloodState, playerId: string, use: boolean, now: nu
 }
 
 export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
+  if (gs.secretPending?.kind === 'revealDecide') {
+    // 延迟决策（复制/屏蔽目标选择）进行中：消磁枪会覆盖挂起决策使其静默丢失，拒绝使用
+    throw new BloodError('PENDING', '先完成当前的芯片决策');
+  }
   const p = gs.players.find((x) => x.id === playerId);
   if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
   // 换牌结束（信号干扰器/皮下密信/魔术橡皮）与对决前（荷官证/广播喇叭/赌徒虹膜）
@@ -1721,13 +1715,13 @@ function settle(gs: BloodState, now: number): void {
   });
 
   const winner = bySeat(gs, rows[0].seat)!;
-  // 速攻计分：抢跑（本局首次夺魁 +1🎫）/ 连胜（连续回合夺魁，第二连起每次 +1🎫）
-  if (!gs.firstChampDone) {
+  // 速攻计分（仅 2 人局）：抢跑（本局首次夺魁 +1🎫）/ 连胜（连续回合夺魁，第二连起每次 +1🎫）
+  if (gs.seatCount === 2 && !gs.firstChampDone) {
     gs.firstChampDone = true;
     rows[0].gainTickets += 1;
     pushLog(gs, 'action', `🏁 ${pname(winner)} 抢跑成功（本局首个夺魁）：额外 +1🎫`);
   }
-  if (gs.lastChampSeat === winner.id) {
+  if (gs.seatCount === 2 && gs.lastChampSeat === winner.id) {
     gs.champStreak += 1;
     rows[0].gainTickets += 1;
     pushLog(gs, 'action', `🔥 ${pname(winner)} 达成 ${gs.champStreak} 连胜：额外 +1🎫`);
