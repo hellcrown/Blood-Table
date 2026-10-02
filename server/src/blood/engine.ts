@@ -180,7 +180,7 @@ export function createBloodGame(
     market: [],
     recycle: [],
     turnSeat: null,
-    deadline: null,
+    deadline: now + BLOOD_TURN_MS, // 选将/构筑阶段同样有 60s 超时兜底（断线者不再无限阻塞）
     stealPending: null,
     secretPending: null,
     comparePipsFirst: false,
@@ -1132,7 +1132,12 @@ function chipEffectsFor(p: BPlayer, ch: ChipInst): BloodEffect[] {
 function nextRevealDecision(gs: BloodState, now: number): void {
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'revealDecide') return;
+  const p = gs.players.find((x) => x.id === pend.seat);
   const queue = (pend.queue ?? []).slice();
+  // 决策排队期间芯片可能被消磁枪/屏蔽器打掉：自动跳过（否则玩家点任何目标都报「不存在」）
+  while (queue.length > 0 && p && p.chips.find((c) => c.id === queue[0].chipId)?.off) {
+    queue.shift();
+  }
   if (queue.length === 0) {
     gs.secretPending = null;
     nextRevealOrSettle(gs, now);
@@ -1494,12 +1499,25 @@ function nextRevealOrSettle(gs: BloodState, now: number): void {
 
 /** 弹出下一条延迟决策（deferredDecisions：屏蔽器失效目标 / 复制芯片复制目标） */
 function startDeferredDecision(gs: BloodState, now: number): void {
-  const next = gs.deferredDecisions.shift()!;
-  const p = gs.players.find((x) => x.id === next.seat);
+  // 决策排队期间芯片可能已失效（消磁/屏蔽）：逐个跳过
+  let next = gs.deferredDecisions.shift();
+  while (next) {
+    const cur = next; // const 别名：闭包引用 let 会失去非空收窄
+    const p = gs.players.find((x) => x.id === cur.seat);
+    const chip = p?.chips.find((c) => c.id === cur.decision.chipId);
+    if (chip && !chip.off) break;
+    next = gs.deferredDecisions.shift();
+  }
+  if (next == null) {
+    nextRevealOrSettle(gs, now);
+    return;
+  }
+  const picked = next;
+  const p = gs.players.find((x) => x.id === picked.seat);
   gs.secretPending = {
-    seat: next.seat,
+    seat: picked.seat,
     kind: 'revealDecide',
-    decision: next.decision,
+    decision: picked.decision,
   };
   gs.deadline = now + BLOOD_TURN_MS;
   const label = next.decision.t === 'copy' ? '【复制芯片】开始选择复制目标' : '【屏蔽器】开始选择失效目标';

@@ -866,6 +866,18 @@ export class RoomManager {
         this.bindings.delete(session.ws);
         session.ws = null;
       }
+      // 选将/构筑阶段离场：立即为其自动完成（否则全桌要等 60s 超时托管）
+      const bs = g as BloodState;
+      const bp = bs.players.find((p) => p.id === session.id);
+      if (bp) {
+        try {
+          const now = Date.now();
+          if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
+          else if (bs.phase === 'setup' && bp.setupRound < 2) blood.bSetup(bs, bp.id, [], now);
+        } catch {
+          /* 阶段守卫兜底 */
+        }
+      }
       if (room.hostId === session.id) {
         const next = [...room.sessions.values()].find((s) => s.connected && !s.bot && !s.spectator && s.id !== session.id);
         // 只剩机器人时不转移（置空），原房主重连即恢复身份，新玩家加入自动接任

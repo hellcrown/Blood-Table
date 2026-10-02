@@ -702,10 +702,9 @@ describe('血色引擎 · 复杂拓展牌（弹簧/复制/屏蔽/屏障）', () 
     expect(gs.secretPending?.decision?.t).toBe('shield');
     bRevealChipTarget(gs, 'p0', 1, p1.play[0].id, 'shield', NOW); // 用复制出的屏蔽器失效乙的屏蔽器本身
     bSkipDecision(gs, 'p0', NOW); // 队列指针收尾推进
-    // 再轮到乙自己的屏蔽器（其芯片已失效，跳过不影响）
-    expect(gs.secretPending?.seat).toBe('p1');
-    bSkipDecision(gs, 'p1', NOW);
-    expect(gs.phase).toBe('settle'); // 延迟决策全部结束 → 结算
+    // 乙自己的屏蔽器已在前面被失效：新行为自动跳过失效决策（不再弹出询问），直接进入结算
+    expect(gs.secretPending).toBeNull();
+    expect(gs.phase).toBe('settle');
   });
 
   it('屏蔽器：令对手芯片失效，评估下降', () => {
