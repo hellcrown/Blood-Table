@@ -3635,6 +3635,13 @@ export function bPullChip(gs: BloodState, playerId: string, cardId: string, now:
     throw new BloodError('PENDING', '当前没有待执行的拔除芯片');
   }
   const p = gs.players.find((x) => x.id === playerId)!;
+  // 跳过（cardId 为空）：弃牌区没有带芯片的牌时允许放弃，道具按已消耗处理
+  if (!cardId) {
+    gs.secretPending = null;
+    pushLog(gs, 'action', `【拔除芯片】${pname(p)} 弃牌区没有可拔除的芯片：放弃发动（道具消耗）`);
+    afterMarketResolved(gs, p, false);
+    return;
+  }
   const card = p.discard.find((c) => c.id === cardId);
   if (!card) throw new BloodError('BAD_CARD', '目标牌不在你的弃牌区');
   const chip = p.chips.find((ch) => ch.on === cardId);

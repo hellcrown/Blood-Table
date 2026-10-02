@@ -800,7 +800,12 @@ export function BloodTable({ view }: { view: BloodView }) {
         : view.prompt.k === 'secretDelete'
           ? `弃牌区（${view.me.discard.length}）· 点击选择要删除的牌`
           : view.prompt.k === 'pullChip'
-            ? `弃牌区（${view.me.discard.length}）· 点击带芯片的牌拔除（+4🩸）`
+            ? (() => {
+                const hasChipCard = view.me.discard.some((c) => c.chipIds.length > 0);
+                return hasChipCard
+                  ? `弃牌区（${view.me.discard.length}）· 点击带芯片的牌拔除（+4🩸）`
+                  : '弃牌区没有带芯片的牌 · 可点下方放弃发动';
+              })()
             : view.prompt.k === 'pinpointVictim'
               ? `弃牌区（${view.me.discard.length}）· 定点爆破：点击一张 ${view.prompt.rank} 点的牌删除`
               : view.prompt.k === 'studentRemove'
@@ -849,6 +854,16 @@ export function BloodTable({ view }: { view: BloodView }) {
           <span className="brand">血色牌局</span>
           <span>
             房间 <b>{view.code}</b> · 第 {view.round + 1} 回合 · 目标 {view.target} 车票
+            {!spectating && (
+              <button
+                className="tag goal"
+                title="查看名次奖励"
+                style={{ marginLeft: 8 }}
+                onClick={() => setRewardOpen(true)}
+              >
+                距目标 {Math.max(0, view.target - view.me.tickets)} 票 🏆
+              </button>
+            )}
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setCodexOpen(true)}>
               📖 图鉴
             </button>
@@ -2347,31 +2362,22 @@ export function BloodTable({ view }: { view: BloodView }) {
         </div>
       </div>
 
-      {/* 名次奖励（右下角，天梯上方） */}
-      <button className={`reward-toggle ${rewardOpen ? 'open' : ''}`} onClick={() => setRewardOpen(!rewardOpen)}>
-        {rewardOpen ? '收起奖励' : '🏆 奖励'}
-      </button>
+      {/* 名次奖励（居中弹窗） */}
       {rewardOpen && (
-        <div className="reward-panel">
-          <div className="ladder-row ladder-head">
-            <span>名次</span>
-            <span>本回合奖励</span>
+        <div className="overlay" onClick={() => setRewardOpen(false)}>
+          <div className="panel" style={{ width: 'min(420px, calc(100% - 40px))' }} onClick={(e) => e.stopPropagation()}>
+            <h3>🏆 名次奖励</h3>
+            <div className="result-row"><span className="r-name">🥇 第 1 名</span><span className="r-hand">+4 🎫</span></div>
+            <div className="result-row"><span className="r-name">🥈 第 2 名</span><span className="r-hand">{view.players.length === 2 ? '+4 🩸' : '+2 🎫 +2 🩸'}</span></div>
+            {view.players.length >= 4 && (
+              <div className="result-row"><span className="r-name">🥉 第 3 名</span><span className="r-hand">+1 🎫 +3 🩸</span></div>
+            )}
+            <div className="result-row"><span className="r-name">末位（第 {Math.min(3, view.players.length) + 1} 名）</span><span className="r-hand">+4 🩸</span></div>
+            {view.players.length === 2 && (
+              <div className="result-row"><span className="r-name">⚡ 速攻</span><span className="r-hand">首夺魁 +1🎫 · 连胜再 +1🎫</span></div>
+            )}
+            <p className="hint">连胜：连续回合夺魁时每次再 +1🎫（仅 2 人局）</p>
           </div>
-          <div className="ladder-row"><span>🥇 第 1 名</span><span>+4 🎫</span></div>
-          <div className="ladder-row"><span>🥈 第 2 名</span><span>{view.players.length === 2 ? '+4 🩸' : '+2 🎫 +2 🩸'}</span></div>
-          {view.players.length >= 4 && (
-            <div className="ladder-row"><span>🥉 第 3 名</span><span>+1 🎫 +3 🩸</span></div>
-          )}
-          <div className="ladder-row"><span>第 {Math.min(3, view.players.length) + 1} 名</span><span>+4 🩸</span></div>
-          {view.players.length === 2 && (
-            <div className="ladder-row"><span>⚡ 速攻</span><span>首夺魁 +1🎫 · 连胜再 +1🎫</span></div>
-          )}
-          {!spectating && (
-            <div className="ladder-row reward-goal">
-              <span>🚂 距目标还差</span>
-              <span>{Math.max(0, view.target - view.me.tickets)} 🎫</span>
-            </div>
-          )}
         </div>
       )}
       {/* 牌型天梯（右下角） */}
@@ -2517,6 +2523,22 @@ export function BloodTable({ view }: { view: BloodView }) {
                   确认删除 {selRemove.length} 张（费用{' '}
                   {Math.max(0, selRemove.length - (view.prompt.free ?? 1)) * (view.prompt.cost ?? 2)}🩸）
                 </button>
+              )}
+              {view.prompt.k === 'pullChip' && zoneModal.kind === 'discard' && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    send({ t: 'bPullChip', cardId: '' }); // 跳过：道具按已消耗处理
+                    setZoneModal(null);
+                  }}
+                >
+                  放弃发动（道具消耗）
+                </button>
+              )}
+              {(chipBuying || view.prompt.k === 'insertChip') && zoneModal.kind === 'discard' && (
+                <p className="hint" style={{ marginTop: 6 }}>
+                  💡 点上方弃牌区中的一张牌，即可把 <b>{activeChipDefId ? BLOOD_MARKET_BY_ID.get(activeChipDefId)?.name : '芯片'}</b> 插入（该牌点数/花色将被改写）
+                </p>
               )}
               {chipBuying && zoneModal.kind === 'discard' && (
                 <button
