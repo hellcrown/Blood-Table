@@ -129,6 +129,7 @@ export interface MarketSlot {
 }
 
 export type BloodPhase =
+  | 'crownBid' // 开局：特权证暗标竞拍（每人密封出价 1~3，最高者得证，开局血筹 = 3 − 出价）
   | 'pick' // 选将（随机抽2张角色牌选1）
   | 'setup' // 初始构筑
   | 'draw'
@@ -174,6 +175,8 @@ export interface BloodState {
   round: number;
   players: BPlayer[];
   seatCount: number;
+  /** 拓展选将开关（开局竞拍结算 → 选将阶段取角色池用） */
+  charExpansion: boolean;
   supply: string[];
   market: MarketSlot[];
   recycle: string[];
@@ -287,6 +290,8 @@ export interface BloodState {
   log: LogLine[];
   logSeq: number;
   privilegeSeat: number | null;
+  /** 特权证暗标：playerId → 出价（1~3）；全员出价后结算，得证者开局血筹 = 3 − 出价 */
+  crownBids: Record<string, number>;
 }
 
 export const BLOOD_TURN_MS = 60_000;
@@ -294,3 +299,5 @@ export const BLOOD_SD_WAIT_MS = 30_000; // 对决展示确认等待上限（演�
 export const BLOOD_SETUP_KEEP = 4; // 每轮初始构筑最多删 4 张
 export const BLOOD_HAND_CAP = 6;
 export const BLOOD_PLAY_COUNT = 5;
+/** 特权证暗标出价上限（出价 1~3，得证者开局血筹 = 3 − 出价；全员出 1 时退化为原版「持证 2 血筹」） */
+export const BLOOD_CROWN_MAX_BID = 3;

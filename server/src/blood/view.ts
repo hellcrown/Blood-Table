@@ -142,6 +142,8 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
     }
   }
   switch (gs.phase) {
+    case 'crownBid':
+      return gs.crownBids[p.id] != null ? { k: 'wait' } : { k: 'crownBid' };
     case 'pick':
       return p.charId ? { k: 'wait' } : { k: 'pick' };
     case 'setup':

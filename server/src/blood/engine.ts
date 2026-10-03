@@ -9,6 +9,7 @@ import {
   BLOOD_PLAY_COUNT,
   BLOOD_SD_WAIT_MS,
   BLOOD_SETUP_KEEP,
+  BLOOD_CROWN_MAX_BID,
   BLOOD_TURN_MS,
   type BCard,
   type BarrierEffect,
@@ -172,10 +173,11 @@ export function createBloodGame(
     }));
 
   const gs: BloodState = {
-    phase: 'pick',
+    phase: 'crownBid',
     round: 0,
     players: bps,
     seatCount,
+    charExpansion,
     supply: buildBloodMarketDeck((n) => randomInt(0, n), expansion),
     market: [],
     recycle: [],
@@ -219,58 +221,94 @@ export function createBloodGame(
     log: [],
     logSeq: 0,
     privilegeSeat: null,
+    crownBids: {},
   };
   for (let i = 0; i < 5; i++) gs.market.push(drawMarketSlot(gs));
 
-  // 掷骰决定临时特权证（点数最高者，平局随机取一）；江东之主的特权在选将后另行授予
-  {
-    const rolls = bps.map((p) => ({ p, roll: randomInt(1, 7) }));
-    const maxRoll = Math.max(...rolls.map((r) => r.roll));
-    const winners = rolls.filter((r) => r.roll === maxRoll);
-    const holder = winners[randomInt(0, winners.length)];
-    gs.privilegeSeat = holder.p.seat;
-    holder.p.privilege = true;
-    for (const p of bps) p.blood = p.privilege ? 2 : 3;
-    pushLog(
-      gs,
-      'sys',
-      `掷骰定特权证：${rolls.map((r) => `${r.p.name} ${r.roll}点`).join('，')} → ${holder.p.name} 获得【临时特权证】（2血筹，其余3血筹）`,
-    );
-  }
+  // 特权证不再掷骰：开局暗标竞拍（每人密封出价 1~3 血筹，最高者得证，开局血筹 = 3 − 出价）
+  for (const p of bps) p.blood = 3;
+  pushLog(
+    gs,
+    'sys',
+    `👑 特权证暗标：每人秘密出价 1~${BLOOD_CROWN_MAX_BID}（愿意少拿几血筹换特权证），出价最高者得证（开局血筹 = ${BLOOD_CROWN_MAX_BID} − 出价），平局掷骰定得主`,
+  );
+  gs.deadline = now + BLOOD_TURN_MS;
+  return gs;
+}
 
-  // 选将/分配：始终进行。2人局每人随机2张选1；3/4人局每人直接随机分配1名角色
-  const pool = shuffle(charPoolIds(charExpansion));
-  gs.charDeck = shuffle(charPoolIds(charExpansion)); // 无面人每回合抽角色用
-  pushLog(gs, 'sys', `🎭 本局角色池：${charExpansion ? `全部 ${pool.length} 名角色（含拓展）` : `基础版 ${pool.length} 名角色`}`);
+/** 出价 b 的持证者开局血筹 = 3 − b（暗标语义；出价随 crownBids 记录，江东之主夺证时按其本人出价重算） */
+export function crownBlood(bid: number): number {
+  return 3 - bid;
+}
+
+/** 特权证暗标：玩家密封出价（1~3）；全员出价后立即结算并进入选将 */
+export function bCrownBid(gs: BloodState, playerId: string, bidRaw: number, now: number): void {
+  if (gs.phase !== 'crownBid') throw new BloodError('BAD_PHASE', '不在特权证竞拍阶段');
+  const p = gs.players.find((x) => x.id === playerId);
+  if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
+  if (gs.crownBids[p.id] != null) return; // 已出价：静默忽略（与选将重复提交同口径）
+  const bid = Math.floor(Number(bidRaw));
+  if (!Number.isFinite(bid) || bid < 1 || bid > BLOOD_CROWN_MAX_BID) {
+    throw new BloodError('BAD_MSG', `出价须为 1~${BLOOD_CROWN_MAX_BID} 的整数`);
+  }
+  gs.crownBids[p.id] = bid;
+  if (gs.players.every((x) => gs.crownBids[x.id] != null)) resolveCrownAuction(gs, now);
+}
+
+/** 结算暗标：最高价得证（平局掷骰定得主），得证者血筹 = 3 − 出价（其余保持 3）→ 进入选将 */
+function resolveCrownAuction(gs: BloodState, now: number): void {
+  const bids = gs.players.map((p) => ({ p, bid: gs.crownBids[p.id] ?? 1 }));
+  const maxBid = Math.max(...bids.map((b) => b.bid));
+  const tied = bids.filter((b) => b.bid === maxBid);
+  const holder = tied.length === 1 ? tied[0]! : tied[randomInt(0, tied.length)]!;
+  gs.privilegeSeat = holder.p.seat;
+  holder.p.privilege = true;
+  holder.p.blood = crownBlood(holder.bid);
+  pushLog(
+    gs,
+    'sys',
+    `👑 开价揭晓：${bids.map((b) => `${b.p.name} 出 ${b.bid}`).join('，')}${tied.length > 1 ? '（平局掷骰）' : ''} → ${holder.p.name} 获得【临时特权证】（开局 ${holder.p.blood} 血筹，其余 3 血筹）`,
+  );
+  beginPickPhase(gs, now);
+}
+
+/** 选将/分配：始终进行。2人局每人随机 2 张选 1；3/4人局每人直接随机分配 1 名角色 */
+function beginPickPhase(gs: BloodState, now: number): void {
+  const bps = gs.players;
+  const pool = shuffle(charPoolIds(gs.charExpansion));
+  gs.charDeck = shuffle(charPoolIds(gs.charExpansion)); // 无面人每回合抽角色用
+  pushLog(gs, 'sys', `🎭 本局角色池：${gs.charExpansion ? `全部 ${pool.length} 名角色（含拓展）` : `基础版 ${pool.length} 名角色`}`);
   // 角色牌基础规则：抽 2 选 1。基础池仅 4 名角色，3/4 人局发不出 2×人数 张，退回随机分配
-  if (seatCount === 2 || pool.length >= seatCount * 2) {
+  if (gs.seatCount === 2 || pool.length >= gs.seatCount * 2) {
     for (const p of bps) p.charOptions = [pool.pop()!, pool.pop()!];
-    pushLog(gs, 'sys', `🎭 ${seatCount}人局选将：每人从两张随机角色牌中选择一张`);
+    gs.phase = 'pick';
+    pushLog(gs, 'sys', `🎭 ${gs.seatCount}人局选将：每人从两张随机角色牌中选择一张`);
   } else {
     const assigned = bps.map((p) => {
       p.charId = pool.pop()!;
       return `${pname(p)}【${BLOOD_CHAR_BY_ID.get(p.charId)!.name}】`;
     });
-    pushLog(gs, 'sys', `🎭 ${seatCount}人局随机分配角色：${assigned.join('、')}`);
+    pushLog(gs, 'sys', `🎭 ${gs.seatCount}人局随机分配角色：${assigned.join('、')}`);
     beginAfterPick(gs, now);
+    return;
   }
   gs.deadline = now + BLOOD_TURN_MS;
-  return gs;
 }
 
 /** 角色确定 → 游戏开始效果结算 → 初始构筑（飞车党/捣蛋鬼跳过；黑客特殊构筑；我的名字？/黑客进入初始化队列） */
 function beginAfterPick(gs: BloodState, now: number): void {
   pushLog(gs, 'sys', '🎭 角色确定，游戏开始');
-  // 江东之主始终拥有临时特权证（覆盖掷骰结果；血筹同步修正为 2/3）
+  // 江东之主始终拥有临时特权证（覆盖暗标结果；血筹按各自出价重算：持证者 = 3 − 出价，失证者回到 3）
   const sunwu = gs.players.find((p) => p.charId === 'sunwu');
   if (sunwu && !sunwu.privilege) {
     const old = gs.players.find((p) => p.privilege);
     for (const p of gs.players) p.privilege = false;
     sunwu.privilege = true;
     gs.privilegeSeat = sunwu.seat;
-    sunwu.blood -= 1;
-    if (old && old.id !== sunwu.id) old.blood += 1;
-    pushLog(gs, 'sys', `${pname(sunwu)}【江东之主】始终拥有【临时特权证】（特权证转移，血筹修正为 2/3）`);
+    const bidOf = (p: typeof sunwu): number => gs.crownBids[p.id] ?? 1;
+    sunwu.blood = crownBlood(bidOf(sunwu));
+    if (old && old.id !== sunwu.id) old.blood = 3;
+    pushLog(gs, 'sys', `${pname(sunwu)}【江东之主】始终拥有【临时特权证】（特权证转移，血筹修正为 ${sunwu.blood}/3）`);
   }
   for (const p of gs.players) {
     const def = BLOOD_CHAR_BY_ID.get(p.charId!)!;
@@ -3016,6 +3054,17 @@ export function bloodTick(gs: BloodState, now: number): boolean {
     }
   };
   switch (gs.phase) {
+    case 'crownBid': {
+      // 特权证暗标超时托管：未出价者按最低价 1 出价
+      for (const p of gs.players) {
+        if (gs.phase !== 'crownBid') break;
+        if (gs.crownBids[p.id] == null) {
+          p.wasAuto = true;
+          act(() => bCrownBid(gs, p.id, 1, now));
+        }
+      }
+      return true;
+    }
     case 'pick': {
       // 选将超时托管：自动选择第一张
       for (const p of gs.players) {

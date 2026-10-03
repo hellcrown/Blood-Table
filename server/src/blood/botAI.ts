@@ -542,6 +542,12 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
   const prompt = promptFor(gs, p);
   switch (prompt.k) {
     /* ---- 基础阶段 ---- */
+    case 'crownBid': {
+      // 特权证暗标：加权随机出价（1 占多数，2/3 少数激进），先手价值随开局经济自平衡
+      const roll = Math.random();
+      blood.bCrownBid(gs, p.id, roll < 0.6 ? 1 : roll < 0.9 ? 2 : 3, now);
+      return true;
+    }
     case 'pick': {
       blood.bPickChar(gs, p.id, p.charOptions[0], now);
       return true;

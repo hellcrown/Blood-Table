@@ -26,6 +26,7 @@ import {
   bestFive,
   bloodTick,
   createBloodGame,
+  bCrownBid,
   bAuctionBid,
   bAuctionPick,
   bAgentAsk,
@@ -111,6 +112,11 @@ function randomAction(gs: BloodState, p: BPlayer, rng: () => number, now: number
     return;
   }
   switch (gs.phase) {
+    case 'crownBid': {
+      // 特权证暗标：随机出价 1~3（覆盖 varied 开局经济下的全流程）
+      if (gs.crownBids[p.id] == null) tryAct(() => bCrownBid(gs, p.id, ri(rng, 3) + 1, now));
+      return;
+    }
     case 'pick': {
       if (!p.charId && p.charOptions.length > 0) {
         tryAct(() => bPickChar(gs, p.id, p.charOptions[ri(rng, p.charOptions.length)], now));

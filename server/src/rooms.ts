@@ -374,6 +374,9 @@ export class RoomManager {
       throw new blood.BloodError('NO_PLAYER', '你不在当前对局中（等待下一局开始）');
     }
     switch (msg.t) {
+      case 'bCrownBid':
+        blood.bCrownBid(bs, pid, clampInt(msg.bid, 1, 3, 1), now);
+        break;
       case 'bPickChar':
         blood.bPickChar(bs, pid, msg.charId, now);
         break;
@@ -864,8 +867,8 @@ export class RoomManager {
     if (room.game) {
       if (room.mode === 'blood') {
         const bs = room.game as BloodState;
-        // 血色对局仅在选将/初始构筑前/终局可安全移除
-        if (bs.phase === 'pick' || bs.phase === 'setup' || bs.phase === 'gameover') {
+        // 血色对局仅在竞拍/选将/初始构筑前/终局可安全移除
+        if (bs.phase === 'crownBid' || bs.phase === 'pick' || bs.phase === 'setup' || bs.phase === 'gameover') {
           bs.players = bs.players.filter((p) => p.id !== session.id);
         }
       } else {
@@ -913,7 +916,8 @@ export class RoomManager {
       if (bp) {
         try {
           const now = Date.now();
-          if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
+          if (bs.phase === 'crownBid' && bs.crownBids[bp.id] == null) blood.bCrownBid(bs, bp.id, 1, now);
+          else if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
           else if (bs.phase === 'setup' && bp.setupRound < 2) blood.bSetup(bs, bp.id, [], now);
         } catch {
           /* 阶段守卫兜底 */

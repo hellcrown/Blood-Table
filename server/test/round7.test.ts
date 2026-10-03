@@ -9,7 +9,7 @@
  * - tickAll 按房间隔离异常：毒房间强制回收，不饿死其余房间（本轮）
  */
 import { describe, expect, it } from 'vitest';
-import { BloodError, bPickChar, createBloodGame } from '../src/blood/engine';
+import { BloodError, bCrownBid, bPickChar, createBloodGame as createBloodGameRaw } from '../src/blood/engine';
 import type { BloodState } from '../src/blood/types';
 import { createGame, startHand } from '../src/game/engine';
 import type { GState } from '../src/game/types';
@@ -77,6 +77,13 @@ function mkRoom(
     matchLogged: true, // 落库哨兵置位：测试零文件副作用
     gameStartedAt: NOW,
   } as unknown as Room;
+}
+
+/** 开局特权证暗标辅助：全员按最低价 1 出价并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
+  const gs = createBloodGameRaw(...args);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  return gs;
 }
 
 function bloodGame2p(): BloodState {

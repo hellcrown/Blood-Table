@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { bloodTick, bSwapStop, createBloodGame } from '../src/blood/engine';
+import { bloodTick, bCrownBid, bSwapStop, createBloodGame } from '../src/blood/engine';
 import { promptFor } from '../src/blood/view';
 import { botAct, createBrain, updateBrains, deriveStrategy, curStrategy, worstDiscardCards, guessOppStrategy, strongestThreat, type BotBrain } from '../src/blood/botAI';
 import { SlidingWindow, TokenBucket } from '../src/net/limits';
@@ -78,6 +78,8 @@ describe('血色机器人 · AI 行为', () => {
   /** 建立一局并推进到 swap（强制角色），返回 gs */
   function toSwap(c0: string, c1: string): BloodState {
     const gs = createBloodGame(2, makePlayers(2), NOW);
+    // 竞拍结算后才发角色牌（先全员出最低价进入选将，再预设 charOptions 供 bot 选择）
+    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
     gs.players[0].charOptions = [c0, 'dealer'];
     gs.players[1].charOptions = [c1, 'clerk'];
     driveBots(gs, ['p0', 'p1'], 'swap');
@@ -457,6 +459,8 @@ describe('血色机器人 · 换牌节奏', () => {
   /** 建立一局并推进到 swap（强制角色） */
   function toSwapC(c0: string, c1: string): BloodState {
     const gs = createBloodGame(2, makePlayers(2), NOW);
+    // 竞拍结算后才发角色牌（先全员出最低价进入选将，再预设 charOptions 供 bot 选择）
+    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
     gs.players[0].charOptions = [c0, 'dealer'];
     gs.players[1].charOptions = [c1, 'clerk'];
     driveBots(gs, ['p0', 'p1'], 'swap');

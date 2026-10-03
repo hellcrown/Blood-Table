@@ -10,6 +10,7 @@ import {
   BloodError,
   bBuy,
   bCleanerDel,
+  bCrownBid,
   bDemagPick,
   bDogTarget,
   bInsertSkip,
@@ -22,7 +23,7 @@ import {
   bSwap,
   bSwapStop,
   bUseItem,
-  createBloodGame,
+  createBloodGame as createBloodGameRaw,
 } from '../src/blood/engine';
 import { applyAction, createGame, startHand } from '../src/game/engine';
 import { GameError, type GState } from '../src/game/types';
@@ -30,6 +31,13 @@ import { RoomManager } from '../src/rooms';
 
 const NOW = 1000;
 const isRank = (r: number) => (c: BCard) => c.r === r;
+
+/** 开局特权证暗标辅助：全员按最低价 1 出价并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
+  const gs = createBloodGameRaw(...args);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  return gs;
+}
 
 function mk2p(): BloodState {
   const gs = createBloodGame(2, [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }], NOW);

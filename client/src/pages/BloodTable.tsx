@@ -99,6 +99,7 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { n
 ];
 
 const PHASES: { key: BloodView['phase']; label: string }[] = [
+  { key: 'crownBid', label: '竞拍' },
   { key: 'pick', label: '选将' },
   { key: 'swap', label: '换牌' },
   { key: 'swapItem', label: '换牌结束' },
@@ -327,6 +328,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [selSwap, setSelSwap] = useState<string[]>([]);
   const [selPlay, setSelPlay] = useState<string[]>([]);
   const [selRemove, setSelRemove] = useState<string[]>([]);
+  /** 特权证暗标：自己已提交的出价（出价保密，仅本地回显「已出价」；离开竞拍阶段自动清除） */
+  const [myCrownBid, setMyCrownBid] = useState<number | null>(null);
   const [pinSeat, setPinSeat] = useState(-1);
   const [irisSeat, setIrisSeat] = useState(-1);
   const [irisCat, setIrisCat] = useState(1);
@@ -384,6 +387,7 @@ export function BloodTable({ view }: { view: BloodView }) {
     prevPhaseRef.current = view.phase;
     if (!prev || prev === view.phase) return;
     if (view.phase === 'reveal') playSfx('reveal');
+    if (view.phase !== 'crownBid') setMyCrownBid(null); // 离开竞拍阶段清除本地出价回显
   }, [view.phase]);
 
   // 结算音：以「结算数据出现」为准（比阶段切换更可靠——settle 视图可能被快速确认跳过渲染）
@@ -582,6 +586,8 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   const myTurnText = (): string => {
     switch (view.prompt.k) {
+      case 'crownBid':
+        return '特权证暗标：秘密出价（1稳/2进/3搏），出价最高者获得特权证';
       case 'pick':
         return '选将：点击角色牌放大查看技能，选择其一（超时自动选择）';
       case 'setup':
@@ -2718,6 +2724,51 @@ export function BloodTable({ view }: { view: BloodView }) {
                   <span>{ANNOUNCE_FX_EMOJI[annFx] ?? '✨'}</span>
                 </div>
               )}
+          </div>
+        </div>
+      )}
+
+      {/* 特权证暗标竞拍：每人密封出价 1~3，最高者得证（开局血筹 = 3 − 出价） */}
+      {view.phase === 'crownBid' && (
+        <div className="overlay char-pick">
+          <div className="panel char-pick-panel" onClick={(e) => e.stopPropagation()}>
+            <h3>👑 特权证暗标竞拍</h3>
+            {view.prompt.k === 'crownBid' ? (
+              <>
+                <p className="hint" style={{ maxWidth: 460 }}>
+                  秘密出价「愿意少拿几血筹换特权证」：出价最高者获得特权证（先手行动 + 平局判定占优），
+                  开局血筹 = 3 − 出价；平局掷骰定得主。出价对他人保密，全员出价后统一开价。
+                </p>
+                <div className="crown-bid-row">
+                  {(
+                    [
+                      [1, '稳', '开局 2🩸'],
+                      [2, '进', '开局 1🩸'],
+                      [3, '搏', '开局 0🩸'],
+                    ] as const
+                  ).map(([n, tag, desc]) => (
+                    <button
+                      key={n}
+                      className={`btn big crown-bid ${myCrownBid === n ? 'primary' : ''}`}
+                      onClick={() => {
+                        setMyCrownBid(n);
+                        send({ t: 'bCrownBid', bid: n });
+                      }}
+                    >
+                      出价 {n}
+                      <small>
+                        {tag} · {desc}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">超时未出价按最低价 1 自动托管</p>
+              </>
+            ) : (
+              <p className="char-pick-waiting">
+                {myCrownBid != null ? `已出价（保密中）· 等待其他玩家出价…` : '竞拍进行中 · 等待玩家出价…'}
+              </p>
+            )}
           </div>
         </div>
       )}

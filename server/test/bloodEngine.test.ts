@@ -34,12 +34,20 @@ import {
   bDemagPick,
   bPinpointVictimPick,
   bloodTick,
-  createBloodGame,
+  bCrownBid,
+  createBloodGame as createBloodGameRaw,
   evalForPlayer,
   bestFive,
 } from '../src/blood/engine';
 
 const NOW = 1000;
+
+/** 开局特权证暗标辅助：全员按最低价 1 出价并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
+  const gs = createBloodGameRaw(...args);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  return gs;
+}
 
 /** 全员确认对决展示（settle → buy） */
 function confirmSd(gs: BloodState): void {

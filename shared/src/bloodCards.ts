@@ -130,7 +130,7 @@ export const BLOOD_MARKET_EXPANSION_DEFS: BloodMarketDef[] = [
   // ── 备用道具 ──
   { id: 'signalJam', no: 'NO.045', name: '信号干扰器', kind: 'item', cost: 3, count: 4, text: '【换牌】结束时，可令一位玩家随机弃1张牌，并抽1张牌。', effect: { k: 'signalJamFx' }, expansion: true },
   { id: 'loudspeaker', no: 'NO.046', name: '广播喇叭', kind: 'item', cost: 3, count: 2, text: '【对决】前，可宣称自己将👑。【结算】若成功👑，则获得玩家人数×3🩸，否则跳过本回合的【购买】【删牌】【重整】。', effect: { k: 'loudspeakerFx' }, expansion: true },
-  { id: 'irisGamble', no: 'NO.047', name: '赌徒虹膜', kind: 'item', cost: 3, count: 2, text: '【对决】前，猜测一位玩家的牌型。【结算】若猜测正确，获得3🩸，该玩家本回合获得的🎫-4（最低为0）。', effect: { k: 'irisGambleFx' }, expansion: true },
+  { id: 'irisGamble', no: 'NO.047', name: '赌徒虹膜', kind: 'item', cost: 3, count: 3, text: '【对决】前，猜测一位玩家的牌型。【结算】若猜测正确，获得3🩸，该玩家本回合获得的🎫-4（最低为0）。', effect: { k: 'irisGambleFx' }, expansion: true },
   { id: 'secretNote', no: 'NO.048', name: '皮下密信', kind: 'item', cost: 2, count: 2, text: '【换牌】结束时，可花费2🩸，抽3张牌。', effect: { k: 'secretNoteFx' }, expansion: true },
   { id: 'barrier', no: 'NO.049', name: '防护屏障', kind: 'item', cost: 3, count: 4, text: '取消玩家即将单独对你使用的[秘密交易]或[备用道具]效果（不可对[防护屏障]使用）。', effect: { k: 'barrierFx' }, expansion: true },
   { id: 'eraser', no: 'NO.050', name: '魔术橡皮', kind: 'item', cost: 3, count: 2, text: '【出牌】前，宣称一种牌型，本回合【对决】此牌型视为「高牌」。', effect: { k: 'eraserFx' }, expansion: true },

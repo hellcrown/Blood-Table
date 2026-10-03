@@ -2911,6 +2911,28 @@ body {
   color: var(--text-dim);
 }
 
+/* 特权证暗标竞拍：三个出价按钮 */
+.crown-bid-row {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.crown-bid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 110px;
+}
+
+.crown-bid small {
+  font-size: 12px;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
 /* 角色详情弹层 */
 .char-detail .char-detail-panel {
   display: flex;

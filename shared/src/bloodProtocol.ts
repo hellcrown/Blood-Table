@@ -79,6 +79,7 @@ export interface BloodSettleRowView {
 export interface BloodMyPrompt {
   k:
     | 'pick'
+    | 'crownBid'
     | 'setup'
     | 'swap'
     | 'play'
@@ -191,6 +192,7 @@ export interface BloodView {
   /** 房间是否设置了密码（不下发密码本体） */
   hasPassword?: boolean;
   phase:
+    | 'crownBid' // 开局：特权证暗标竞拍（每人密封出价 1~3）
     | 'pick'
     | 'setup'
     | 'draw'
@@ -259,6 +261,7 @@ export interface BloodView {
 /* ---------------- 客户端 → 服务端：血色动作 ---------------- */
 
 export type BloodAction =
+  | { t: 'bCrownBid'; bid: number }
   | { t: 'bPickChar'; charId: string }
   | { t: 'bSetup'; removed: string[] }
   | { t: 'bSwap'; cardIds: string[]; drawCount?: number }

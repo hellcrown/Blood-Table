@@ -49,12 +49,20 @@ import {
   bRemove,
   bestFive,
   bloodTick,
-  createBloodGame,
+  bCrownBid,
+  createBloodGame as createBloodGameRaw,
 } from '../src/blood/engine';
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
 import type { BCard, BloodPhase, BloodState, BPlayer } from '../src/blood/types';
 
 const NOW = 1000;
+
+/** 开局特权证暗标辅助：全员按最低价 1 出价并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
+  const gs = createBloodGameRaw(...args);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  return gs;
+}
 
 function makeGame(c0: string, c1: string): BloodState {
   const gs = createBloodGame(2, [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }], NOW, true);
