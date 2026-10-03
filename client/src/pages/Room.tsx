@@ -264,8 +264,7 @@ export function Room({ view }: { view: TableView }) {
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·
               开局定角色（角色牌足够时每人抽2选1：拓展池3/4人局可选将；基础池随机分配）·
-              集齐 {view.maxPlayers <= 2 ? 24 : view.maxPlayers === 3 ? 20 : 16} 张车票获胜（
-              {view.maxPlayers <= 2 ? '2人局' : view.maxPlayers === 3 ? '3人局' : '4人局'}目标）
+              按开局人数分档：2 人局 24 张车票 · 3 人局 20 张 · 4 人局 16 张（房主可自定义 8-30）
             </p>
           ) : (
             <div className="settings-grid">

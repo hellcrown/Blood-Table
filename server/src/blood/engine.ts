@@ -119,10 +119,20 @@ export function createBloodGame(
   expansion = false,
   options: BloodOptions = {},
 ): BloodState {
-  const bps: BPlayer[] = players
+  // 座位归一化 + 局规模以「实际开局人数」为准（2026-10-03 审查 S6）：
+  // · 房间座位可能稀疏（4 座房只在 1/3 号位坐人），而引擎内部大量依赖 `(seat + i) % gs.seatCount`
+  //   的环绕推算（回合轮转、共享信息队列、离特权证顺时针距离），座位必须连续 0..n-1；
+  // · 局规模一律按人数分档才是规则书口径（目标票数 24/20/16、名次奖励分列、2 人局抢跑/连胜、
+  //   选将池门槛 `pool.length >= seatCount * 2`）——4 座房只坐 2 人时，那局就是 2 人局。
+  const seated = players
     .slice()
     .sort((a, b) => a.seat - b.seat)
-    .map((p) => ({
+    .map((p, i) => ({ id: p.id, name: p.name, seat: i }));
+  if (seatCount !== seated.length) {
+    console.warn('[blood] 座位数 %d 与开局人数 %d 不一致：按人数分档', seatCount, seated.length);
+  }
+  seatCount = seated.length;
+  const bps: BPlayer[] = seated.map((p) => ({
       id: p.id,
       name: p.name,
       seat: p.seat,

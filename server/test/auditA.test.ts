@@ -83,3 +83,36 @@ describe('批次 A · 跨人挂起不得带进删牌阶段（永久卡死）', (
     expect(gs.phase).not.toBe('remove');
   });
 });
+
+describe('批次 A · 局规模按实际开局人数（S6）', () => {
+  const P = (seat: number, n = seat) => ({ id: `p${n}`, name: `玩家${n}`, seat });
+
+  it('4 座房只坐 2 人：按 2 人局分档（目标 24 票，而非 4 人局的 16）', () => {
+    const gs = createBloodGame(4, [P(0), P(1)], NOW);
+    expect(gs.seatCount).toBe(2);
+    expect(gs.target).toBe(24);
+  });
+
+  it('稀疏座位（1/3 号位）归一到连续 0..n-1：环绕推算（(seat+i)%seatCount）才成立', () => {
+    const gs = createBloodGame(4, [P(1, 0), P(3, 1)], NOW);
+    expect(gs.players.map((p) => p.seat)).toEqual([0, 1]);
+    expect(gs.seatCount).toBe(2);
+    expect(gs.target).toBe(24);
+    // 归一化后每个座位号都必须能找到玩家（否则 (seat+i)%seatCount 会落到空位）
+    for (let s = 0; s < gs.seatCount; s++) {
+      expect(gs.players.some((p) => p.seat === s)).toBe(true);
+    }
+  });
+
+  it('3 人局目标 20 票', () => {
+    const gs = createBloodGame(3, [P(0), P(1), P(2)], NOW);
+    expect(gs.seatCount).toBe(3);
+    expect(gs.target).toBe(20);
+  });
+
+  it('房主自定义目标票数仍然优先于人数分档', () => {
+    const gs = createBloodGame(4, [P(0), P(1)], NOW, false, false, { targetTickets: 12 });
+    expect(gs.seatCount).toBe(2);
+    expect(gs.target).toBe(12);
+  });
+});

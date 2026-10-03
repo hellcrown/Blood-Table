@@ -628,7 +628,7 @@ export class RoomManager {
           .filter((s) => !s.spectator && (s.bot || s.connected || s.token !== ''))
           .sort((a, b) => a.seat - b.seat)
           .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
-        room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
+        room.game = blood.createBloodGame(players.length, players, now, room.charExpansion, room.expansion, {
           targetTickets: room.targetTickets || undefined,
         });
         room.matchLogged = false;
@@ -1015,7 +1015,7 @@ export class RoomManager {
       for (const s of room.sessions.values()) {
         if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
       }
-      room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
+      room.game = blood.createBloodGame(players.length, players, now, room.charExpansion, room.expansion, {
         targetTickets: room.targetTickets || undefined,
       });
       room.matchLogged = false;
