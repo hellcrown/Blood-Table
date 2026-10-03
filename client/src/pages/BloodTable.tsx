@@ -3,7 +3,7 @@ import { playSfx } from '../audio/sound';
 import type { FxEvent } from '../net/socket';
 import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
 import { applyCharEval } from '@shared/bloodChars';
-import { evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
+import { applyImitate, evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
 import { net } from '../net/socket';
 import { FeedbackModal } from '../components/FeedbackModal';
@@ -557,6 +557,17 @@ export function BloodTable({ view }: { view: BloodView }) {
   const myCharId = mySeatView?.charOff ? null : view.me.tempChar || mySeatView?.charId || null;
   const toEvalMe = (cv: BloodCardView): EvalCard => applyCharEval([toEval(cv)], myCharId)[0];
 
+  /**
+   * 按引擎 evalCardsFor 同序评估一组（将组成出牌区的）牌：基础候选 → 仿制印章并集 → 角色技能改写。
+   * 出牌选牌预览与确认排序都必须走这条管线——印章牌的最终牌型取决于它在出牌区内可「视为」的其他牌面，
+   * 只做单牌候选会让预览/排序与结算口径背离（用户可见为：选了印章但预览不显示最终效果）。
+   */
+  const evalMyPlay = (cards: BloodCardView[]): EvalCard[] => {
+    const evals = cards.map(toEval);
+    const imitate = cards.map((cv) => cv.chipIds.some((id) => BLOOD_MARKET_BY_ID.get(id)?.effect.k === 'imitate'));
+    return applyCharEval(applyImitate(evals, cards.map((c) => ({ r: c.r, s: c.s })), imitate), myCharId);
+  };
+
   // 瞎掰王宣告默认值：取「含芯片/角色修正后的候选首项」——与引擎质疑核对口径一致（诚实宣告无需手改）
   const declareDefault = (cv: BloodCardView): { r: number; s: BloodCardView['s'] } => {
     // 仿制印章：候选替换为出牌区其他牌基础面的并集（与引擎 applyImitate 口径一致）
@@ -584,7 +595,9 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (view.prompt.k !== 'play') return null;
     const chosen = view.me.hand.filter((c) => selPlay.includes(c.id));
     if (chosen.length === 0) return null;
-    return evalBloodHand(chosen.map(toEvalMe));
+    const hasStamp = chosen.some((cv) => cv.chipIds.some((id) => BLOOD_MARKET_BY_ID.get(id)?.effect.k === 'imitate'));
+    return { ev: evalBloodHand(evalMyPlay(chosen)), hasStamp };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.prompt.k, view.me.hand, selPlay, myCharId]);
 
   /** 牌局记录中的【牌名】渲染为可点击（打开牌面详情）；非牌名（技能名等）保持纯文本 */
@@ -1324,7 +1337,9 @@ export function BloodTable({ view }: { view: BloodView }) {
               <div className="act-hint">{myTurnText()}</div>
               {view.prompt.k === 'play' && playHint && (
                 <div className="play-hint">
-                  当前选择：{selPlay.length < 5 ? `还需 ${5 - selPlay.length} 张` : `【${playHint.name}】· ${playHint.pips} 点`}
+                  当前选择：
+                  {selPlay.length < 5 ? `还需 ${5 - selPlay.length} 张` : `【${playHint.ev.name}】· ${playHint.ev.pips} 点`}
+                  {playHint.hasStamp && selPlay.length >= 5 && ' · 🪴 印章按出牌区内其他牌面取最优'}
                 </div>
               )}
               {myCharId === 'faceless' && view.me.tempChar && (
@@ -1429,9 +1444,9 @@ export function BloodTable({ view }: { view: BloodView }) {
                     className="btn primary"
                     disabled={selPlay.length !== Math.min(5, view.me.hand.length)}
                     onClick={() => {
-                      // 按牌型排序后发送，对决亮牌时自然有序（三条在前、顺子按序等）
+                      // 按牌型排序后发送，对决亮牌时自然有序（三条在前、顺子按序等）；含印章时按最终牌型排序
                       const chosen = handList.filter((c) => selPlay.includes(c.id));
-                      const ev = evalBloodHand(chosen.map(toEvalMe));
+                      const ev = evalBloodHand(evalMyPlay(chosen));
                       const ordered = sortHandByType(chosen, ev.cat);
                       send({ t: 'bPlay', cardIds: ordered.map((c) => c.id) });
                       playSfx('lock');
