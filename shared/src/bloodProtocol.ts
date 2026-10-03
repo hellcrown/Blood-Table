@@ -8,6 +8,13 @@ export interface BloodCardView {
   r: number; // 0 = 王牌
   s: Suit | null;
   chipIds: string[]; // 挂载的强化芯片 def id
+  /**
+   * 服务端算好的**最终点数**（含芯片与弹簧修正、钳制 2-14，王牌为 0）。
+   * 客户端不该自己按 chipIds 重新推算：复制芯片复制到的效果快照（copiedFx）不在 chipIds 里，
+   * 本地推算会把「复制了校准器+2」的牌算成基础点数，导致角标与"按点数筛选"的交互
+   * （如定点爆破的受害者选牌）与服务端不一致。老服务端不下发时客户端回退本地推算。
+   */
+  effR?: number;
 }
 
 export interface BloodSeatView {

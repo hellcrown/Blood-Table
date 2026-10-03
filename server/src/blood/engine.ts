@@ -1008,10 +1008,14 @@ export function finalRank(p: BPlayer, c: BCard): number {
   if (c.s == null || c.r === 0) return 0;
   let r = c.r;
   for (const ch of p.chips.filter((x) => x.on === c.id)) {
-    if (ch.off) continue;
-    const eff = BLOOD_MARKET_BY_ID.get(ch.def)?.effect;
-    if (eff && eff.k === 'rankMod') r += eff.mod;
-    if (ch.springMod) r += ch.springMod; // 弹簧 ±X 与对决评估口径一致
+    // 必须与评估器同口径（chipEffectsFor：自身效果 + 复制快照 copiedFx + 弹簧修正）。
+    // 只读 def.effect 会让「复制芯片复制了校准器+2」的牌出现两个点数 ——
+    // 比点数/评估按 r+2 算、finalRank 按 r 算，而后者被定点爆破的宣称判定与
+    // 大厨/枪手/主播的【3】【4】判定使用，两套口径互相矛盾。
+    // 一张牌只能挂一张芯片，故三个来源不可能重复计同一份修正。
+    for (const eff of chipEffectsFor(p, ch)) {
+      if (eff.k === 'rankMod') r += eff.mod;
+    }
   }
   return Math.min(14, Math.max(2, r));
 }
@@ -2766,6 +2770,10 @@ export function bSecretDelete(gs: BloodState, playerId: string, cardIds: string[
     pushLog(gs, 'action', `${pname(p)} 删除：${cards.map(bloodCardText).join(' ')}`);
   }
   gainChefDeleteThrees(gs, p, cards);
+  // 皇叔的宿命胜利挂在「任何时候」：这张牌可能就是第 54 张。
+  // 只在 bRemove 判定会让「廉价删除 / 共享信息删掉最后一张」的玩家等到下一轮「跳过删牌」才判胜。
+  checkLiuWin(gs, p, now);
+  if (gs.phase !== 'buy') return; // 已达成宿命胜利，不再推进共享信息链
 
   // 共享信息链式：买家删完后每位对手依次可删 1 张（空选择=跳过）
   if (pend.kind === 'sharedInfo') {
@@ -2822,6 +2830,9 @@ export function bViolent(gs: BloodState, playerId: string, targetSeat: number, n
   const top = target.draw.splice(-3, 3);
   target.removed.push(...top);
   purgeChipsOn(gs, target, new Set(top.map((c) => c.id)));
+  // 对手的删牌同样可能删掉皇叔的第 54 张（卡面写的是「任何时候」，不限于自己删）
+  checkLiuWin(gs, target, now);
+  if (gs.phase !== 'buy') return; // 已达成宿命胜利
   pushLog(gs, 'action', `【暴力删除】发动：${pname(p)} 删除 ${pname(target)} 抽牌堆顶的 ${top.map(bloodCardText).join(' ')}`);
   afterMarketResolved(gs, p, false);
 }
@@ -3847,7 +3858,6 @@ export function bPinpoint(gs: BloodState, playerId: string, seat: number, rank: 
 
 /** 精准删除：抽到的 3 张牌中删除 0-2 张，其余弃置 */
 export function bPreciseDel(gs: BloodState, playerId: string, cardIds: string[], now: number): void {
-  void now;
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'preciseDel' || pend.seat !== playerId) {
     throw new BloodError('PENDING', '当前没有待处理的精准删除');
@@ -3871,6 +3881,9 @@ export function bPreciseDel(gs: BloodState, playerId: string, cardIds: string[],
   );
   gainChefDeleteThrees(gs, p, picked);
   gs.secretPending = null;
+  // 精准删除删的也是自己的牌：同样可能凑满 54 张（卡面：「任何时候」）
+  checkLiuWin(gs, p, now);
+  if (gs.phase === 'gameover') return;
   afterMarketResolved(gs, p, false);
 }
 
@@ -4545,6 +4558,9 @@ export function bFryerDel(gs: BloodState, playerId: string, cardIds: string[], d
   p.removed.push(...cards);
   purgeChipsOn(gs, p, new Set(cards.map((c) => c.id))); // 与其他删牌路径一致：删除牌上的芯片同步回收
   gainChefDeleteThrees(gs, p, cards);
+  // 炸鸡店老板的删牌同样可能删掉皇叔的第 54 张（卡面：「任何时候」）
+  checkLiuWin(gs, p, now);
+  if (gs.phase !== 'settle') return; // 已达成宿命胜利
   if (cards.length > 0) {
     pushLog(gs, 'action', `🍗 ${pname(p)}【炸鸡店老板】支付 ${cards.length} 血筹删除本回合打出的牌：${cards.map(bloodCardText).join(' ')}`);
   }

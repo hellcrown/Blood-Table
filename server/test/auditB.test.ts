@@ -6,9 +6,10 @@
  * 修复前 tryBarrierAsk 在询问之前就把道具移出并回收，选择不使用/超时同样白丢一张屏障。
  */
 import { describe, expect, it } from 'vitest';
-import { bBarrierDecide, bBuy, bPinpoint, bRemoveDone, bUseItem, createBloodGame } from '../src/blood/engine';
+import { bBarrierDecide, bBuy, bPinpoint, bRemoveDone, bSecretDelete, bUseItem, bViolent, createBloodGame, finalRank } from '../src/blood/engine';
 import { botAct, createBrain } from '../src/blood/botAI';
-import { promptFor } from '../src/blood/view';
+import { promptFor, buildBloodView } from '../src/blood/view';
+import type { Room } from '../src/rooms';
 import type { BloodState } from '../src/blood/types';
 
 const NOW = 1_000_000;
@@ -246,6 +247,109 @@ describe('批次 B · 走私客标记必须认「这一张牌」（B6 引擎真�
     const markedSlot = gs.smugglerMark?.slot ?? -1;
     expect(markedSlot).toBeGreaterThanOrEqual(0);
     expect(gs.market[markedSlot].uid).toBe(203);
+  });
+});
+
+describe('批次 B · 复制芯片不得让同一张牌有两个点数（B5）', () => {
+  /**
+   * 评估器走 chipEffectsFor（自身效果 + 复制快照 + 弹簧修正），而 finalRank 只读 def.effect ——
+   * 于是「复制芯片复制了校准器+2」的那张牌，比点数/评估按 7 算，而 finalRank 仍按 5 算。
+   * finalRank 被定点爆破的宣称判定、大厨/枪手/主播的【3】【4】判定使用，两套口径会互相矛盾。
+   */
+  it('copyChip 复制到点数芯片后，finalRank 与评估口径一致', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    const card = me.draw[0];
+    card.r = 5;
+    card.s = 's';
+    me.chips.push({ id: 'ch-copy', def: 'copyChip', on: card.id, copiedFx: { k: 'rankMod', mod: 2 } });
+    expect(finalRank(me, card)).toBe(7); // 修复前为 5（评估器按 7）
+  });
+
+  it('自身就是点数芯片（校准器+2）时同样为 7（口径未被改坏）', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    const card = me.draw[0];
+    card.r = 5;
+    card.s = 's';
+    me.chips.push({ id: 'ch-calib', def: 'calib2', on: card.id });
+    expect(finalRank(me, card)).toBe(7);
+  });
+
+  it('弹簧临时修正与复制快照叠加时不重复计算', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    const card = me.draw[0];
+    card.r = 5;
+    card.s = 's';
+    // 弹簧夹层：def 是 springFx，修正走独立字段；复制快照是另一条来源
+    me.chips.push({ id: 'ch-spring', def: 'spring', on: card.id, springMod: 3, copiedFx: { k: 'rankMod', mod: 2 } });
+    expect(finalRank(me, card)).toBe(10); // 5 + 3(弹簧) + 2(复制) —— 三条来源各算一次
+  });
+
+  it('失效芯片（被屏蔽/消磁）不参与最终点数', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    const card = me.draw[0];
+    card.r = 5;
+    card.s = 's';
+    me.chips.push({ id: 'ch-copy', def: 'copyChip', on: card.id, copiedFx: { k: 'rankMod', mod: 2 }, off: true });
+    expect(finalRank(me, card)).toBe(5);
+  });
+
+  it('视图把服务端算好的最终点数（effR）一并下发，客户端不必自己按 chipIds 推算', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    const card = me.draw[0];
+    card.r = 5;
+    card.s = 's';
+    me.chips.push({ id: 'ch-copy', def: 'copyChip', on: card.id, copiedFx: { k: 'rankMod', mod: 2 } });
+    me.hand = [card];
+    // 最小 Room 骨架：buildBloodView 只用到 sessions（判断 connected），故这里给空会话表即可
+    const room = { code: '7B-rank', mode: 'blood', maxPlayers: 2, sessions: new Map() } as unknown as Room;
+    const view = buildBloodView(room, gs, 'p0');
+    expect(view.me.hand.find((c) => c.id === card.id)?.effR).toBe(7);
+  });
+});
+
+describe('批次 B · 皇叔宿命胜利必须及时（B5）', () => {
+  /** 让皇叔差一张就删满 54，且票数已达目标一半（2 人局目标 24） */
+  function liuOneAway(): { gs: BloodState; me: BloodState['players'][number] } {
+    const gs = make2p();
+    const me = gs.players[0];
+    me.charId = 'liu';
+    me.tickets = 12; // ≥ 目标一半
+    gs.phase = 'buy';
+    gs.turnSeat = 0;
+    me.removed.push(...me.draw.splice(0, me.draw.length - 1)); // 剩 1 张在抽牌堆
+    me.discard = [me.draw.pop()!];
+    return { gs, me };
+  }
+
+  it('第 54 张由「廉价删除」（bSecretDelete）删掉时立即判胜', () => {
+    const { gs, me } = liuOneAway();
+    expect(me.removed.length).toBe(53);
+    gs.secretPending = { seat: 'p0', kind: 'deleteUpTo', max: 2, defId: 'cheapDel' };
+    bSecretDelete(gs, 'p0', [me.discard[0].id], NOW);
+    expect(gs.phase).toBe('gameover'); // 修复前：要等下一轮「跳过删牌」才判胜
+    expect(gs.final?.winnerSeat).toBe(0);
+  });
+
+  it('第 54 张由对手的「暴力删除」（bViolent）删掉时同样立即判胜', () => {
+    const gs = make2p();
+    const me = gs.players[0];
+    me.charId = 'liu';
+    me.tickets = 12; // ≥ 目标一半
+    gs.phase = 'buy';
+    gs.turnSeat = 1;
+    // 只差 3 张：抽牌堆正好留 3 张（暴力删除打光抽牌堆顶 3 张）
+    me.removed.push(...me.draw.splice(0, me.draw.length - 3));
+    expect(me.removed.length).toBe(51);
+    expect(me.draw.length).toBe(3);
+    gs.secretPending = { seat: 'p1', kind: 'violentTarget' };
+    bViolent(gs, 'p1', 0, NOW); // 对手对皇叔发动
+    expect(me.removed.length).toBe(54);
+    expect(gs.phase).toBe('gameover');
   });
 });
 

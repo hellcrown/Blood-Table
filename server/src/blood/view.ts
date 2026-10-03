@@ -1,7 +1,7 @@
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
 import type { BloodCardView, BloodMyPrompt, BloodSeatView, BloodView } from '@shared/bloodProtocol';
 import type { Room } from '../rooms';
-import { evalForPlayer, effChar } from './engine';
+import { evalForPlayer, effChar, finalRank } from './engine';
 import type { BCard, BloodState, BPlayer } from './types';
 
 function cardView(c: BCard, p: BPlayer): BloodCardView {
@@ -11,6 +11,8 @@ function cardView(c: BCard, p: BPlayer): BloodCardView {
     s: c.s,
     // 已失效（被屏蔽/消磁）的芯片不下发：客户端目标列表不再出现死按钮，摊牌角标也只显示生效芯片
     chipIds: p.chips.filter((ch) => ch.on === c.id && !ch.off).map((ch) => ch.def),
+    // 最终点数由服务端给：客户端无法从 chipIds 推出复制芯片的效果快照（copiedFx）
+    effR: finalRank(p, c),
   };
 }
 
@@ -338,6 +340,8 @@ export function buildBloodView(
                       id: c.id,
                       r: c.r,
                       s: c.s,
+                      // 与 cardView 同口径：结算明细里的牌也带上服务端算好的最终点数
+                      effR: owner ? finalRank(owner, c) : c.r,
                       chipIds:
                         bluffRow || !owner
                           ? []

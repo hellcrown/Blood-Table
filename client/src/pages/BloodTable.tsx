@@ -12,7 +12,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { CharDetail, CharPortrait } from '../components/CharCard';
 import { CardView } from '../components/Card';
-import { BCard, cardLabel, effLabel, effRankOf, sortHandByType } from '../components/BloodCard';
+import { BCard, cardEffRank, cardLabel, effLabel, effRankOf, sortHandByType } from '../components/BloodCard';
 import { Showdown, type ShowdownRow } from '../components/Showdown';
 
 /** 鲜花/鸡蛋飞行动画：从 from 座位面板中心飞向 to 座位面板中心；鸡蛋落地震动+糊脸 */
@@ -842,7 +842,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       return;
     }
     if (view.prompt.k === 'pinpointVictim') {
-      if (effRankOf(c).r !== (view.prompt.rank ?? 0)) return; // 点数不符不可选
+      if (cardEffRank(c) !== (view.prompt.rank ?? 0)) return; // 点数不符不可选（服务端口径）
       send({ t: 'bPinpointVictimPick', cardId: c.id });
       setZoneModal(null);
       return;
@@ -1723,7 +1723,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       const springCard = view.players
                         .find((p) => p.seat === view.me.seat)
                         ?.played?.find((c) => c.id === view.prompt.decision?.cardId);
-                      const base = springCard ? effRankOf(springCard).r : 0;
+                      const base = springCard ? cardEffRank(springCard) : 0;
                       const out = base + m < 2 || base + m > 14;
                       return (
                         <button
@@ -2617,7 +2617,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                   const dimmed =
                     (chipBuying != null && c.chipIds.length > 0) ||
                     (view.prompt.k === 'pullChip' && c.chipIds.length === 0) ||
-                    (view.prompt.k === 'pinpointVictim' && effRankOf(c).r !== (view.prompt.rank ?? 0)) ||
+                    (view.prompt.k === 'pinpointVictim' && cardEffRank(c) !== (view.prompt.rank ?? 0)) ||
                     (zoneModal.kind === 'discard' &&
                       !!activeChipDefId &&
                       (view.prompt.k === 'insertChip' || !!chipBuying) &&
@@ -2718,7 +2718,7 @@ export function BloodTable({ view }: { view: BloodView }) {
         const target = view.me.discard.find((c) => c.id === insertConfirm.cardId);
         const def = BLOOD_MARKET_BY_ID.get(insertConfirm.defId);
         const mod = def?.effect.k === 'rankMod' ? def.effect.mod : null;
-        const baseRank = target ? effRankOf(target).r : 0;
+        const baseRank = target ? cardEffRank(target) : 0;
         const newRank = mod != null ? Math.min(14, Math.max(2, baseRank + mod)) : baseRank;
         return (
           <div className="overlay" onClick={() => setInsertConfirm(null)}>
