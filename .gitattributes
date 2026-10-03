@@ -1,0 +1,19 @@
+# 行尾规则写进仓库，而不是各人本机的 core.autocrlf：
+# 服务器上若是 CRLF 的 deploy.sh / bin/bloodtable，bash 会直接报 $'\r': command not found。
+# 先前只有「本机 autocrlf=true」这一层保护，换一台机器就可能把 CRLF 提交进仓库。
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF（cmd.exe 对 LF 的 .bat 容错很差）
+*.bat text eol=crlf
+
+# 二进制资源不参与任何行尾/文本转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.xlsx binary
+*.mp4 binary
+*.wav binary
+*.woff2 binary

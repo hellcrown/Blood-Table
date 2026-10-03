@@ -3,7 +3,12 @@ node_modules/
 *.log
 .DS_Store
 .admin-secret
-.admin-secret
 server/simdbg.tmp.ts
 server/data/
 .draining
+
+# 宣传素材（promo/ 含 6MB 视频与 4MB wav，共约 17MB）：体积大且属于本地产物，
+# 不该被 `git add -A` 顺手带进仓库。若要正式入库请显式 `git add -f promo/...`。
+promo/
+# 本机会话的计划/草稿（只对本机有意义）
+.zcode/

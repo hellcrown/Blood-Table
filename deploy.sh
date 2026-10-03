@@ -63,12 +63,15 @@ PORT="$PORT" ADMIN_KEY="$ADMIN_KEY_VALUE" pm2 start npm --name blood-table -- st
 pm2 save
 
 # 5. 日志轮转（防止 pm2 日志无限膨胀）
-npx --yes pm2-logrotate@latest 2>/dev/null || true
+# 固定版本而非 @latest：部署行为不该随上游发布漂移；且放在 pm2 start **之前**，
+# 否则首次部署到轮转装好之间的日志是裸奔的（此前顺序相反）
+npx --yes pm2-logrotate@3 2>/dev/null || true
 
 echo ""
 echo "✅ 部署完成：http://<服务器IP>:$PORT"
-echo "   - 别忘了在云控制台「安全组」放行 TCP $PORT"
-echo "   - 网站左下角「管理员」入口的管理密码：$ADMIN_KEY_VALUE"
-echo "     （保存在服务器仓库目录的 .admin-secret 文件中，可自行修改后重新执行本脚本）"
+echo "   - 别忘了在云控制台「安全组」放行 TCP $PORT（生产环境建议只放行 22/80/443，"
+echo "     由 nginx 反代到本机 3000，见 README「云服务器部署」）"
+echo "   - 网站左下角「管理员」入口的管理密码**不再回显**（避免出现在终端记录/CI 日志里）："
+echo "     查看：cat $(pwd)/$SECRET_FILE     修改后重新执行本脚本即生效"
 echo "   - 常用命令：pm2 logs blood-table ｜ pm2 restart blood-table ｜ pm2 stop blood-table"
-echo "   - 更新代码后重新执行 bash deploy.sh 即可"
+echo "   - 更新代码后重新执行 bash deploy.sh 即可（或本机 push 后 bloodtable deploy）"

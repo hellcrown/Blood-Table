@@ -51,21 +51,45 @@ HTTPS 证书由 certbot（Let's Encrypt）签发并自动续期，80 强制跳�
 推荐直接部署在云服务器上（2核1G 起步，Ubuntu 22.04/24.04），所有玩家直连、无需任何组网工具：
 
 ```bash
-# 服务器上（安全组放行 TCP 22 与 3000）
+# 服务器上
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs git && sudo npm i -g pm2
+sudo apt install -y nodejs git curl && sudo npm i -g pm2
 git clone https://github.com/hellcrown/Blood-Table.git
 cd Blood-Table && bash deploy.sh
 ```
 
-访问 `http://服务器IP:3000` 即玩；更新版本：`git pull && bash deploy.sh`。
+**安全组怎么放行，取决于你要哪种模式**（两种模式不要混用）：
 
-> **发版后玩家侧感知**：服务端 `GET /api/version` 下发「服务器上跑的是哪一条更新日志」
-> （取自 `shared/src/changelog.ts` 的最新条目），前端每 5 分钟 / 回到前台时比对一次：
-> 发现服务器那条日志的**日期**比页面打包的日期新，就在大厅顶部弹出「🆕 新版本已发布」横幅与「立即刷新」按钮——
-> 仍开着旧页面（浏览器缓存里的旧 JS）的玩家由此能明确知道该刷新了，而不是靠运气。
-> 天数相同的两次发版不提示（无从判断谁在前，宁可漏报也不让所有人白刷一次），此时靠下一条。
-> 玩家没读过的更新日志另在「📜 更新日志」入口显示角标，点开即消。
+| 模式 | 安全组放行 | 玩家访问 | 说明 |
+| --- | --- | --- | --- |
+| **生产（推荐）** | 22 / 80 / 443，**不放行 3000** | `https://你的域名` | nginx 反代 443 → 本机 3000；账号密码与管理密钥全程 TLS，也绕不开 nginx 层防护 |
+| 内网 / 试玩 | 22 + 3000 | `http://服务器IP:3000` | 明文 HTTP，**口令与管理密钥会以明文过网**，仅限内网或临时试玩 |
+
+> ⚠️ 早期文档在这里前后矛盾（一处写「3000 限本机」、一处写「放行 3000」）。以本表为准：
+> 公网生产环境**不要**直接放行 3000。另外 `deploy.sh` 的回显也不再诱导你开放 3000 端口。
+
+生产模式（nginx + Let's Encrypt）落地步骤——`deploy/nginx-blood-table.conf` 是现成配置，此前没有任何文档说明怎么用它：
+
+```bash
+sudo cp deploy/nginx-blood-table.conf /etc/nginx/sites-available/blood
+sudo ln -s /etc/nginx/sites-available/blood /etc/nginx/sites-enabled/blood
+sudo nginx -t && sudo systemctl reload nginx
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d 你的域名          # 自动签发并配置续期；证书到期前会自动续
+```
+
+> nginx 配置里的三处细节别删：`/ws` 的 `Upgrade`/长超时（否则对局被掐断）、
+> `X-Real-IP`/`X-Forwarded-For`（缺了它服务端眼里的来源 IP 全是 127.0.0.1，
+> 单 IP 配额会退化成全站共享）、`/assets/` 长缓存 + `index.html` 协商缓存（发版后刷新即得新版）。
+
+> **发版后玩家侧感知**：服务端 `GET /api/version` 下发当前部署的**构建标识**（构建产物的哈希资源名，
+> 如 `index-b4DagTlm.js`，启动时从 `client/dist/index.html` 里读出），前端每 5 分钟 / 回到前台比对一次：
+> 页面自己的构建标识（取自 `import.meta.url`）与它不同，就说明这个标签页还开着旧包 →
+> 大厅顶部弹出「🆕 新版本已发布」横幅与「立即刷新」按钮，而不是靠玩家自己想起来刷新。
+> 之所以不用更新日志日期：那个口径要求每次发版都改日志，而实际最近 30 个提交里 21 个根本没动它，
+> 同一天内多次发版就完全检测不到。取不到构建标识时（开发环境 / 未升级的老服务端）才回退按日期比
+> （同日不提示：两个方向都无从判断先后，宁可漏报也不让所有人白刷一次）。
+> 「稍后」按**具体版本**记忆（换版本会重新提示）；玩家没读过的更新日志另在「📜 更新日志」入口显示角标，点开即消。
 >
 > **更新日志的写作口径**：`shared/src/changelog.ts` 是给**玩家**看的，只写玩家看得见、用得上的变化；
 > 命令、部署、仓库、接口、限流参数、管理端功能等开发/运维细节写在本 README 与提交记录里，不要写进日志。
@@ -99,20 +123,25 @@ cd Blood-Table && bash deploy.sh
 shared/src/
   protocol.ts             前后端共享的 WS 消息与类型
   changelog.ts            更新日志（前端渲染 + 服务端 /api/version 的版本比对口径）
+  updateNotice.ts         「新版本已发布」提示的判定（纯函数，前后端与测试共用）
   bloodCards.ts           黑市牌定义（基础 25 种 57 张，拓展黑市另 27 种 55 张，数据驱动）
   bloodEval.ts            血色对决评估器（前后端共用，出牌实时牌型提示）
+  bloodChars.ts           58 名角色定义（含难度分级与实装说明）
 server/src/
-  blood/                  血色模式引擎（8 阶段状态机/视图/超时托管）
+  blood/                  血色模式引擎（8 阶段状态机/视图/超时托管/机器人 AI）
   game/                   经典德扑引擎
-  rooms.ts                房间、会话、重连、广播、计时
-  index.ts                HTTP + WebSocket 服务、静态托管、心跳
-server/test/              单元测试 + 随机整场模拟 + WS 端到端冒烟
+  rooms.ts                房间、会话、重连、广播、计时、配额与排水
+  index.ts                HTTP + WebSocket 服务、静态托管、鉴权、心跳、限流
+  auth.ts | matchlog.ts | feedback.ts   账号/天梯落库、对局统计、反馈
+  net/limits.ts           限流原语（滑动窗口 / 令牌桶 / 按 IP 表）
+server/test/              单元测试 + 随机整场模拟 + HTTP 接入层测试 + WS 端到端冒烟
 client/src/
-  net/socket.ts           WS 客户端、自动重连、token 管理
-  net/version.ts          版本提示（旧包检测 + 更新日志未读标记）
+  net/socket.ts           WS 客户端、自动重连、token 管理、血战日志本地累积
+  net/version.ts          版本提示（取构建标识 + 读存储的薄壳）
   pages/Lobby|Room|Table|BloodTable
-  components/             卡牌、座位、操作栏、结算浮层、日志
-bin/bloodtable            服务器运维命令（update/restart/logs/clear/status…）
+  components/             卡牌、座位、操作栏、结算浮层、日志、图鉴、管理面板
+bin/bloodtable            服务器运维命令（update/deploy/restart/logs/clear/status…）
+deploy/nginx-blood-table.conf  线上 nginx 反代配置（443 → 本机 3000）
 ```
 
 服务端为权威服务器：规则判定全在服务端，私有信息（手牌/牌堆/弃牌区）只下发给所有者。
@@ -120,15 +149,21 @@ bin/bloodtable            服务器运维命令（update/restart/logs/clear/stat
 ## 测试
 
 ```bash
-npm test           # 291 个用例：德扑规则回归 + 血色评估器 + 血色引擎流程 + 角色技能 + 机器人 + 随机整场模拟 + 账号/天梯 + 更新日志版本口径与写作口径
+npm test           # 343 个用例：德扑规则回归 + 血色评估器 + 血色引擎流程 + 角色技能 + 机器人
+                   # + 随机整场模拟（牌张守恒等不变量）+ 账号/天梯 + 更新日志版本与写作口径
+                   # + 房间生命周期（请离/重连/空房回收）+ 广播体积 + HTTP 接入层
 ```
 
-端到端脚本（先启动服务器）：
+端到端脚本（**先启动服务器**；`bloodSmoke.ts` 会真的打完整局，含对决演示节奏，通常需要几十秒到几分钟）：
 
 ```bash
-cd server && npx tsx test/bloodSmoke.ts   # 血色模式 2 机器人完整对局到车票胜利
+cd server && npx tsx test/bloodSmoke.ts   # 血色模式 2 机器人完整对局到车票胜利（2 人局目标 24）
 cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 ```
+
+> 这两个脚本不在 `npm test` 里（文件名不匹配 vitest 的 `*.test.ts`），需要手动跑。
+> 失败时会打印最后一次看到的阶段/提示，以及两个机器人期间收到的**服务端拒绝与连接关闭**记录 ——
+> 「等待超时」几乎总是症状，真正原因在那几行里。
 
 ## 已知限制
 
