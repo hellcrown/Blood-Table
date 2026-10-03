@@ -254,8 +254,8 @@ export interface BloodState {
   /** 我的名字？：自定义牌型与名称 */
   mynameCat: number | null;
   mynameText: string | null;
-  /** 走私客：本回合标记的黑市栏位 */
-  smugglerMark: { slot: number; by: string } | null;
+  /** 走私客：本回合标记的黑市牌（defId 用于购买补位后按牌重新定位 slot，防索引漂移误收费） */
+  smugglerMark: { slot: number; by: string; defId: string } | null;
   /** 窥天师：天意（暗置的黑市牌 defId 序列） */
   seerZone: string[];
   /** 特工：本回合的出牌区交换记录（aCards/bCards 为双方交换时的出牌 id） */

@@ -961,13 +961,14 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'cleanerDel': {
-      // cardId 为空时引擎从目标抽牌堆随机删；目标抽牌堆/弃牌区全空会被拒绝，改为选有牌可删的目标
+      // cardId 为空时引擎从目标抽牌堆随机删；目标仅有弃牌区牌时空 cardId 会被拒（BAD_CARD 空转到超时），改传具体弃牌
       const cands = gs.players
         .filter((o) => o.id !== p.id && (o.draw.length > 0 || o.discard.length > 0))
         .sort((a, b) => b.tickets - a.tickets);
       const t = cands[0];
       if (t) {
-        blood.bCleanerDel(gs, p.id, t.seat, '', now);
+        const cardId = t.draw.length > 0 ? '' : t.discard[0]!.id;
+        blood.bCleanerDel(gs, p.id, t.seat, cardId, now);
         return true;
       }
       return false;

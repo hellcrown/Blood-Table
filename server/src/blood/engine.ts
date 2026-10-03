@@ -449,7 +449,8 @@ function reshuffleIfEmpty(gs: BloodState, p: BPlayer): void {
     p.discard = [];
     p.draw.push(...coils); // 线圈宿主牌置于抽牌堆顶
     if (coils.length) {
-      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.map(bloodCardText).join('、')} 置于抽牌堆顶`);
+      // 宿主牌来自私有弃牌区：日志只公示张数，牌面公开等于全员预知其下一张摸牌
+      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.length} 张宿主牌置于抽牌堆顶`);
     }
     grantLaundryOnReshuffle(gs);
   }
@@ -645,6 +646,8 @@ function allDone(gs: BloodState, pred: (p: BPlayer) => boolean): boolean {
 export function bSetup(gs: BloodState, playerId: string, removedIds: string[], now: number): void {
   if (gs.phase !== 'setup') throw new BloodError('BAD_PHASE', '不在初始构筑阶段');
   const p = gs.players.find((x) => x.id === playerId)!;
+  // 黑客的初始构筑被 hackerSetup 挂起替代：挂起未决时走正常构筑 = 额外看 16 张牌双重构筑
+  if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成当前角色技能抉择');
   if (p.setupRound >= 2) return;
   if (removedIds.length > BLOOD_SETUP_KEEP) throw new BloodError('TOO_MANY', `最多删除 ${BLOOD_SETUP_KEEP} 张`);
   const removedCards: BCard[] = [];
@@ -722,7 +725,8 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   drawToCap(gs, p);
   p.swapLeft -= 1;
   p.lastAction = `换牌 ${cardIds.length}张`;
-  pushLog(gs, 'action', `${pname(p)} 换牌：弃置 ${discardCards.map(bloodCardText).join(' ')}，抽至上限`);
+  // 弃牌区对他人私有（金科玉律）：日志只记张数，公示牌面等于泄露其保留的手牌构成
+  pushLog(gs, 'action', `${pname(p)} 换牌：弃置 ${discardCards.length} 张，抽至上限`);
   if (p.swapLeft <= 0) {
     p.swapDone = true;
     // 酒保：剩余可换牌次数实际变为 0 时获得 1 血筹
@@ -770,7 +774,7 @@ function runTwinSetup(gs: BloodState): void {
     p.discard = [];
     p.draw.push(host, ...coils); // 末端为堆顶
     grantLaundryOnReshuffle(gs);
-    pushLog(gs, 'action', `🪞 ${pname(p)}【双生子】将【双生镜片】插入 ${bloodCardText(host)}、重洗牌库后置于抽牌堆顶`);
+    pushLog(gs, 'action', `🪞 ${pname(p)}【双生子】将【双生镜片】插入弃牌区一张牌，重洗牌库后置于抽牌堆顶`);
   }
 }
 
@@ -1665,9 +1669,10 @@ export function bItemAsk(gs: BloodState, playerId: string, use: boolean, now: nu
 }
 
 export function bUseItem(gs: BloodState, playerId: string, itemId: string | null, now: number): void {
-  if (gs.secretPending?.kind === 'revealDecide') {
-    // 延迟决策（复制/屏蔽目标选择）进行中：消磁枪会覆盖挂起决策使其静默丢失，拒绝使用
-    throw new BloodError('PENDING', '先完成当前的芯片决策');
+  if (gs.secretPending) {
+    // 任何存活挂起（含他人的屏障反制询问/消磁二级选择）期间禁止使用道具：
+    // 消磁枪会整体覆盖 secretPending——屏障已被扣但反制询问丢失，效果绕过受害者决策
+    throw new BloodError('PENDING', '先完成当前的挂起交互');
   }
   const p = gs.players.find((x) => x.id === playerId);
   if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
@@ -2318,6 +2323,13 @@ function refillMarket(gs: BloodState): void {
     }
     break;
   }
+  // 右推补位后 slot 索引漂移：按 defId 把走私客标记重新定位到被标记的牌，
+  // 否则他人买「新占该栏位的牌」会被误收 2 血筹过路费（标记物未被购买时标记不得转移）
+  if (gs.smugglerMark) {
+    const idx = gs.market.findIndex((m) => m.def === gs.smugglerMark!.defId);
+    if (idx >= 0) gs.smugglerMark.slot = idx;
+    else gs.smugglerMark = null; // 被标记的牌已被买走/整格移除：标记作废
+  }
 }
 
 function isChipInsertable(p: BPlayer, card: BCard, def: import('@shared/bloodCards').BloodMarketDef): boolean {
@@ -2775,8 +2787,11 @@ export function bPassBuy(gs: BloodState, playerId: string, now: number): void {
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成上一张牌的结算');
   if (
     gs.secretPending &&
-    ['pirateRob', 'pirateDecide', 'smugglerMark', 'auctionPick', 'auctionBid', 'impRedeem'].includes(gs.secretPending.kind)
+    ['pirateRob', 'pirateDecide', 'smugglerMark', 'auctionPick', 'auctionBid', 'impRedeem', 'barrierAsk'].includes(
+      gs.secretPending.kind,
+    )
   ) {
+    // barrierAsk 不拦会随 endBuy 泄漏进删牌阶段：受害者 bRemove/bRemoveDone 永远 PENDING，对局卡死
     throw new BloodError('PENDING', '购买前的角色互动尚未完成');
   }
   if (p.buyPassed) return;
@@ -2801,13 +2816,18 @@ function advanceBuyTurn(gs: BloodState, fromSeat: number, now: number): void {
     if (p && !p.buyPassed) {
       gs.turnSeat = p.seat;
       gs.deadline = now + BLOOD_TURN_MS;
-      // 瞎掰帝拍卖得牌者轮到其购买回合时发放暗置的牌
+      // 瞎掰帝拍卖得牌者轮到其购买回合时发放暗置的芯片（道具牌已在叫价结算时发放）
       if (gs.auction && gs.auction.highestBy === p.id) {
         const def = BLOOD_MARKET_BY_ID.get(gs.auction.defId);
         gs.auction = null;
         if (def) {
           pushLog(gs, 'action', `🔨 ${pname(p)} 获得拍卖得牌【${def.name}】`);
-          processMarketDef(gs, p, def, true);
+          if (def.kind === 'chip') {
+            processMarketDef(gs, p, def, true); // 插入决策挂起，解决后推进（该回合的购买机会随插入消耗）
+          } else {
+            p.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
+            pushLog(gs, 'action', `${pname(p)} 将【${def.name}】正面朝上放入道具区`);
+          }
           return;
         }
       }
@@ -2819,6 +2839,29 @@ function advanceBuyTurn(gs: BloodState, fromSeat: number, now: number): void {
 
 function endBuy(gs: BloodState, now: number): void {
   if (gs.phase !== 'buy') return;
+  // 兜底：得牌者被预设跳过购买（编剧未达50/闭店礼）时拍卖牌不会经购买回合发放——此处补发，
+  // 防已扣的血筹与暗置牌随 gs.auction 凭空蒸发
+  const undelivered = gs.auction;
+  if (undelivered?.highestBy) {
+    const w = gs.players.find((x) => x.id === undelivered.highestBy);
+    const def = BLOOD_MARKET_BY_ID.get(undelivered.defId);
+    gs.auction = null;
+    if (w && def) {
+      pushLog(gs, 'action', `🔨 ${pname(w)} 购买阶段结束前补发拍卖得牌【${def.name}】`);
+      if (def.kind === 'item') {
+        w.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
+      } else {
+        const target = w.discard.find((c) => isChipInsertable(w, c, def));
+        if (target) {
+          insertChip(gs, w, `ch-${Math.random().toString(36).slice(2, 10)}`, def.id, target.id);
+        } else {
+          w.blood += undelivered.highest; // 无合法宿主：退还已付血筹，牌弃置
+          gs.recycle.push(def.id);
+          pushLog(gs, 'action', `🔨 ${pname(w)} 无合法芯片宿主：退还 ${undelivered.highest} 血筹，牌弃置入回收站`);
+        }
+      }
+    }
+  }
   for (const idx of [3, 4]) {
     if (gs.market[idx] && gs.market[idx].def != null) {
       gs.market[idx].bonus += 1;
@@ -3022,7 +3065,8 @@ export function bReorg(
     p.discard = [];
     p.draw.push(...coils); // 磁力线圈宿主牌置于抽牌堆顶
     if (coils.length) {
-      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.map(bloodCardText).join('、')} 置于抽牌堆顶`);
+      // 宿主牌来自私有弃牌区：日志只公示张数，牌面公开等于全员预知其下一张摸牌
+      pushLog(gs, 'action', `📡 ${pname(p)} 的【磁力线圈】发动：${coils.length} 张宿主牌置于抽牌堆顶`);
     }
     grantLaundryOnReshuffle(gs);
     pushLog(gs, 'action', `${pname(p)} 重洗牌库`);
@@ -4080,7 +4124,8 @@ export function bStudentDump(gs: BloodState, playerId: string, accept: boolean, 
     p.discard.push(...dumped);
     p.play = [];
     p.blood += 2;
-    pushLog(gs, 'action', `🎒 ${pname(p)}【高中生】弃光出牌区（${dumped.map(bloodCardText).join(' ')}）：获得 2 血筹，并可执行一次删牌`);
+    // 出牌区在摊牌前私有：逐张公示等于提前亮出其 5 张暗牌，只记张数
+    pushLog(gs, 'action', `🎒 ${pname(p)}【高中生】弃光出牌区（${dumped.length} 张）：获得 2 血筹，并可执行一次删牌`);
     if (p.discard.length > 0 && p.blood >= 2) {
       gs.secretPending = { seat: p.id, kind: 'studentRemove' };
       gs.deadline = now + BLOOD_TURN_MS;
@@ -4584,7 +4629,7 @@ export function bSmugglerMark(gs: BloodState, playerId: string, slot: number, no
   }
   const ms = gs.market[slot];
   if (!ms || ms.def == null) throw new BloodError('BAD_SLOT', '该栏位没有黑市牌');
-  gs.smugglerMark = { slot, by: p.id };
+  gs.smugglerMark = { slot, by: p.id, defId: ms.def };
   const def = BLOOD_MARKET_BY_ID.get(ms.def)!;
   pushLog(gs, 'action', `🚚 ${pname(p)}【走私客】标记【${def.name}】：自己购买 -2 血筹，他人购买须先支付 2 血筹`);
   processPreBuyQueue(gs, now);
@@ -4714,7 +4759,15 @@ export function bAuctionBid(gs: BloodState, playerId: string, amount: number, no
   if (winnerId) {
     const w = gs.players.find((x) => x.id === winnerId)!;
     w.blood -= gs.auction.highest;
-    pushLog(gs, 'action', `🔨 ${pname(w)} 以 ${gs.auction.highest} 血筹竞得暗置的牌（于其购买回合发放）`);
+    const wonDef = BLOOD_MARKET_BY_ID.get(gs.auction.defId);
+    // 道具牌立即入道具区：留到购买回合发放会被 afterMarketResolved 顺延，得牌者的正常购买机会被整段跳过
+    if (wonDef && wonDef.kind === 'item') {
+      w.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: wonDef.id });
+      pushLog(gs, 'action', `🔨 ${pname(w)} 以 ${gs.auction.highest} 血筹竞得【${wonDef.name}】（正面朝上放入道具区）`);
+      gs.auction = null;
+    } else {
+      pushLog(gs, 'action', `🔨 ${pname(w)} 以 ${gs.auction.highest} 血筹竞得暗置的牌（于其购买回合发放）`);
+    }
     if (w.id !== auctioneer.id) {
       auctioneer.blood += 2;
       pushLog(gs, 'action', `🔨 ${pname(auctioneer)}【瞎掰帝】得牌者非自己：获得 2 血筹`);
