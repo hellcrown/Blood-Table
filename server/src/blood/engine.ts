@@ -260,9 +260,18 @@ function beginCrownBid(gs: BloodState, now: number): void {
   pushLog(
     gs,
     'sys',
-    `👑 特权证暗标（选将后）：每人秘密出价 ${BLOOD_CROWN_MIN_BID}~${BLOOD_CROWN_MAX_BID}（愿意少拿几血筹换特权证，0=不参与），出价最高者得证（开局血筹 = ${BLOOD_CROWN_MAX_BID} − 出价），平局掷骰定得主`,
+    `👑 特权证暗标（角色确定后）：每人秘密出价 ${BLOOD_CROWN_MIN_BID}~${BLOOD_CROWN_MAX_BID}（愿意少拿几血筹换特权证，0=不参与），出价最高者得证（开局血筹 = ${BLOOD_CROWN_MAX_BID} − 出价），平局掷骰定得主`,
   );
+  // 已离场（标记断线）的玩家按 0（不参与）预填：选将前/中离场者不再让竞拍空等 60s 托管
+  for (const p of gs.players) {
+    if (!p.connected && gs.crownBids[p.id] == null) {
+      p.wasAuto = true;
+      gs.crownBids[p.id] = BLOOD_CROWN_MIN_BID;
+      pushLog(gs, 'action', `${pname(p)} 已离场：特权证竞拍按 0（不参与）托管`);
+    }
+  }
   gs.deadline = now + BLOOD_TURN_MS;
+  if (gs.players.every((x) => gs.crownBids[x.id] != null)) resolveCrownAuction(gs, now);
 }
 
 /** 特权证暗标：玩家密封出价（0~3，0=不参与）；全员出价后立即结算并进入角色开局效果与构筑 */
@@ -281,6 +290,13 @@ export function bCrownBid(gs: BloodState, playerId: string, bidRaw: number, now:
 
 /** 结算暗标：最高价得证（平局掷骰定得主），得证者血筹 = 3 − 出价（其余保持 3）→ 角色开局效果与构筑 */
 function resolveCrownAuction(gs: BloodState, now: number): void {
+  // 江东之主在场：特权证注定被其收走，拍卖整体作废（不扣任何人血筹）——
+  // 否则「全 0 平局掷骰骰中 sunwu = 3 血筹持证 / 骰不中 = 作废后 2 血筹」互相矛盾，且出高价者输骰反而更优
+  if (gs.players.some((p) => p.charId === 'sunwu')) {
+    pushLog(gs, 'sys', '👑 【江东之主】在场：特权证竞拍作废（其始终拥有特权证）');
+    beginAfterPick(gs, now);
+    return;
+  }
   const bids = gs.players.map((p) => ({ p, bid: gs.crownBids[p.id] ?? 1 }));
   const maxBid = Math.max(...bids.map((b) => b.bid));
   const tied = bids.filter((b) => b.bid === maxBid);
@@ -1556,6 +1572,8 @@ function startDeferredDecision(gs: BloodState, now: number): void {
 
 export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now: number): void {
   if (gs.phase !== 'reveal') throw new BloodError('BAD_PHASE', '不在对决阶段');
+  // 决策队列未清空时禁止掠夺：否则 settle 会带挂起重入（二次结算=全场奖励双倍发放）
+  if (gs.secretPending) throw new BloodError('PENDING', '先完成当前的芯片决策');
   if (!gs.stealPending || gs.stealPending.seat !== playerId) throw new BloodError('NOT_YOUR_TURN', '当前没有需要你选择的掠夺目标');
   const p = gs.players.find((x) => x.id === playerId)!;
   const target = bySeat(gs, targetSeat);
@@ -1684,6 +1702,9 @@ function seatOf(gs: BloodState, playerId: string): number {
 /* ---------------- 结算 ---------------- */
 
 function settle(gs: BloodState, now: number): void {
+  // 幂等护栏：结算只允许从对决阶段进入一次。残留挂起/重复推进若再触发 settle，
+  // 会把名次车票/血筹/连胜计分全部双倍发放（可刷分到胜利），必须直接拒绝
+  if (gs.phase !== 'reveal') return;
   const order = orderFrom(gs, gs.privilegeSeat ?? gs.players[0].seat);
   const dist = (p: BPlayer) => seatDist(gs, order[0].seat, p.seat);
   const rows: SettleRow[] = gs.players.map((p) => {
@@ -3228,7 +3249,13 @@ export function bloodTick(gs: BloodState, now: number): boolean {
       if (gs.phase !== 'reveal') return true;
       if (gs.secretPending?.kind === 'revealDecide') {
         pushLog(gs, 'action', '对决决策超时，剩余芯片效果按跳过处理');
+        const owner = gs.secretPending.seat;
         gs.secretPending = null;
+        // 同主的未结清掠夺一并落空：残留会让属主 ≠ 窗口玩家，tick 对窗口玩家重放 bUseItem 空转卡死
+        if (gs.stealPending && gs.stealPending.seat === owner) {
+          gs.stealPending = null;
+          pushLog(gs, 'action', '掠夺目标超时未选，效果落空');
+        }
         nextRevealOrSettle(gs, now);
         return true;
       }
@@ -3260,11 +3287,14 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         pushLog(gs, 'action', `${pname(p)} 掠夺目标无效，效果落空`);
         nextRevealOrSettle(gs, now);
         return true;
-      } else {
-        p.wasAuto = true;
-        act(() => bUseItem(gs, p.id, null, now));
       }
-      return true;
+      if (gs.stealPending) {
+        // 属主不是当前窗口玩家（异常残留）：按落空清理，否则下方 bUseItem 被全局拦截，每 tick 空转永久卡死
+        const owner = gs.players.find((x) => x.id === gs.stealPending!.seat);
+        gs.stealPending = null;
+        pushLog(gs, 'action', `${owner ? pname(owner) : '?'} 的掠夺未能结清，效果落空`);
+        return true; // 下个 tick 窗口玩家正常宣告推进
+      }
     }
     case 'settle': {
       // 对决展示确认：全员确认立即统一推进；演示播完后的 30s 等待上限到期自动确认兜底

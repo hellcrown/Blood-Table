@@ -99,8 +99,8 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { n
 ];
 
 const PHASES: { key: BloodView['phase']; label: string }[] = [
-  { key: 'crownBid', label: '竞拍' },
   { key: 'pick', label: '选将' },
+  { key: 'crownBid', label: '竞拍' },
   { key: 'swap', label: '换牌' },
   { key: 'swapItem', label: '换牌结束' },
   { key: 'play', label: '出牌' },
@@ -396,10 +396,13 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (view.phase !== 'crownBid') setMyCrownBid(null); // 离开竞拍阶段清除本地出价回显
   }, [view.phase]);
 
-  // 服务端确认「我还没出价」（断线期间点过出价但消息丢了 / 重连后）：清掉本地回显，重新可出价
+  // 服务端确认「我还没出价」（断线期间点过出价但消息丢了 / 重连后）：清掉本地回显，重新可出价。
+  // 依赖整个 view：断线重连后 phase/prompt.k 与断线前完全相同（Object.is 相等），只依赖它们会让 effect 不触发、
+  // 按钮永久锁死而实际按 0 托管。prompt.k === 'crownBid' ⇔ 服务端无本座位出价（出价一经写入永不清除），语义权威。
+  // 代价：点击与服务端入账之间若他人广播先到，高亮短暂闪烁后自愈（服务端对重复出价静默忽略）。
   useEffect(() => {
     if (view.phase === 'crownBid' && view.prompt.k === 'crownBid') setMyCrownBid(null);
-  }, [view.phase, view.prompt.k]);
+  }, [view]);
 
   // 结算音：以「结算数据出现」为准（比阶段切换更可靠——settle 视图可能被快速确认跳过渲染）
   const prevResultRoundRef = useRef<number | null>(null);
@@ -2743,7 +2746,7 @@ export function BloodTable({ view }: { view: BloodView }) {
         </div>
       )}
 
-      {/* 特权证暗标竞拍：每人密封出价 1~3，最高者得证（开局血筹 = 3 − 出价） */}
+      {/* 特权证暗标竞拍（角色确定后）：每人密封出价 0~3（0=不参与），最高者得证（开局血筹 = 3 − 出价） */}
       {view.phase === 'crownBid' && (
         <div className="overlay char-pick">
           <div className="panel char-pick-panel" onClick={(e) => e.stopPropagation()}>
@@ -2751,17 +2754,17 @@ export function BloodTable({ view }: { view: BloodView }) {
             {view.prompt.k === 'crownBid' ? (
               <>
                 <p className="hint" style={{ maxWidth: 460 }}>
-                  选将完成，现在为特权证暗标：秘密出价「愿意少拿几血筹换特权证」，出价最高者获得特权证
-                  （先手行动 + 平局判定占优），开局血筹 = 3 − 出价；平局掷骰定得主。
+                  角色已确定，现在为特权证暗标：秘密出价「愿意少拿几血筹换特权证」，出价最高者获得特权证
+                  （先手行动 + 平局判定占优），得证者开局血筹 = 3 − 出价；平局掷骰定得主。
                   出价 0 = 不参与（得证也只会在全场都出 0 时掷骰白得）。出价对他人保密，全员出价后统一开价。
                 </p>
                 <div className="crown-bid-row">
                   {(
                     [
-                      [0, '弃', '开局 3🩸'],
-                      [1, '稳', '开局 2🩸'],
-                      [2, '进', '开局 1🩸'],
-                      [3, '搏', '开局 0🩸'],
+                      [0, '弃', '得证开局 3🩸'],
+                      [1, '稳', '得证开局 2🩸'],
+                      [2, '进', '得证开局 1🩸'],
+                      [3, '搏', '得证开局 0🩸'],
                     ] as const
                   ).map(([n, tag, desc]) => (
                     <button
@@ -2788,7 +2791,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             ) : (
               <p className="char-pick-waiting">
                 {view.prompt.bidDone
-                  ? '你已出价（保密中）· 等待开价…'
+                  ? '本座位已出价（保密中）· 等待开价…'
                   : '竞拍进行中 · 等待玩家出价…'}
               </p>
             )}

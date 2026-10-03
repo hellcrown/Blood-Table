@@ -2911,7 +2911,7 @@ body {
   color: var(--text-dim);
 }
 
-/* 特权证暗标竞拍：三个出价按钮 */
+/* 特权证暗标竞拍：四个出价按钮（0=不参与） */
 .crown-bid-row {
   display: flex;
   gap: 14px;

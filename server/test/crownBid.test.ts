@@ -153,31 +153,48 @@ describe('特权证暗标竞拍 · 结算', () => {
   });
 });
 
-describe('特权证暗标竞拍 · 江东之主夺证（竞拍作废）', () => {
-  it('sunwu 夺证：拍卖作废，sunwu 血筹修正为 2，原持证者出价退还至 3', () => {
+describe('特权证暗标竞拍 · 江东之主在场（拍卖作废）', () => {
+  it('sunwu 在场：拍卖整体作废，任何出价不扣血筹，sunwu 血筹修正为 2', () => {
     const gs = make2p();
     gs.players[0].charOptions = ['dealer', 'noble'];
     gs.players[1].charOptions = ['sunwu', 'clerk'];
     bPickChar(gs, 'p0', 'dealer', NOW);
     bPickChar(gs, 'p1', 'sunwu', NOW);
     expect(gs.phase).toBe('crownBid');
-    bCrownBid(gs, 'p0', 3, NOW); // p0 赢得竞拍（开局 0 血筹）
+    bCrownBid(gs, 'p0', 3, NOW); // 出最高价也不得证、不扣血筹
     bCrownBid(gs, 'p1', 1, NOW);
     expect(gs.players.find((p) => p.id === 'p1')!.privilege).toBe(true);
     expect(gs.privilegeSeat).toBe(1);
     expect(gs.players.find((p) => p.id === 'p1')!.blood).toBe(2); // 原版「始终拥有」：2
-    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(3); // 出价退还
+    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(3); // 拍卖作废：未扣
   });
 
-  it('sunwu 自己赢得竞拍时不重复修正（持证者 = 3 − 出价）', () => {
+  it('sunwu 在场且全员出 0：同样作废，sunwu 恒 2 血筹（消除平局掷骰的血筹不一致）', () => {
     const gs = make2p();
     gs.players[0].charOptions = ['sunwu', 'clerk'];
     gs.players[1].charOptions = ['dealer', 'noble'];
     bPickChar(gs, 'p0', 'sunwu', NOW);
     bPickChar(gs, 'p1', 'dealer', NOW);
-    bCrownBid(gs, 'p0', 2, NOW);
-    bCrownBid(gs, 'p1', 1, NOW);
-    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(1); // 3 − 出价 2，无二次修正
+    for (const p of gs.players) bCrownBid(gs, p.id, 0, NOW);
+    expect(gs.players.find((p) => p.id === 'p0')!.privilege).toBe(true);
+    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(2); // 恒 2，不因「自己掷骰赢」变 3
     expect(gs.players.find((p) => p.id === 'p1')!.blood).toBe(3);
+  });
+});
+
+describe('特权证暗标竞拍 · 离场预填', () => {
+  it('选将前离场（引擎侧 connected=false）：进入竞拍时自动按 0 预填并立即结算，不空等托管', () => {
+    const gs = make2p();
+    gs.players[1].connected = false; // 模拟 rooms.handleLeave 的引擎侧离场标记
+    gs.players[0].charOptions = ['dealer', 'noble'];
+    gs.players[1].charOptions = ['dealer', 'noble'];
+    bPickChar(gs, 'p0', 'dealer', NOW);
+    expect(gs.phase).toBe('pick'); // 等待 p1
+    bPickChar(gs, 'p1', 'dealer', NOW); // p1 的选将由托管完成（离场者同路径），随后进入竞拍
+    expect(gs.crownBids['p1']).toBe(0); // 预填
+    expect(gs.phase).toBe('crownBid'); // p0 未出价，等待中
+    bCrownBid(gs, 'p0', 2, NOW);
+    expect(gs.phase).toBe('setup'); // 无需再等 60s 托管
+    expect(gs.players.find((p) => p.privilege)!.id).toBe('p0');
   });
 });

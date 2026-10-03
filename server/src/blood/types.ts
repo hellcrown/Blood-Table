@@ -129,7 +129,7 @@ export interface MarketSlot {
 }
 
 export type BloodPhase =
-  | 'crownBid' // 开局：特权证暗标竞拍（每人密封出价 1~3，最高者得证，开局血筹 = 3 − 出价）
+  | 'crownBid' // 角色确定后：特权证暗标竞拍（每人密封出价 0~3，0=不参与；最高者得证，开局血筹 = 3 − 出价）
   | 'pick' // 选将（随机抽2张角色牌选1）
   | 'setup' // 初始构筑
   | 'draw'
@@ -290,7 +290,7 @@ export interface BloodState {
   log: LogLine[];
   logSeq: number;
   privilegeSeat: number | null;
-  /** 特权证暗标：playerId → 出价（1~3）；全员出价后结算，得证者开局血筹 = 3 − 出价 */
+  /** 特权证暗标：playerId → 出价（0~3，0=不参与）；全员出价后结算，得证者开局血筹 = 3 − 出价 */
   crownBids: Record<string, number>;
 }
 

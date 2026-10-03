@@ -113,8 +113,8 @@ function randomAction(gs: BloodState, p: BPlayer, rng: () => number, now: number
   }
   switch (gs.phase) {
     case 'crownBid': {
-      // 特权证暗标：随机出价 1~3（覆盖 varied 开局经济下的全流程）
-      if (gs.crownBids[p.id] == null) tryAct(() => bCrownBid(gs, p.id, ri(rng, 3) + 1, now));
+      // 特权证暗标：随机出价 0~3（覆盖不参与与「全员 0 掷骰白得」路径）
+      if (gs.crownBids[p.id] == null) tryAct(() => bCrownBid(gs, p.id, ri(rng, 4), now));
       return;
     }
     case 'pick': {

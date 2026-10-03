@@ -924,12 +924,13 @@ export class RoomManager {
       if (bp) {
         try {
           const now = Date.now();
+          bp.connected = false; // 引擎侧离场标记：beginCrownBid 据此对先于竞拍离场者预填 0 价
+          if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
+          // pick 选将可能触发 beginCrownBid（预填已覆盖离场者）；此处兜底竞拍中直接离场的补价
           if (bs.phase === 'crownBid' && bs.crownBids[bp.id] == null) {
             bp.wasAuto = true; // 与超时托管同口径：非本人出价
             blood.bCrownBid(bs, bp.id, 0, now); // 离场按不参与（0）托管，不替离场者花血筹
-          }
-          else if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
-          else if (bs.phase === 'setup' && bp.setupRound < 2) blood.bSetup(bs, bp.id, [], now);
+          } else if (bs.phase === 'setup' && bp.setupRound < 2) blood.bSetup(bs, bp.id, [], now);
         } catch {
           /* 阶段守卫兜底 */
         }

@@ -194,7 +194,7 @@ export interface BloodView {
   /** 房间是否设置了密码（不下发密码本体） */
   hasPassword?: boolean;
   phase:
-    | 'crownBid' // 开局：特权证暗标竞拍（每人密封出价 1~3）
+    | 'crownBid' // 角色确定后：特权证暗标竞拍（每人密封出价 0~3，0=不参与）
     | 'pick'
     | 'setup'
     | 'draw'
