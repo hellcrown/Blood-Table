@@ -12,7 +12,8 @@ import { CHANGELOG, LATEST, isStaleBundle, versionKey } from '@shared/changelog'
 describe('更新日志 · 版本口径', () => {
   it('CHANGELOG[0] 恒为最新：LATEST 与之同源', () => {
     expect(CHANGELOG.length).toBeGreaterThan(0);
-    expect(LATEST).toBe(CHANGELOG[0]);
+    // 断言"内容上就是最新那条"而不是对象身份：等价实现（如返回副本）不该被判红
+    expect(LATEST).toEqual(CHANGELOG[0]);
   });
 
   it('日期为零填充 ISO 日期：字典序比较才等价于时间先后', () => {
@@ -72,7 +73,9 @@ describe('更新日志 · 面向玩家', () => {
     [/部署/, '部署'],
     [/运维/, '运维'],
     [/用例/, '测试用例'],
-    [/接口|API/, '接口'],
+    // API 用词边界：裸子串会把 rapid / capital / therapist 这类正常英文词一并拦下，
+    // 逼作者放宽正则 —— 守卫类测试最常见的退化路径
+    [/接口|\bAPI\b/, '接口'],
     [/落库|数据库/, '存储'],
     [/管理员/, '管理端功能'],
     [/埋点/, '埋点'],
