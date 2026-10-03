@@ -1137,8 +1137,13 @@ function actRevealDecide(gs: BloodState, p: BPlayer, t: string | undefined, chip
     return true;
   }
   if (t === 'spring') {
-    // ±2 可能越界（2-14 钳制）：按宿主牌最终点数选可用修正量，无可用量则跳过
     const chip = p.chips.find((c) => c.id === chipId);
+    // 同一条弹簧决策会被 surface 两次（引擎队列语义）：已用过则直接跳过，防重复扣血
+    if (chip?.springMod) {
+      blood.bSkipDecision(gs, p.id, now);
+      return true;
+    }
+    // ±2 可能越界（2-14 钳制）：按宿主牌最终点数选可用修正量，无可用量则跳过
     const card = chip ? p.play.find((c) => c.id === chip.on) : undefined;
     const base = card ? blood.finalRank(p, card) : 0;
     const mod = base + 2 <= 14 ? 2 : base + 1 <= 14 ? 1 : base - 1 >= 2 ? -1 : 0;

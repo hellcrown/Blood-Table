@@ -528,6 +528,13 @@ export function BloodTable({ view }: { view: BloodView }) {
   const myCharId = mySeatView?.charOff ? null : view.me.tempChar || mySeatView?.charId || null;
   const toEvalMe = (cv: BloodCardView): EvalCard => applyCharEval([toEval(cv)], myCharId)[0];
 
+  // 瞎掰王宣告默认值：取「含芯片/角色修正后的候选首项」——与引擎质疑核对口径一致（诚实宣告无需手改）
+  const declareDefault = (cv: BloodCardView): { r: number; s: BloodCardView['s'] } => {
+    const ev = applyCharEval([toEval(cv)], myCharId)[0];
+    const suit = cv.s != null && ev.suits.includes(cv.s) ? cv.s : ev.suits[0];
+    return { r: ev.ranks[0], s: suit };
+  };
+
   const playHint = useMemo(() => {
     if (view.prompt.k !== 'play') return null;
     const chosen = view.me.hand.filter((c) => selPlay.includes(c.id));
@@ -2148,11 +2155,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <span key={c.id} className="act-row wrap">
                           <span className="hint">{cardLabel(c)} →</span>
                           <select
-                            value={blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r)}
+                            value={blufferDecl[c.id]?.r ?? declareDefault(c).r}
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
-                                [c.id]: { r: Number(e.target.value), s: blufferDecl[c.id]?.s ?? (c.s ?? 's') },
+                                [c.id]: { r: Number(e.target.value), s: blufferDecl[c.id]?.s ?? declareDefault(c).s },
                               }))
                             }
                           >
@@ -2163,11 +2170,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                             ))}
                           </select>
                           <select
-                            value={blufferDecl[c.id]?.s ?? (c.s ?? 's')}
+                            value={blufferDecl[c.id]?.s ?? declareDefault(c).s}
                             onChange={(e) =>
                               setBlufferDecl((m) => ({
                                 ...m,
-                                [c.id]: { r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r), s: e.target.value },
+                                [c.id]: { r: blufferDecl[c.id]?.r ?? declareDefault(c).r, s: e.target.value },
                               }))
                             }
                           >
@@ -2187,8 +2194,8 @@ export function BloodTable({ view }: { view: BloodView }) {
                             t: 'bBlufferDeclare',
                             declared: (view.me.playCards ?? []).map((c) => ({
                               id: c.id,
-                              r: blufferDecl[c.id]?.r ?? (c.r === 0 ? 14 : effRankOf({ ...c, chipIds: [] }).r),
-                              s: (blufferDecl[c.id]?.s ?? c.s ?? 's') as BloodCardView['s'],
+                              r: blufferDecl[c.id]?.r ?? declareDefault(c).r,
+                              s: (blufferDecl[c.id]?.s ?? declareDefault(c).s) as BloodCardView['s'],
                             })),
                           })
                         }
