@@ -622,9 +622,10 @@ export class RoomManager {
           if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
         }
         // 从房间当前会话重建对局（而非旧局 players）：对局中入座者不再被排除在重开局之外；
-        // 目标票数沿用房间设置（0=按新人数默认），与 handleStart 开局口径一致
+        // 目标票数沿用房间设置（0=按新人数默认），与 handleStart 开局口径一致。
+        // 排除断线且令牌已被清空的会话（被踢者特征）——其幽灵座位没人能接管，不该被再发进新手局
         const players = [...room.sessions.values()]
-          .filter((s) => !s.spectator)
+          .filter((s) => !s.spectator && (s.bot || s.connected || s.token !== ''))
           .sort((a, b) => a.seat - b.seat)
           .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
         room.game = blood.createBloodGame(room.maxPlayers, players, now, room.charExpansion, room.expansion, {
@@ -632,6 +633,7 @@ export class RoomManager {
         });
         room.matchLogged = false;
         room.gameStartedAt = now;
+        this.drainNotified.delete(room.code); // 同上：再来一场的新对局重新预告
         if (this.draining) this.notifyDrain(room);
         break;
       }
@@ -782,6 +784,12 @@ export class RoomManager {
     session.ws = ws;
     session.connected = true;
     room.pendingRemove.delete(session.id);
+    // 引擎侧断线标记同步复位：血色 pick 阶段离场者重连后若仍是 connected=false，
+    // 竞拍开始会按「已离场」替其预填 0 价且 bCrownBid 静默忽略重复出价，重连者永远无法参与竞拍
+    if (room.game && room.mode === 'blood' && 'market' in room.game) {
+      const bp = (room.game as BloodState).players.find((x) => x.id === session.id);
+      if (bp) bp.connected = true;
+    }
     if (!room.hostId && !session.spectator) room.hostId = session.id; // 房主空缺（原房主离开后只剩 bot）时由重连者接任
     this.bind(ws, room, session);
     this.sendHello(ws, session);
@@ -1012,6 +1020,7 @@ export class RoomManager {
       });
       room.matchLogged = false;
       room.gameStartedAt = now;
+      this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告（旧局收过不代表新局知道）
       if (this.draining) this.notifyDrain(room);
     } else {
       if (!room.game) {
@@ -1031,6 +1040,7 @@ export class RoomManager {
       engine.startHand(room.game, now);
       room.matchLogged = false;
       room.gameStartedAt = now;
+      this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告（旧局收过不代表新局知道）
       if (this.draining) this.notifyDrain(room);
     }
     this.broadcast(room);
@@ -1061,7 +1071,9 @@ export class RoomManager {
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     if (msg.targetTickets != null) {
       const n = Math.round(msg.targetTickets);
-      room.targetTickets = Math.min(30, Math.max(0, Number.isFinite(n) ? n : 0));
+      // 与界面承诺/引擎 resolveTargetTickets 同口径：非 0 钳 8-30。此前 rooms 层放行 1-7——
+      // 视图「N 票」与天梯结算按原值、引擎开局却钳到 8，口径分裂且小目标可刷速胜天梯分
+      room.targetTickets = Number.isFinite(n) ? (n === 0 ? 0 : Math.min(30, Math.max(8, n))) : 0;
     }
     if (msg.password != null) {
       const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
@@ -1129,6 +1141,22 @@ export class RoomManager {
       return;
     }
     send(target.ws, { t: 'error', code: 'KICKED', msg: '你已被房主请出房间' });
+    // 血色安全阶段（竞拍/选将/构筑/终局）直接移除会话：此后其幽灵座位会锁死房间
+    // （占满员名额、令牌已失效无人可接管、bRematch 还会把它再发进新手局）；对局中仍走断线托管
+    const bloodPhase = room.mode === 'blood' && room.game ? (room.game as BloodState).phase : null;
+    if (bloodPhase != null && ['crownBid', 'pick', 'setup', 'gameover'].includes(bloodPhase)) {
+      if (target.ws) {
+        try {
+          target.ws.close(4003, 'kicked');
+        } catch {
+          /* 忽略 */
+        }
+        this.bindings.delete(target.ws);
+      }
+      this.removeSession(room, target);
+      this.broadcast(room);
+      return;
+    }
     this.handleLeave(room, target);
     if (target.ws) {
       try {
@@ -1141,6 +1169,7 @@ export class RoomManager {
     }
     target.connected = false;
     this.tokenIndex.delete(target.token); // 被请离者的会话令牌失效，无法自动重回房间
+    target.token = ''; // 令牌字段一并清空：bRematch 重建对局时以「断线且无令牌」识别被踢幽灵并排除
     // 账号令牌同步除名：否则被踢者可凭 30 天登录令牌经账号重连找回鬼位会话，踢人对登录玩家形同虚设
     delete target.accountId;
   }
@@ -1430,7 +1459,9 @@ export class RoomManager {
         seatCount: g.players.length,
         winnerSeat: g.final.winnerSeat,
         settings: {
-          targetTickets: room.targetTickets || undefined,
+          // 引擎解析后的实际目标（resolveTargetTickets：自定义钳 8-30，缺省按 maxPlayers 24/20/16）。
+          // 此前记 room 原始设置——开局人数少于座位数或旧值 1-7 时与对局实际 target 不一致，天梯结算口径随之扭曲
+          targetTickets: g.target,
           charExpansion: room.charExpansion,
           expansion: room.expansion,
         },

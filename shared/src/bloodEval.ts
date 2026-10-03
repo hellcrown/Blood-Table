@@ -242,6 +242,7 @@ export function toEvalCard(
 /**
  * 仿制印章：将带印章的牌候选改为“出牌区其他牌的基础牌面（无视其芯片、不含JOKER）”的并集。
  * 仅排除自身宿主——对方印章牌的宿主基础牌面同样是合法仿制目标（互仿 = 互换基础面，良定义）。
+ * 卡面为「可视为」：宿主自身的非 JOKER 基础牌面也保留在候选中（允许不发动，否则同点数比大时被强制压低）。
  * 近似实现：点数×花色取并集的笛卡尔积（可能包含实际不存在的点花组合），供评估取最优。
  */
 export function applyImitate(
@@ -255,11 +256,16 @@ export function applyImitate(
     const ranks = new Set<number>();
     const suits = new Set<Suit>();
     raws.forEach((raw, j) => {
-      if (j === i || raw.s == null) return;
+      if (raw.s == null) return;
+      if (j === i) {
+        ranks.add(raw.r); // 宿主自身基础面：不发动印章的选项
+        suits.add(raw.s);
+        return;
+      }
       ranks.add(raw.r);
       suits.add(raw.s);
     });
-    if (ranks.size === 0) return c; // 没有可仿制的目标（出牌区只有自己/JOKER）
+    if (ranks.size === 0) return c; // 没有可仿制的目标且宿主是 JOKER（保持原候选）
     return { ...c, ranks: [...ranks].sort((a, b) => a - b), suits: [...suits] };
   });
 }

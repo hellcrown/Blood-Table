@@ -38,7 +38,7 @@ export const BLOOD_CHARS: BloodCharDef[] = [
   { id: 'pirate', name: '海盗', emoji: '🏴‍☠️', hue: 220, tags: ['购买'], difficulty: 2, impl: 'full', implNote: '抢劫→放弃/抵抗（轮流掷骰）全流程自动化，购买阶段前触发。', text: '【购买阶段】前，你可以抢劫一位对手，其必须选择【放弃】或者【抵抗】。若【放弃】，则交给你2血筹（不足则全给）。若【抵抗】，则与你轮流掷骰，若你的点数更大，则抢夺其至多4血筹，否则无事发生。' },
   { id: 'stockholder', name: '股民', emoji: '📈', hue: 140, tags: ['购买'], difficulty: 2, impl: 'full', text: '【购物阶段】结束时，若你剩余0血筹，则获得3血筹。' },
   { id: 'tarot', name: '塔罗师', emoji: '🔮', hue: 260, tags: ['换牌'], difficulty: 2, impl: 'full', implNote: '每次换牌改为先抽（≤2）后弃（≤2），换牌界面双步确认。', text: '【换牌阶段】你的每次换牌：可先抽牌，再弃牌。但每次最多抽2张再弃2张牌。' },
-  { id: 'mascot', name: '吉祥物', emoji: '🧸', hue: 30, tags: ['购买'], difficulty: 1, impl: 'full', text: '每回合【购物阶段】当你第一次购买时，价格优惠一半（向上取整）。例：价格3血筹的牌以1血筹购入。' },
+  { id: 'mascot', name: '吉祥物', emoji: '🧸', hue: 30, tags: ['购买'], difficulty: 1, impl: 'full', text: '每回合【购物阶段】当你第一次购买时，价格优惠一半（向下取整）。例：价格3血筹的牌以1血筹购入。' },
   { id: 'fryer', name: '炸鸡店老板', emoji: '🍗', hue: 25, tags: ['换牌', '结算'], difficulty: 2, impl: 'full', implNote: '换牌期付1抽1（无限次）；结算期付1删本回合打出的牌（≤3张）。', text: '【换牌阶段】你可花费1血筹，并抽1张牌（无次数限制）。【结算阶段】结束时，你可用1血筹删除1张本回合打出的牌（最多3张）。' },
   { id: 'laundry', name: '洗衣房店主', emoji: '🧺', hue: 200, tags: ['常驻', '重整'], difficulty: 1, impl: 'full', text: '任何时候，当重洗牌库时，获得1血筹。【重整阶段】若选择不重洗牌库，则额外获得2血筹。' },
   { id: 'idol', name: '偶像', emoji: '🌟', hue: 50, tags: ['换牌'], difficulty: 1, impl: 'full', text: '【换牌阶段】每次换牌，可选择任意数量的牌（而非至多3张），若一次弃了4张或者更多的牌，获得1血筹。' },

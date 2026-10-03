@@ -54,6 +54,19 @@ export function sortHandByType<T extends SdSortableCard>(cards: T[], cat: number
   return [...jokers, ...order.flatMap((r) => groups.get(r)!)];
 }
 
+/** 各牌型对「主组」的点数张数需求（0 = 非主组型）；coreOrder 判定王牌是否为构成牌用 */
+const CORE_MAIN_GROUP_NEEDED: Record<number, number> = {
+  3: 3, // 三条
+  6: 3, // 葫芦（主组 3+对 2）
+  7: 4, // 四条
+  8: 5, // 五条
+  10: 3, // 同花葫芦
+  11: 5, // 同花五条
+  12: 6, // 六条
+  13: 6, // 同花六条
+  14: 7, // 七条
+};
+
 /**
  * 牌型核心牌（触发放大 + 光柱特效）：按激发顺序返回。
  * 顺子/同花顺 = 全部；对/三条/葫芦/四条及以上 = 同点数组（组大的先、王牌补足主组）；高牌/同花 = 无。
@@ -71,18 +84,19 @@ export function coreOrder<T extends SdSortableCard>(cards: T[], cat: number): T[
     .filter(([r]) => r !== 0)
     .sort((a, b) => (b[1].length - a[1].length) || b[0] - a[0]);
   const core: T[] = [];
-  const [mainRank, mainGroup] = rankGroups[0] ?? [null, []];
+  const [, mainGroup] = rankGroups[0] ?? [null, []];
   if (mainGroup.length >= 2) {
     core.push(...mainGroup);
-    // 王牌可补足主组构成三条及以上（如 对+王 = 三条；葫芦主组 2+王 也成立）
-    if (jokers.length > 0 && mainGroup.length + jokers.length >= 3 && cat >= 3) {
+    // 王牌仅在主组不足该牌型所需主组数时才是构成牌（对+王=三条；3 同点+2 王=五条）；
+    // 主组已自足（KKK+无关王）时王与牌型无关，不高亮
+    const need = CORE_MAIN_GROUP_NEEDED[cat] ?? 0;
+    if (need > 0 && jokers.length > 0 && mainGroup.length < need && mainGroup.length + jokers.length >= need) {
       core.push(...jokers);
     }
   }
   for (const [r, g] of rankGroups.slice(1)) {
     if (g.length >= 2) core.push(...g);
   }
-  void mainRank;
   return core;
 }
 

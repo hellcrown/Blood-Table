@@ -87,18 +87,20 @@ describe('深查修复 · 评估器', () => {
     expect(r.pips).toBe(70); // 5×14
   });
 
-  it('仿制印章仅排除自身宿主：对方印章宿主基础面是合法目标', () => {
+  it('仿制印章候选 = 其他牌基础面 ∪ 自身基础面（「可视为」可不发动）；对方宿主面是合法目标', () => {
     const cards: EvalCard[] = [fixed('a', 7, 's'), fixed('b', 9, 'h')];
     const raws = [
       { r: 7, s: 's' as const },
       { r: 9, s: 'h' as const },
     ];
     const out = applyImitate(cards, raws, [true, true]);
-    // a 可仿 b 的 9♥，b 可仿 a 的 7♠（各自池排除自己）
+    // a 可仿 b 的 9♥，也可保留自身 7♠（卡面「可视为」= 可选，强制替换会在同点数比大时压低自己）
     expect(out[0].ranks).toContain(9);
-    expect(out[0].ranks).not.toContain(7);
+    expect(out[0].ranks).toContain(7);
+    expect(out[0].suits).toContain('h');
+    expect(out[0].suits).toContain('s');
     expect(out[1].ranks).toContain(7);
-    expect(out[1].ranks).not.toContain(9);
+    expect(out[1].ranks).toContain(9);
   });
 });
 

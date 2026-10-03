@@ -738,7 +738,8 @@ export function BloodTable({ view }: { view: BloodView }) {
       case 'cleanerDel':
         return '清洁工：选择目标玩家，从其弃牌区选牌删除（或随机删其抽牌堆一张，删自抽牌堆则重洗）';
       case 'pinpointVictim':
-        return `定点爆破：从你的弃牌区点击一张 ${view.prompt.rank ?? 0} 点的牌删除（可跳过）`;
+        // 服务端没有玩家侧跳过入口（超时托管兜底），不承诺「可跳过」
+        return `定点爆破：从你的弃牌区点击一张 ${view.prompt.rank ?? 0} 点的牌删除（无匹配的牌则等待超时落空）`;
       default:
         return '等待其他玩家操作…';
     }
@@ -763,13 +764,14 @@ export function BloodTable({ view }: { view: BloodView }) {
             : 3;
 
   /** 购买实付价（与服务端计价同口径）：吉祥物首次半价 / 魏王芯片-2 / 走私客标记位自己-2、他人+2。
-   *  此前禁用按原价——折扣角色的合法购买被 UI 挡死且无任何提示。 */
+   *  此前禁用按原价——折扣角色的合法购买被 UI 挡死且无任何提示。
+   *  smugglerSlot 是全局标记栏位（服务端下发给所有人）：只有走私客本人买标记牌才 -2，其余人 +2。 */
   const effBuyCost = (slotIdx: number, m: { cost: number; defId: string | null; marked?: boolean }): number => {
     const def = BLOOD_MARKET_BY_ID.get(m.defId ?? '');
     let cost = m.cost;
     if (myCharId === 'mascot' && !view.me.firstBuyUsed) cost = Math.floor(cost / 2);
     if (myCharId === 'wei' && def?.kind === 'chip') cost = Math.max(0, cost - 2);
-    if (view.me.smugglerSlot === slotIdx) cost = Math.max(0, cost - 2);
+    if (myCharId === 'smuggler' && view.me.smugglerSlot === slotIdx) cost = Math.max(0, cost - 2);
     else if (m.marked) cost += 2;
     return cost;
   };
@@ -973,7 +975,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             </button>
           </span>
           <span className="spacer" />
-          {view.phase !== 'gameover' && (
+          {!spectating && view.phase !== 'gameover' && (
             <button
               className="btn small danger"
               onClick={() => {
@@ -1565,7 +1567,12 @@ export function BloodTable({ view }: { view: BloodView }) {
                   <>
                     <button
                       className="btn primary"
-                      disabled={selRemove.length === 0}
+                      disabled={
+                        selRemove.length === 0 ||
+                        // 血筹不足必报 NO_BLOOD：与购买按钮同口径，超预算直接禁用
+                        Math.max(0, selRemove.length - (view.prompt.free ?? 1)) * (view.prompt.cost ?? 2) >
+                          view.me.blood
+                      }
                       onClick={() => {
                         send({ t: 'bRemove', cardIds: selRemove });
                         setSelRemove([]);
@@ -1984,11 +1991,23 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <div className="my-hand">
                       {(view.me.playCards ?? []).map((c) => (
                         <div key={c.id} className="hand-cell">
-                          <BCard c={c} size="lg" onClick={() => send({ t: 'bFryerDel', cardIds: [c.id], done: false })} />
+                          {/* 预算 = min(剩余次数, 血筹)：超预算点击必报 TOO_MANY/NO_BLOOD，禁点并给提示 */}
+                          <BCard
+                            c={c}
+                            size="lg"
+                            onClick={
+                              view.me.blood >= 1 && (view.prompt.max ?? 3) >= 1
+                                ? () => send({ t: 'bFryerDel', cardIds: [c.id], done: false })
+                                : undefined
+                            }
+                          />
                         </div>
                       ))}
                     </div>
                     <div className="act-row">
+                      <span className="hint">
+                        剩余可删 {Math.min(view.prompt.max ?? 3, view.me.blood)} 张（每张 1🩸）
+                      </span>
                       <button className="btn" onClick={() => send({ t: 'bFryerDel', cardIds: [], done: true })}>
                         结束删牌
                       </button>
@@ -2491,7 +2510,16 @@ export function BloodTable({ view }: { view: BloodView }) {
 
       {/* 牌区弹窗 */}
       {zoneModal && (
-        <div className="overlay" onClick={() => setZoneModal(null)}>
+        <div
+          className="overlay"
+          onClick={() => {
+            // 遮罩关闭与显式取消同口径：清掉待插入的芯片购买意图，
+            // 否则残留的 chipBuying 会把下一次浏览弃牌区变成插入模式，按旧栏位号误发购买
+            if (chipBuying) setChipBuying(null);
+            setInsertConfirm(null);
+            setZoneModal(null);
+          }}
+        >
           <div className="panel zone-modal" onClick={(e) => e.stopPropagation()}>
             <h3>{zoneTitle}</h3>
             {zoneModal.kind === 'items' ? (
@@ -2604,7 +2632,11 @@ export function BloodTable({ view }: { view: BloodView }) {
               {(zoneModal.kind === 'discard' && view.prompt.k === 'remove') && (
                 <button
                   className="btn primary"
-                  disabled={selRemove.length === 0}
+                  disabled={
+                    selRemove.length === 0 ||
+                    Math.max(0, selRemove.length - (view.prompt.free ?? 1)) * (view.prompt.cost ?? 2) >
+                      view.me.blood
+                  }
                   onClick={() => {
                     send({ t: 'bRemove', cardIds: selRemove });
                     setSelRemove([]);

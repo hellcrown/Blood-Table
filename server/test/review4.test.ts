@@ -97,7 +97,7 @@ describe('M1：消磁枪不得覆盖存活挂起', () => {
     expect(gs.players[0]!.items).toHaveLength(1); // 道具未被消耗
     gs.secretPending = null;
     bUseItem(gs, 'p0', 'it1', NOW); // 清空后正常进入消磁链
-    expect(gs.secretPending?.kind).toBe('demagTarget');
+    expect((gs.secretPending as { kind?: string } | null)?.kind).toBe('demagTarget'); // TS 不追踪引擎内部赋值，需断言收窄
   });
 });
 
