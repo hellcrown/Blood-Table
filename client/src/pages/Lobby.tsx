@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadLastRoom, net } from '../net/socket';
+import { loadLastRoom, net, type ConnStatus } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
 import { AuthPanel } from '../components/AuthPanel';
 import { CodexModal } from '../components/CodexModal';
@@ -11,7 +11,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { UpdateNotice } from '../components/UpdateNotice';
 import { hasUnseen, initSeenIfFirstVisit, markSeen } from '../net/version';
 
-export function Lobby({ connected }: { connected: boolean }) {
+export function Lobby({ connected, status }: { connected: boolean; status?: ConnStatus }) {
   const [name, setName] = useState(net.loadName());
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
@@ -239,7 +239,19 @@ export function Lobby({ connected }: { connected: boolean }) {
           </div>
         </div>
 
-        {!connected && <p className="hint">正在连接服务器…</p>}
+        {!connected &&
+          (status === 'replaced' ? (
+            // 被顶号（同 token 的第二条连接出现）后本窗口永不重连：此前只显示「正在连接服务器…」，
+            // 而按钮全是 disabled —— 玩家看到一个永远转圈的死页，只能自己想到刷新
+            <p className="hint">
+              本房间已在其他窗口打开，此窗口已断开。{' '}
+              <button className="btn small primary" onClick={() => net.reconnectFresh()}>
+                重新连接
+              </button>
+            </p>
+          ) : (
+            <p className="hint">正在连接服务器…</p>
+          ))}
 
         <UpdateNotice
           unseen={unseenLog}

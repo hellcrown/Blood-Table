@@ -101,6 +101,10 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { n
 const PHASES: { key: BloodView['phase']; label: string }[] = [
   { key: 'pick', label: '选将' },
   { key: 'crownBid', label: '竞拍' },
+  // 缺 setup / draw 会让「阶段条」在这两个阶段一个都不高亮（findIndex 返回 -1）——
+  // 与引擎的 BloodPhase 逐一对照补齐
+  { key: 'setup', label: '构筑' },
+  { key: 'draw', label: '抽牌' },
   { key: 'swap', label: '换牌' },
   { key: 'swapItem', label: '换牌结束' },
   { key: 'play', label: '出牌' },

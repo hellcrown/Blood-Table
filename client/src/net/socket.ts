@@ -176,7 +176,15 @@ class Net {
           this.notedCode = null; // 同步重置：否则重进同房间时首条 state 不写 lastRoom，横幅失效
           this.setView(null);
           if (msg.code !== 'TOKEN_INVALID') clearLastRoom(); // 房间已解散/被请离：清除「回到房间」；仅 token 失效时保留（房间可能还在，可重新加入）
-          if (msg.code === 'KICKED') this.errorListeners.forEach((l) => l(msg.code, msg.msg)); // 被请离要给出原因
+          // 三类都要给出可见提示：此前只有被请离有 —— 于是服务器发版重启后（rejoin 找不到内存里的会话
+          // → TOKEN_INVALID）全场玩家静默被丢回大厅，完全看不出发生了什么
+          const fallback =
+            msg.code === 'KICKED'
+              ? '你已被房主请出房间'
+              : msg.code === 'ROOM_CLOSED'
+                ? '房间已解散，你已回到大厅'
+                : '会话已失效（服务器可能刚更新过），请重新建房或加入';
+          this.errorListeners.forEach((l) => l(msg.code, msg.msg || fallback));
           return;
         }
         this.errorListeners.forEach((l) => l(msg.code, msg.msg));
@@ -225,7 +233,12 @@ class Net {
     this.connect();
   }
 
-  send(msg: C2S): void {
+  /**
+   * 发送一条消息。返回是否真的发出去了 —— 此前未连接时静默丢弃（界面照常可点、
+   * 本地选牌已被清空、音效照响，玩家以为操作生效，实际服务端在等它，60 秒后按超时托管处理）。
+   * 现在丢弃时给一条可见提示。
+   */
+  send(msg: C2S): boolean {
     // 入房类消息自动携带账号令牌：登录玩家在房内以账号身份记账（战绩/天梯积分）
     if (
       this.authToken &&
@@ -236,7 +249,17 @@ class Net {
     }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+      return true;
     }
+    this.errorListeners.forEach((l) => l('OFFLINE', '连接已断开，这次操作没有发出去（正在重连…）'));
+    return false;
+  }
+
+  /** 被顶号 / 会话失效后手动重连：凭据已清空，等价于开一个全新匿名会话 */
+  reconnectFresh(): void {
+    if (this.ws) return; // 已经连着就别重复建
+    this.started = false;
+    this.start();
   }
 
   /* ---------------- 账号登录态 ---------------- */

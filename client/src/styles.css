@@ -54,6 +54,9 @@ button {
 input,
 select {
   font-family: inherit;
+  /* iOS 对 <16px 的表单控件会在聚焦时强制放大整个视口（且不自动还原）。
+     房间码输入是每个移动玩家的必经路径，故基础字号必须 ≥16px（更细的字号由各组件自己覆盖为视觉尺寸）。 */
+  font-size: 16px;
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);

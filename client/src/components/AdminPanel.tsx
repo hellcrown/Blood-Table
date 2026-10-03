@@ -7,10 +7,13 @@ const TOKEN_KEY = 'blood-admin-token';
 const PHASE_CN: Record<string, string> = {
   waiting: '等待中',
   pick: '选将',
+  crownBid: '竞拍',
   setup: '构筑',
   draw: '抽牌',
   swap: '换牌',
+  swapItem: '换牌结束',
   play: '出牌',
+  revealPre: '对决前',
   reveal: '对决',
   settle: '结算',
   buy: '购买',
