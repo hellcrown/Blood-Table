@@ -2816,9 +2816,20 @@ export function bPassBuy(gs: BloodState, playerId: string, now: number): void {
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成上一张牌的结算');
   if (
     gs.secretPending &&
-    ['pirateRob', 'pirateDecide', 'smugglerMark', 'auctionPick', 'auctionBid', 'impRedeem', 'barrierAsk'].includes(
-      gs.secretPending.kind,
-    )
+    [
+      'pirateRob',
+      'pirateDecide',
+      'smugglerMark',
+      'auctionPick',
+      'auctionBid',
+      'impRedeem',
+      'barrierAsk',
+      // 共享信息对手链 / 定点爆破受害者：这两类挂起的属主是**别人**（seat ≠ 买家），
+      // 漏掉它们会带着挂起执行 endBuy → 删牌阶段的托管不认识该挂起 →
+      // 受害者的 bRemove/bRemoveDone 永远 PENDING → 对局永久卡死（实测：连续 20 拍超时托管仍在 remove）
+      'sharedInfoOpp',
+      'pinpointVictim',
+    ].includes(gs.secretPending.kind)
   ) {
     // barrierAsk 不拦会随 endBuy 泄漏进删牌阶段：受害者 bRemove/bRemoveDone 永远 PENDING，对局卡死
     throw new BloodError('PENDING', '购买前的角色互动尚未完成');
@@ -2868,6 +2879,15 @@ function advanceBuyTurn(gs: BloodState, fromSeat: number, now: number): void {
 
 function endBuy(gs: BloodState, now: number): void {
   if (gs.phase !== 'buy') return;
+  // 不变量：绝不能带着未结清的挂起离开购买阶段。挂在**别人**身上的抉择（共享信息对手链、
+  // 定点爆破受害者）在删牌阶段的托管里没有分支，受害者只能抛 PENDING → 阶段永不推进。
+  // 这里是最后一道闸：真漏了也只延后收尾（由购买阶段超时托管结清），不会把对局钉死。
+  if (gs.secretPending) {
+    console.warn('[blood] endBuy 被未结清挂起拦住：%s（已延后收尾）', gs.secretPending.kind);
+    pushLog(gs, 'sys', '⚠️ 仍有未结清的抉择，购买阶段稍后收尾');
+    gs.deadline = now + BLOOD_TURN_MS;
+    return;
+  }
   // 兜底：得牌者被预设跳过购买（编剧未达50/闭店礼）时拍卖牌不会经购买回合发放——此处补发，
   // 防已扣的血筹与暗置牌随 gs.auction 凭空蒸发
   const undelivered = gs.auction;
@@ -3427,6 +3447,14 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         gs.secretPending = null;
         return true;
       }
+      // 兜底（阶段隔离网）：删牌阶段唯一合法的挂起是 dogTarget。任何别的挂起都是跨阶段泄漏
+      // （历史事故：共享信息对手链/定点爆破受害者随 endBuy 进来），若不清理，受害者每拍都抛
+      // PENDING 被 act 吞掉 → 零推进零广播的永久卡死。清掉并继续推进，比卡死好。
+      if (pend) {
+        console.warn('[blood] remove 阶段清理泄漏挂起：%s', pend.kind);
+        pushLog(gs, 'sys', '⚠️ 检测到未结清的抉择，已自动清理并继续删牌阶段');
+        gs.secretPending = null;
+      }
       for (const p of gs.players) {
         if (gs.phase !== 'remove') break;
         if (!p.removeDone) {
@@ -3461,6 +3489,12 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         }
         afterCleanerResolved(gs, now);
         return true;
+      }
+      // 兜底同删牌阶段：重整阶段唯一合法的挂起是 cleanerDel，其余一律是泄漏
+      if (gs.secretPending) {
+        console.warn('[blood] reorg 阶段清理泄漏挂起：%s', gs.secretPending.kind);
+        pushLog(gs, 'sys', '⚠️ 检测到未结清的抉择，已自动清理并继续重整阶段');
+        gs.secretPending = null;
       }
       for (const p of gs.players) {
         if (gs.phase !== 'reorg') break;
