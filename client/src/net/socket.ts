@@ -1,7 +1,7 @@
 import type { C2S, S2C } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 
-export type ConnStatus = 'connecting' | 'open' | 'closed';
+export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
 export type AnyView = import('@shared/protocol').TableView | BloodView;
 
 type ViewListener = (v: AnyView | null) => void;
@@ -80,7 +80,7 @@ class Net {
   private notedCode: string | null = null;
 
   view: AnyView | null = null;
-  token: string | null = sessionStorage.getItem(TOKEN_KEY);
+  token: string | null = Net.loadSessionToken();
   playerId: string | null = null;
   status: ConnStatus = 'connecting';
   /** 账号登录令牌（localStorage 持久；null = 匿名游玩） */
@@ -93,6 +93,14 @@ class Net {
       return localStorage.getItem(AUTH_KEY);
     } catch {
       return null; // 隐私模式/禁存储
+    }
+  }
+
+  private static loadSessionToken(): string | null {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null; // 隐私模式/禁存储：与 loadAuthToken 同口径，模块求值期不得抛错（否则整页白屏）
     }
   }
 
@@ -112,7 +120,19 @@ class Net {
       return;
     }
     this.ws = ws;
+    // 握手看门狗：TCP 已建立但 WS upgrade 挂死时 onclose 永不触发，连接会永久卡在 CONNECTING
+    // （online/visibilitychange 的强制重连也因 ws!=null 被跳过）。10s 未 open 主动关闭走既有重连路径。
+    const watchdog = window.setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        try {
+          ws.close();
+        } catch {
+          /* 忽略 */
+        }
+      }
+    }, 10_000);
     ws.onopen = () => {
+      window.clearTimeout(watchdog);
       this.reconnectDelay = 800;
       this.setStatus('open');
       if (this.token) this.send({ t: 'rejoin', token: this.token });
@@ -163,14 +183,19 @@ class Net {
       }
     };
     ws.onclose = (ev) => {
+      window.clearTimeout(watchdog);
       if (this.ws === ws) this.ws = null;
-      this.setStatus('closed');
-      // 被更新的连接顶掉（同 token 双标签页互踢）：清凭据回大厅，停止重连避免互踢死循环
+      // 被更新的连接顶掉（同 token 双标签页互踢）：清凭据回大厅，停止重连避免互踢死循环。
+      // 单独状态而非 closed：App 层对 closed 一律显示「正在重连」，但 4000 永不重连，文案必须区分
       if (ev.code === 4000) {
+        this.setStatus('replaced');
         this.clearToken();
+        this.notedCode = null;
+        clearLastRoom(); // 「回到房间」横幅会引导以全新会话再加入，与「此窗口已退回大厅」语义矛盾
         this.setView(null);
         return;
       }
+      this.setStatus('closed');
       this.scheduleReconnect();
     };
   }
@@ -269,7 +294,11 @@ class Net {
   private clearToken(): void {
     this.token = null;
     this.playerId = null;
-    sessionStorage.removeItem(TOKEN_KEY);
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* 隐私模式/禁存储 */
+    }
   }
 
   private setView(v: AnyView | null): void {

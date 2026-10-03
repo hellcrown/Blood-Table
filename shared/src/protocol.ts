@@ -43,6 +43,8 @@ export interface SeatView {
   chips: number;
   isHost: boolean;
   connected: boolean;
+  /** 服务端机器人（客户端据此渲染「移除机器人」，不得用昵称启发式——人类可取 🤖 开头昵称） */
+  isBot: boolean;
   sittingOut: boolean; // 已出局或等待下场
   inHand: boolean; // 本手牌中且未弃牌
   folded: boolean;

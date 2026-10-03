@@ -168,6 +168,8 @@ export interface BloodResultView {
 export interface BloodFinal {
   winnerSeat: number;
   ranking: { seat: number; name: string; tickets: number; blood: number; wasAuto?: boolean }[];
+  /** 投降终局：非完整竞技局（2人局第二名=投降者，票数可倒挂），不计天梯积分与胜场 */
+  resigned?: boolean;
 }
 
 export interface BloodState {

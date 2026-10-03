@@ -7,7 +7,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 export interface AccountRow {
   accountId: string;
@@ -71,6 +71,80 @@ const byId = new Map<string, AccountRow>();
 const byName = new Map<string, string>();
 /** accountId → { points, wins }（points.jsonl 聚合） */
 const ladder = new Map<string, { points: number; wins: number }>();
+
+/* ---------------- 令牌吊销（登出即失效） ---------------- */
+/** sha256(token) hex → 过期时间。无状态 HMAC 令牌本身无法吊销，登出必须落黑名单 */
+const revoked = new Map<string, number>();
+let revokedFile: string | null = null;
+
+/** 启动时调用：恢复吊销黑名单（坏行/过期条目跳过；目录自动创建） */
+export function initAuthRevocations(revokedPath: string): void {
+  revokedFile = revokedPath;
+  revoked.clear();
+  try {
+    fs.mkdirSync(path.dirname(revokedPath), { recursive: true });
+    if (!fs.existsSync(revokedPath)) {
+      fs.writeFileSync(revokedPath, '');
+      return;
+    }
+    const now = Date.now();
+    const keep: string[] = [];
+    for (const line of fs.readFileSync(revokedPath, 'utf-8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const row = JSON.parse(trimmed) as { h?: unknown; exp?: unknown };
+        if (typeof row?.h === 'string' && typeof row?.exp === 'number' && row.exp > now) {
+          revoked.set(row.h, row.exp);
+          keep.push(trimmed);
+        }
+      } catch {
+        /* 坏行跳过 */
+      }
+    }
+    // 重写为仅含未过期条目，防文件无限增长
+    fs.writeFileSync(revokedPath, keep.length ? keep.join('\n') + '\n' : '');
+  } catch (e) {
+    console.error('[auth] 初始化吊销黑名单失败（登出仅本次进程生效）:', e);
+  }
+}
+
+/** 清理已过期的吊销条目（周期调用防慢性泄漏） */
+export function pruneRevocations(now = Date.now()): void {
+  for (const [h, exp] of revoked) if (exp <= now) revoked.delete(h);
+}
+
+function tokenHash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * 吊销登录令牌（登出用）：令牌须通过格式与 HMAC 校验才记录（不为此泄露有效性信息，调用方恒返回 200）。
+ * 黑名单落盘：重启后仍有效。
+ */
+export function revokeToken(token: unknown): void {
+  if (typeof token !== 'string' || !token) return;
+  const parts = token.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v1') return;
+  const [, accountId, exp, mac] = parts as [string, string, string, string];
+  // HMAC 不匹配的令牌本就无效，无需记录（防黑名单被无关垃圾灌满）
+  const expect = createHmac('sha256', secret).update(`${accountId}.${exp}`).digest('hex');
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expect);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return;
+  const expMs = parseInt(exp, 36);
+  if (!Number.isFinite(expMs) || expMs <= Date.now()) return;
+  const h = tokenHash(token);
+  if (revoked.has(h)) return;
+  revoked.set(h, expMs);
+  if (revokedFile) {
+    try {
+      fs.appendFileSync(revokedFile, JSON.stringify({ h, exp: expMs }) + '\n');
+    } catch (e) {
+      console.error('[auth] 吊销记录落盘失败（已保留内存）:', e);
+    }
+  }
+}
 
 /* ---------------- 昵称清洗（与 rooms.cleanName 同口径） ---------------- */
 
@@ -195,7 +269,9 @@ export function issueToken(accountId: string, ttl: number = AUTH_TTL_MS): string
   return `v1.${payload}.${sign(payload)}`;
 }
 
-/** 校验令牌：格式/过期/HMAC 三重检查；账号仍存在才返回身份 */
+/**
+ * 校验令牌：格式/过期/HMAC/吊销 四重检查；账号仍存在才返回身份
+ */
 export function verifyToken(token: unknown): AuthedAccount | null {
   if (typeof token !== 'string') return null;
   const parts = token.split('.');
@@ -207,6 +283,7 @@ export function verifyToken(token: unknown): AuthedAccount | null {
   const b = Buffer.from(expect);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   if (parseInt(exp, 36) < Date.now()) return null;
+  if (revoked.has(tokenHash(token))) return null; // 已登出吊销
   const row = byId.get(accountId);
   if (!row) return null;
   return { accountId, name: row.name };

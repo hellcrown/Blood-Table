@@ -53,6 +53,8 @@ export interface BloodMarketSlotView {
   cost: number;
   text: string;
   bonus: number;
+  /** 走私客标记的栏位（公开信息）：他人购买需 +2 血筹 */
+  marked?: boolean;
 }
 
 export interface BloodSettleCardView {
@@ -256,6 +258,10 @@ export interface BloodView {
     tempChar?: string | null;
     /** 走私客：本回合被标记的黑市栏位（-1 无） */
     smugglerSlot?: number;
+    /** 吉祥物：本回合首次购买优惠是否已用（客户端计算实付价用） */
+    firstBuyUsed?: boolean;
+    /** 魏王：本回合是否已购买过黑市牌（客户端计算实付价用） */
+    boughtAny?: boolean;
   };
   prompt: BloodMyPrompt;
 }

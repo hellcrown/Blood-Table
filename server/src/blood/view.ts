@@ -237,7 +237,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
     return sv;
   });
 
-  const market = gs.market.map((slot) => {
+  const market = gs.market.map((slot, slotIdx) => {
     const def = slot.def ? BLOOD_MARKET_BY_ID.get(slot.def) : null;
     return {
       defId: slot.def,
@@ -246,6 +246,7 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
       cost: def?.cost ?? 0,
       text: def?.text ?? '',
       bonus: slot.bonus,
+      marked: gs.smugglerMark?.slot === slotIdx, // 走私客标记公开：他人购买 +2（客户端计价/展示用）
     };
   });
 
@@ -377,6 +378,8 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
           dogUsed: me.dogUsed,
           tempChar: me.tempChar,
           smugglerSlot: gs.smugglerMark ? gs.smugglerMark.slot : -1,
+          firstBuyUsed: me.firstBuyUsed,
+          boughtAny: me.boughtAny,
         }
       : {
           seat: -1,

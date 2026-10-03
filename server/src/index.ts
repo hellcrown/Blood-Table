@@ -6,10 +6,13 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import {
   accountLadder,
+  initAuthRevocations,
   initAuthStore,
   ladderBoard,
   login as authLogin,
+  pruneRevocations,
   register as authRegister,
+  revokeToken,
   verifyToken,
 } from './auth';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
@@ -221,10 +224,15 @@ function authAccount(req: http.IncomingMessage) {
 const manager = new RoomManager();
 
 const server = http.createServer((req, res) => {
-  // 基础安全头（对全部响应生效，含静态与 API）
+  // 基础安全头（对全部响应生效，含静态与 API）。
+  // CSP：构建产物全部为外链 self 资源、无内联脚本；style 因框架运行时写样式保留 unsafe-inline
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+  );
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname === '/api/stats/chars' && req.method === 'GET') {
     if (publicStatsCache && Date.now() - publicStatsCache.at < 60_000) {
@@ -315,6 +323,20 @@ const server = http.createServer((req, res) => {
       authFails.delete(ip);
       send(200, { ok: true, token: r.token, account: r.account });
     })
+      .catch(() => {
+        /* body 超限已断开连接 */
+      });
+    return;
+  }
+  if (url.pathname === '/api/auth/logout' && req.method === 'POST') {
+    // 登出 = 吊销令牌（黑名单落盘，重启仍有效）。无论令牌是否有效恒返回 200（不泄露有效性）
+    void readBody(req)
+      .then(() => {
+        const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? '');
+        if (m?.[1]) revokeToken(m[1]);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      })
       .catch(() => {
         /* body 超限已断开连接 */
       });
@@ -501,6 +523,7 @@ initAuthStore(
   path.resolve(process.cwd(), 'data', 'points.jsonl'),
   path.resolve(process.cwd(), 'data', 'auth-secret'),
 );
+initAuthRevocations(path.resolve(process.cwd(), 'data', 'auth-revoked.jsonl'));
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
 // 1200 ≈ 千人同时在线余量（1GB 内存实测 1000 连接约占 150-250MB，先于内存见顶的是这个常量）
@@ -525,6 +548,7 @@ setInterval(() => {
   }
   regLimit.prune();
   authTryLimit.prune();
+  pruneRevocations();
 }, 5 * 60_000).unref();
 
 wss.on('connection', (ws, req) => {

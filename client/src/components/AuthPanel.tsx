@@ -93,6 +93,18 @@ export function AuthPanel() {
   };
 
   const logout = () => {
+    // 先通知服务端吊销令牌（黑名单落盘）：公共电脑上「退出」必须真正失效，而非仅清本机存储。
+    // fire-and-forget：网络失败也不阻塞本地登出（令牌最迟 30 天自然过期）
+    const token = net.authToken;
+    if (token) {
+      void fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+      }).catch(() => {
+        /* 网络异常：本地照常登出 */
+      });
+    }
     net.clearAuthToken();
     setMe(null);
     setExpanded(false);

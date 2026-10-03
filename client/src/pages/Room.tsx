@@ -369,7 +369,8 @@ export function Room({ view }: { view: TableView }) {
                   onBlur={() => {
                     if (!isHost) return;
                     const n = Math.round(Number(targetTicketsInput) || 0);
-                    const clamped = Math.min(30, Math.max(0, n));
+                    // 与界面承诺一致：非 0 值钳到 8-30（服务端虽放宽到 0-30，1-7 票的局会失去博弈意义）
+                    const clamped = n === 0 ? 0 : Math.min(30, Math.max(8, n));
                     setTargetTicketsInput(String(clamped || ''));
                     if (clamped !== (view.targetTickets ?? 0)) update({ targetTickets: clamped });
                   }}
@@ -418,11 +419,11 @@ export function Room({ view }: { view: TableView }) {
                   🤖 添加机器人
                 </button>
               )}
-              {view.players.some((pl) => pl.name.startsWith('🤖')) && (
+              {view.players.some((pl) => pl.isBot) && (
                 <button
                   className="btn"
                   onClick={() => {
-                    const bot = view.players.filter((pl) => pl.name.startsWith('🤖')).sort((a, b) => b.seat - a.seat)[0];
+                    const bot = view.players.filter((pl) => pl.isBot).sort((a, b) => b.seat - a.seat)[0];
                     if (bot) net.send({ t: 'kickBot', seat: bot.seat });
                   }}
                 >

@@ -238,8 +238,23 @@ export class RoomManager {
     if (session.ws === ws) {
       session.ws = null;
       session.connected = false;
-      // 房主暂时掉线不转移（重连自动恢复身份）；仅真正退出房间时才转移
-      this.broadcast(room);
+      if (session.spectator) {
+        // 观战会话断开即移除：无座位/手牌状态（重连恢复价值仅日志序号），
+        // 否则断线观战者永久占 MAX_SPECTATORS 坑位，10 个断开连接即可定向占满观战席
+        try {
+          this.handleLeave(room, session);
+        } catch (e) {
+          console.error('[room] 观战断开清理异常:', e);
+        }
+        return;
+      }
+      // 房主暂时掉线不转移（重连自动恢复身份）；仅真正退出房间时才转移。
+      // broadcast 有防御 try：消息/时钟路径均有 catch，唯独连接关闭路径此前无保护，视图构建异常会击穿进程
+      try {
+        this.broadcast(room);
+      } catch (e) {
+        console.error('[room] 断线广播异常:', e);
+      }
     }
   }
 
@@ -773,12 +788,13 @@ export class RoomManager {
     this.broadcast(room);
   }
 
-  /** 按账号找活跃会话（跨设备重连）：优先已入座会话，其次观战会话 */
+  /** 按账号找活跃会话（跨设备重连）：优先已入座会话，其次观战会话。
+   *  只救援**离线**会话——在线会话属于另一台正在使用的设备，自动重连触发账号回退时不得顶掉它。 */
   private findSessionByAccount(acc: { accountId: string }): { room: Room; sessionId: string } | undefined {
     let fallback: { room: Room; sessionId: string } | undefined;
     for (const room of this.rooms.values()) {
       for (const s of room.sessions.values()) {
-        if (s.bot || s.accountId !== acc.accountId) continue;
+        if (s.bot || s.connected || s.accountId !== acc.accountId) continue;
         const loc = { room, sessionId: s.id };
         if (!s.spectator) return loc;
         fallback ??= loc;
@@ -1050,6 +1066,15 @@ export class RoomManager {
     if (msg.password != null) {
       const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
       room.password = pw || undefined; // 空串清除密码
+    }
+    // 再来一场后的 waiting 期（GState 仍存在）允许改设置：必须同步进引擎快照。
+    // seatCount/settings 是 createGame 时快照且引擎不再读房间——不同步会让 addPlayer 放进
+    // 座位号 ≥ seatCount 的「幽灵玩家」（发不到牌 → 手牌无限循环/结算 TypeError/白赢池），
+    // 并让 rematch 沿用旧起始筹码与盲注（同桌两种筹码，可利用）。
+    if (g) {
+      const cg = g as GState;
+      cg.seatCount = room.maxPlayers;
+      cg.settings = { ...room.settings };
     }
     this.broadcast(room);
   }
@@ -1425,7 +1450,8 @@ export class RoomManager {
           };
         }),
       };
-      this.maybeAwardLadderPoints(room, entry, durationMin);
+      // 投降局不记天梯（非完整竞技局：2人局第二名=投降者票数可倒挂，gap 轴可被串通喂满；互投刷胜场同理）
+      if (!g.final.resigned) this.maybeAwardLadderPoints(room, entry, durationMin);
     } else {
       const cg = g as GState;
       const final = cg.final!; // 外层守卫已保证非空（as GState 丢失收窄）

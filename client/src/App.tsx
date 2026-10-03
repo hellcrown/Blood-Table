@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { playSfx } from './audio/sound';
 import { net } from './net/socket';
 import { Lobby } from './pages/Lobby';
@@ -11,6 +11,8 @@ export default function App() {
   const [view, setView] = useState<AnyView | null>(net.view);
   const [status, setStatus] = useState(net.status);
   const [toast, setToast] = useState<string | null>(null);
+  // toast 定时器互覆问题：两条错误相隔较短时，第一条的定时器会把第二条提前清掉
+  const toastTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const offV = net.onView(setView);
@@ -18,13 +20,15 @@ export default function App() {
     const offE = net.onError((_code, msg) => {
       setToast(msg);
       playSfx('error');
-      window.setTimeout(() => setToast(null), 2600);
+      if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(() => setToast(null), 2600);
     });
     net.start();
     return () => {
       offV();
       offS();
       offE();
+      if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
     };
   }, []);
 
@@ -37,7 +41,13 @@ export default function App() {
   return (
     <div className="app">
       {status !== 'open' && (
-        <div className="conn-banner">{status === 'connecting' ? '连接服务器中…' : '连接断开，正在重连…'}</div>
+        <div className="conn-banner">
+          {status === 'connecting'
+            ? '连接服务器中…'
+            : status === 'replaced'
+              ? '本房间已在其他窗口打开，此窗口已退回大厅'
+              : '连接断开，正在重连…'}
+        </div>
       )}
       {page}
       {toast && <div className="toast">{toast}</div>}

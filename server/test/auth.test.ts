@@ -7,6 +7,7 @@ import {
   accountName,
   cleanAccountName,
   computeLadderPoints,
+  initAuthRevocations,
   initAuthStore,
   isNameRegistered,
   issueToken,
@@ -14,6 +15,7 @@ import {
   login,
   recordLadderEvent,
   register,
+  revokeToken,
   verifyToken,
   AUTH_TTL_MS,
 } from '../src/auth';
@@ -119,6 +121,32 @@ describe('登录令牌校验', () => {
     expect(verifyToken(42)).toBeNull();
     // 未知账号（合法签名但账号不存在）
     expect(verifyToken(issueToken('deadbeefdeadbeef'))).toBeNull();
+  });
+
+  it('登出吊销：已吊销令牌立即失效；垃圾/伪造令牌吊销为 no-op；重启后黑名单仍生效', () => {
+    const r = register('登出测试', 'secret66');
+    if (!r.ok) throw new Error('register failed');
+    const revFile = path.join(dir, 'auth-revoked.jsonl');
+    initAuthRevocations(revFile); // 与生产一致：启动即初始化黑名单，此后吊销才落盘
+    const token = issueToken(r.account.accountId);
+    expect(verifyToken(token)?.accountId).toBe(r.account.accountId);
+    revokeToken(token);
+    expect(verifyToken(token)).toBeNull(); // 吊销后立即失效
+    // 伪造/垃圾令牌：吊销 no-op，不污染黑名单
+    const forged = `${'v1'}.${r.account.accountId}.${Date.now().toString(36)}.${'0'.repeat(64)}`;
+    revokeToken(forged);
+    revokeToken('garbage');
+    revokeToken(null);
+    expect(verifyToken(forged)).toBeNull(); // 本就无效（HMAC 不匹配）
+    // 同账号重新登录的新令牌不受影响
+    const again = login('登出测试', 'secret66');
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(verifyToken(again.token)?.accountId).toBe(r.account.accountId);
+    // 模拟重启：黑名单从文件恢复，已吊销令牌仍失效
+    initAuthRevocations(revFile);
+    expect(verifyToken(token)).toBeNull();
+    expect(verifyToken(again.token)?.accountId).toBe(r.account.accountId);
   });
 
   afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));

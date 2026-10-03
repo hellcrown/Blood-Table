@@ -3898,6 +3898,7 @@ export function bResign(gs: BloodState, playerId: string, now: number): void {
         return b.tickets - a.tickets || b.blood - a.blood;
       })
       .map((x) => ({ seat: x.seat, name: x.name, tickets: x.tickets, blood: x.blood, wasAuto: !!x.wasAuto })),
+    resigned: true, // 投降局：2人局第二名=投降者票数可倒挂，天梯计分方据此跳过
   };
   pushLog(gs, 'sys', `🏳️ ${pname(p)} 投降，本局判负 · ${pname(winner)} 获胜`);
 }
@@ -4359,6 +4360,13 @@ export function bFryerDel(gs: BloodState, playerId: string, cardIds: string[], d
   gainChefDeleteThrees(gs, p, cards);
   if (cards.length > 0) {
     pushLog(gs, 'action', `🍗 ${pname(p)}【炸鸡店老板】支付 ${cards.length} 血筹删除本回合打出的牌：${cards.map(bloodCardText).join(' ')}`);
+  }
+  // 还有预算且弃牌区仍有本回合打出的牌：重新挂起继续删（客户端逐张点选，每张一次请求）。
+  // 直接清挂起会让队列项永久消失——「至多 3 张」实际只能删 1 张，第二张起必吃 PENDING 错误。
+  const remainingBudget = Math.min(3 - p.fryerDelCount, p.blood);
+  if (cards.length > 0 && remainingBudget >= 1 && p.discard.some((c) => playedIds.includes(c.id))) {
+    gs.secretPending = { seat: p.id, kind: 'fryerDel', max: 3 };
+    return;
   }
   gs.secretPending = null;
   processSettleQueue(gs, now);

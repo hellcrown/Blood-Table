@@ -384,6 +384,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [annHiddenAt, setAnnHiddenAt] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('none');
   const lockRef = useRef(0);
+  const lastMsgRef = useRef('');
   const logRef = useRef<HTMLDivElement | null>(null);
 
   // ---- 音效钩子（克制挂点：亮牌/结算/终局/购买宣告，音量面板可全局关闭） ----
@@ -458,6 +459,11 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   useEffect(() => {
     if (!view.result) return;
+    // 新对局 round 归零（重开/再来一场）：倒退即重置防重 key，否则新局首轮演示被吞、
+    // sdConfirm 无浮层可关，只能干等服务端 30s 超时托管
+    if (lastShowdownRound.current != null && view.round < lastShowdownRound.current) {
+      lastShowdownRound.current = null;
+    }
     if (lastShowdownRound.current === view.round) return;
     lastShowdownRound.current = view.round;
     const rows: ShowdownRow[] = view.result.rows.map((r) => {
@@ -522,11 +528,16 @@ export function BloodTable({ view }: { view: BloodView }) {
   }, [view.prompt.k]);
   useEffect(() => {
     if (view.prompt.k === 'pullChip' || view.prompt.k === 'pinpointVictim') setZoneModal({ kind: 'discard' });
+    if (view.prompt.k === 'secretDelete') setDelPick([]); // 同回合第二次廉价删除：清上次已删牌的选中残留
   }, [view.prompt.k]);
 
   const send = (msg: Parameters<typeof net.send>[0]) => {
+    // 250ms 内相同 payload 去重（防双击重复发送）；不同操作不再一刀切丢弃——
+    // 旧逻辑曾把捣蛋鬼逐目标连抽、itemAsk 链的连续应答静默吞掉且无任何 UI 反馈
+    const key = JSON.stringify(msg);
     const t = Date.now();
-    if (t - lockRef.current < 250) return; // 防连点重复发送
+    if (key === lastMsgRef.current && t - lockRef.current < 250) return;
+    lastMsgRef.current = key;
     lockRef.current = t;
     net.send(msg);
   };
@@ -740,7 +751,28 @@ export function BloodTable({ view }: { view: BloodView }) {
   const handClickable = view.prompt.k === 'setup' || view.prompt.k === 'swap' || view.prompt.k === 'play';
   const handSel = view.prompt.k === 'setup' ? selSetup : view.prompt.k === 'play' ? selPlay : selSwap;
   const handSetSel = view.prompt.k === 'setup' ? setSelSetup : view.prompt.k === 'play' ? setSelPlay : setSelSwap;
-  const handMax = view.prompt.k === 'setup' ? 4 : view.prompt.k === 'play' ? 5 : myCharId === 'tarot' ? 2 : 3;
+  const handMax =
+    view.prompt.k === 'setup'
+      ? 4
+      : view.prompt.k === 'play'
+        ? 5
+        : view.prompt.k === 'swap' && myCharId === 'idol'
+          ? view.me.hand.length // 偶像：一次可弃任意数量（≥4 张 +1🩸，客户端此前写死 3 导致奖励不可达）
+          : myCharId === 'tarot'
+            ? 2
+            : 3;
+
+  /** 购买实付价（与服务端计价同口径）：吉祥物首次半价 / 魏王芯片-2 / 走私客标记位自己-2、他人+2。
+   *  此前禁用按原价——折扣角色的合法购买被 UI 挡死且无任何提示。 */
+  const effBuyCost = (slotIdx: number, m: { cost: number; defId: string | null; marked?: boolean }): number => {
+    const def = BLOOD_MARKET_BY_ID.get(m.defId ?? '');
+    let cost = m.cost;
+    if (myCharId === 'mascot' && !view.me.firstBuyUsed) cost = Math.floor(cost / 2);
+    if (myCharId === 'wei' && def?.kind === 'chip') cost = Math.max(0, cost - 2);
+    if (view.me.smugglerSlot === slotIdx) cost = Math.max(0, cost - 2);
+    else if (m.marked) cost += 2;
+    return cost;
+  };
 
   // 与引擎 isChipInsertable 同规则：弃牌区目标牌能否插入指定芯片
   const chipInsertable = (c: BloodCardView, defId: string): boolean => {
@@ -785,6 +817,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       return;
     }
     if (view.prompt.k === 'pullChip') {
+      if (c.chipIds.length === 0) return; // dim 仅样式：无芯片牌本地拦截，不发无效请求
       send({ t: 'bPullChip', cardId: c.id });
       setZoneModal(null);
       return;
@@ -1140,13 +1173,13 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <div className="mc-foot">
                           <span className="mc-cost">🩸{m.cost}</span>
                           {m.bonus > 0 && <span className="mc-bonus">+{m.bonus}🩸</span>}
-                          {view.me.smugglerSlot === i && <span className="mc-bonus">🚚已标记</span>}
+                          {(view.me.smugglerSlot === i || m.marked) && <span className="mc-bonus">🚚已标记</span>}
                           <span className="spacer" />
                           {view.prompt.k === 'buy' && (
                             <button
                               className="btn tiny"
                               disabled={
-                                view.me.blood < m.cost ||
+                                view.me.blood < effBuyCost(i, m) ||
                                 (BLOOD_MARKET_BY_ID.get(m.defId)?.kind === 'chip' && view.me.discard.length === 0)
                               }
                               title={
@@ -1361,7 +1394,10 @@ export function BloodTable({ view }: { view: BloodView }) {
                           <button
                             key={c.id}
                             className="btn"
-                            onClick={() => send({ t: 'bCurseHide', cardId: c.id })}
+                            onClick={() => {
+                            send({ t: 'bCurseHide', cardId: c.id });
+                            setSelSwap((l) => l.filter((x) => x !== c.id)); // 牌已离手：从换牌选择中剔除
+                          }}
                           >
                             ✨ 藏入{cardLabel(c)}（抽1张+1🩸）
                           </button>
@@ -2136,6 +2172,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       className="btn primary"
                       disabled={
                         !Number.isFinite(auctionAmt) ||
+                        !Number.isInteger(auctionAmt) ||
                         auctionAmt <= (view.prompt.amount ?? 0) ||
                         auctionAmt > view.me.blood
                       }
@@ -2273,7 +2310,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                       />
                       <button
                         className="btn primary"
-                        disabled={!Number.isFinite(ceoAmt) || ceoSeat < 0 || ceoAmt < 1 || ceoAmt > view.me.blood}
+                        disabled={!Number.isFinite(ceoAmt) || !Number.isInteger(ceoAmt) || ceoSeat < 0 || ceoAmt < 1 || ceoAmt > view.me.blood}
                         onClick={() => send({ t: 'bCeoGive', seat: ceoSeat, amount: ceoAmt })}
                       >
                         给予并等待回应
@@ -2510,8 +2547,15 @@ export function BloodTable({ view }: { view: BloodView }) {
                     (zoneModal.kind === 'discard' && view.prompt.k === 'remove') ||
                     (zoneModal.kind === 'discard' && view.prompt.k === 'insertChip') ||
                     (zoneModal.kind === 'discard' && view.prompt.k === 'pullChip') ||
-                    (zoneModal.kind === 'discard' && view.prompt.k === 'pinpointVictim');
-                  const list = view.prompt.k === 'secretDelete' ? delPick : selRemove;
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'pinpointVictim') ||
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'studentRemove') ||
+                    (zoneModal.kind === 'discard' && view.prompt.k === 'detectivePick');
+                  const list =
+                    view.prompt.k === 'secretDelete'
+                      ? delPick
+                      : view.prompt.k === 'detectivePick'
+                        ? detPick
+                        : selRemove;
                   const selected = pickMode && !chipBuying && list.includes(c.id);
                   const dimmed =
                     (chipBuying != null && c.chipIds.length > 0) ||
