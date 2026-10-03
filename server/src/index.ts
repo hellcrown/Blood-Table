@@ -657,11 +657,15 @@ setInterval(() => {
 }, 30_000).unref();
 
 // 房间驱动：超时托管 / 结算推进 / 空房清理（兜底 try/catch：tick 内未预期异常不得击穿进程）
-// 排水：deploy.sh 重启前写入 server/.draining 标记，tick 检测后向对局广播更新公告
+// 排水：deploy.sh 重启前写入 server/.draining 标记，检测到后向对局广播更新公告
 const DRAIN_MARKER = path.resolve(process.cwd(), '.draining');
+let tickSeq = 0;
 setInterval(() => {
   try {
-    manager.setDraining(fs.existsSync(DRAIN_MARKER));
+    // 排水标记降频检查：每拍（2 次/秒）同步 stat 一次磁盘对 1 核小机是纯浪费，
+    // 且它与 tickAll 共用一个 catch —— existsSync 出问题会被记成「房间驱动异常」，
+    // 掩盖 tickAll 自身按房间隔离的异常处理。5s 粒度足够（deploy.sh 以 10s 轮询等待排水）。
+    if (tickSeq++ % 10 === 0) manager.setDraining(fs.existsSync(DRAIN_MARKER));
     manager.tickAll();
   } catch (e) {
     console.error('[tick] 房间驱动异常:', e);

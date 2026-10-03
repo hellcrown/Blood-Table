@@ -1160,7 +1160,8 @@ export class RoomManager {
       this.broadcast(room);
       return;
     }
-    this.handleLeave(room, target);
+    // 非安全阶段（对局进行中）：先按请离断开（关闭码 4003，客户端据此区别于主动离开
+    // —— handleLeave 内部会用 4001 关一次，故必须在它之前关并把 ws 置空）
     if (target.ws) {
       try {
         target.ws.close(4003, 'kicked');
@@ -1170,8 +1171,13 @@ export class RoomManager {
       this.bindings.delete(target.ws);
       target.ws = null;
     }
-    target.connected = false;
-    this.tokenIndex.delete(target.token); // 被请离者的会话令牌失效，无法自动重回房间
+    // 引擎侧按离场处理：标 connected=false 进入超时托管，并自动完成竞拍/选将/构筑
+    this.handleLeave(room, target);
+    // 再移除会话 —— 座位必须释放。此前只做 handleLeave 而把会话留在 room.sessions 里，
+    // 于是幽灵座位永久占着满员名额（加入判定按会话数），而其令牌已清空、无人可接管，
+    // 替补永远进不来（德扑模式同场景是能释放的）。引擎侧不受影响：对局中的玩家由 bs.players
+    // 持有，removeSession 的阶段守卫保证不会删掉它，超时托管照常接手。
+    this.removeSession(room, target);
     target.token = ''; // 令牌字段一并清空：bRematch 重建对局时以「断线且无令牌」识别被踢幽灵并排除
     // 账号令牌同步除名：否则被踢者可凭 30 天登录令牌经账号重连找回鬼位会话，踢人对登录玩家形同虚设
     delete target.accountId;
