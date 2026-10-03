@@ -7,7 +7,7 @@
  *
  * 只用日期不够：09-28 当天发过三条，日期相同会被误判成「没变化」，故标识带上标题。
  */
-import { LATEST, isNewerVersion, versionKey, type ChangelogRef } from '@shared/changelog';
+import { LATEST, isStaleBundle, versionKey, type ChangelogRef } from '@shared/changelog';
 
 export type VersionRef = ChangelogRef;
 
@@ -78,10 +78,13 @@ export async function fetchServerVersion(): Promise<VersionRef | null> {
   }
 }
 
-/** 版本展示文案：`2026-10-03 · 版本提示 · 运维命令入库` */
+/** 版本展示文案：`2026-10-03 · 新版本提示` */
 export function versionLabel(v: VersionRef | null): string {
   if (!v) return '';
   return v.title ? `${v.date} · ${v.title}` : v.date;
 }
 
-export { isNewerVersion };
+/** 服务器版本比本页打包的版本新 → 本页是旧包，该提示刷新了 */
+export function serverIsNewer(server: VersionRef | null): boolean {
+  return isStaleBundle(server, bundledVersion());
+}

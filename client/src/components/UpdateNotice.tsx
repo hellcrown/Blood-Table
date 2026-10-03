@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { bundledVersion, fetchServerVersion, isNewerVersion, versionLabel, type VersionRef } from '../net/version';
+import { bundledVersion, fetchServerVersion, serverIsNewer, versionLabel, type VersionRef } from '../net/version';
 
 /**
  * 「新版本已发布」提示（大厅）。
@@ -25,8 +25,8 @@ export function UpdateNotice({
     const check = async (): Promise<void> => {
       const server = await fetchServerVersion();
       if (!alive) return;
-      // 服务器比本页新 → 本页是旧包；服务器更旧（本地开发 / 回滚中）不提示
-      setStale(server && isNewerVersion(server, bundledVersion()) ? server : null);
+      // 服务器比本页新 → 本页是旧包；服务器更旧（本地开发 / 回滚中）或同一版不提示
+      setStale(server && serverIsNewer(server) ? server : null);
     };
     void check();
     const timer = window.setInterval(() => void check(), 5 * 60 * 1000);
