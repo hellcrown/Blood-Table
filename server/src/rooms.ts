@@ -213,6 +213,9 @@ export class RoomManager {
     // 限流表闲置清理：防止海量 IP 源缓慢撑大内存
     setInterval(() => {
       this.joinAttempts.prune();
+      // pwJoins 是唯一漏在清理之外的限流表：任何访问过密码房的 IP 都会永久留一条
+      // （与 net/limits.ts 的「带闲置自动清理，防 Map 无限膨胀」注释相矛盾）
+      this.pwJoins.prune();
       const now = Date.now();
       for (const [code, w] of this.pwFailsByRoom) {
         if (w.idle(now)) this.pwFailsByRoom.delete(code);

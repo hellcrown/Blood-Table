@@ -119,7 +119,10 @@ export function recordMatch(entry: MatchEntry): void {
     fs.appendFileSync(file, JSON.stringify(entry) + '\n');
     if (fs.statSync(file).size > MAX_FILE_BYTES) {
       const keep = list.slice(-ROTATE_KEEP);
-      fs.writeFileSync(file, keep.map((m) => JSON.stringify(m)).join('\n') + '\n');
+      // 先写临时文件再原子改名：覆盖式重写期间崩溃会把正式文件截断成半截（历史记录不可恢复）
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, keep.map((m) => JSON.stringify(m)).join('\n') + '\n');
+      fs.renameSync(tmp, file);
     }
   } catch (e) {
     console.error('[matchlog] 落盘失败（已保留内存）:', e);

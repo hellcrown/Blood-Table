@@ -92,12 +92,15 @@ export function submitFeedback(
       // 文件轮转：超过 1MB 重写为最近 200 条，避免无限膨胀
       if (fs.statSync(file).size > 1024 * 1024) {
         const keep = list.slice(-200);
+        // 原子轮转：先写 .tmp 再改名，避免重写中途崩溃把反馈文件截断成半截
+        const tmp = file + '.tmp';
         fs.writeFileSync(
-          file,
+          tmp,
           keep
             .map((e2) => JSON.stringify(e2))
             .join('\n') + '\n',
         );
+        fs.renameSync(tmp, file);
       }
     } catch (e) {
       console.error('[feedback] 落盘失败（已保留内存）:', e);

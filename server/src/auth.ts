@@ -102,8 +102,12 @@ export function initAuthRevocations(revokedPath: string): void {
         /* 坏行跳过 */
       }
     }
-    // 重写为仅含未过期条目，防文件无限增长
-    fs.writeFileSync(revokedPath, keep.length ? keep.join('\n') + '\n' : '');
+    // 重写为仅含未过期条目，防文件无限增长。
+    // 必须先写临时文件再原子改名：直接覆盖式重写时若进程被杀/断电，文件会被截断成半截，
+    // 而「文件里还在的行」才是启动时加载的吊销名单 —— 丢行 = 已登出的令牌重新生效（30 天 TTL 内）。
+    const tmp = revokedPath + '.tmp';
+    fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : '');
+    fs.renameSync(tmp, revokedPath);
   } catch (e) {
     console.error('[auth] 初始化吊销黑名单失败（登出仅本次进程生效）:', e);
   }

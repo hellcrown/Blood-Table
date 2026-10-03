@@ -101,19 +101,29 @@ function clientIp(req: http.IncomingMessage): string {
   return remote;
 }
 
-/** 读取 POST 请求的 JSON body（超过 64KB 直接断开连接，拒绝继续接收） */
+/** 读取 POST 请求的 JSON body（超过 64KB 直接断开连接，拒绝继续接收；15s 无进展也断开） */
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
+    // 悬挂请求兜底：只声明 Content-Length 却不发体，会把连接一直吊着（占一条上游连接）。
+    // 正常提交远快于 15s，故这里主动断开。
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error('body timeout'));
+    }, 15_000);
+    const settle = (fn: () => void): void => {
+      clearTimeout(timer);
+      fn();
+    };
     req.on('data', (chunk) => {
       data += chunk;
       if (data.length > 64 * 1024) {
         req.destroy();
-        reject(new Error('body too large'));
+        settle(() => reject(new Error('body too large')));
       }
     });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
+    req.on('end', () => settle(() => resolve(data)));
+    req.on('error', (e) => settle(() => reject(e)));
   });
 }
 
@@ -156,6 +166,13 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
   '.woff2': 'font/woff2',
+  // 构建产物里真实存在的类型：黑市牌动画用 gif，另有 robots/sitemap
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
 };
 
 function serveStatic(pathname: string, res: http.ServerResponse): void {
@@ -170,16 +187,38 @@ function serveStatic(pathname: string, res: http.ServerResponse): void {
   }
   let filePath = filePath0;
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    // SPA 回退
+    // 带内容哈希的静态资源不做 SPA 回退：缺失就是缺失。
+    // 否则 /assets/<已删除的旧哈希>.js 会返回 200 + index.html，而 nginx 给 /assets/ 加了
+    // 「一年 immutable」——旧页面会把 HTML 当 JS 执行（MIME 报错白屏），错误响应还会被缓存一年。
+    if (rel.startsWith('/assets/')) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not Found');
+      return;
+    }
+    // SPA 回退（前端路由 / 深链）
     filePath = path.join(root, 'index.html');
   }
   const ext = path.extname(filePath).toLowerCase();
   res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
-  fs.createReadStream(filePath).pipe(res);
+  // 读流必须接住 error：existsSync 与 createReadStream 之间有竞态（部署时 dist 被清空、
+  // 或 fd 耗尽），未监听的 'error' 是**未捕获异常** —— 会直接结束进程、全场玩家掉线。
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', (e) => {
+    console.error('[static] 读取失败:', filePath, e);
+    if (!res.headersSent) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not Found');
+    } else {
+      res.destroy(); // 已发头：中断连接，别让客户端收到一个被截断的 200
+    }
+  });
+  stream.pipe(res);
 }
 
 /** 公开角色胜率榜缓存（60s）：防刷同时省去每次全量聚合 */
 let publicStatsCache: { at: number; body: string } | null = null;
+/** 天梯榜缓存（60s）：同为公开接口，每次请求都要全量 map+sort */
+let ladderCache: { at: number; body: string } | null = null;
 
 /* ---------------- 玩家账号接口限流 ---------------- */
 /** 注册频率：单 IP 10 次/小时（防脚本刷号） */
@@ -249,7 +288,7 @@ const server = http.createServer((req, res) => {
   }
   // 版本提示：把「服务器上跑的是哪一条更新日志」告诉在线页面，
   // 页面据此判断自己是不是旧包（浏览器缓存里的旧 JS）并提示刷新。no-store 防中间层缓存旧版本号。
-  if (url.pathname === '/api/version' && req.method === 'GET') {
+  if (url.pathname === '/api/version' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(
       JSON.stringify({
@@ -266,13 +305,20 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/stats/ladder' && req.method === 'GET') {
+    // 与 /api/stats/chars 同款 60s 缓存：天梯榜每次请求都要把全部注册账号 map+sort，
+    // 而这是**匿名可打**的公开接口 —— 几十个并发就足以占满唯一事件循环、拖慢 500ms 对局 tick
+    if (ladderCache && Date.now() - ladderCache.at < 60_000) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(ladderCache.body);
+      return;
+    }
+    const body = JSON.stringify({
+      ok: true,
+      board: ladderBoard().slice(0, 50).map(({ accountId, ...row }) => row),
+    });
+    ladderCache = { at: Date.now(), body };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(
-      JSON.stringify({
-        ok: true,
-        board: ladderBoard().slice(0, 50).map(({ accountId, ...row }) => row),
-      }),
-    );
+    res.end(body);
     return;
   }
   if (url.pathname === '/api/auth/register' && req.method === 'POST') {
@@ -468,7 +514,10 @@ const server = http.createServer((req, res) => {
       };
       let parsed: { text?: unknown; contact?: unknown; room?: unknown; name?: unknown } = {};
       try {
-        parsed = JSON.parse(body) as typeof parsed;
+        const raw = JSON.parse(body) as unknown;
+        // JSON.parse('null') 是合法 JSON，但得到 null —— 直接丢给 submitFeedback 会抛 TypeError，
+        // 被下方空 catch 吞掉，于是**永不响应**：客户端挂到 nginx 超时才报错，期间还占着一条上游连接
+        if (raw != null && typeof raw === 'object') parsed = raw as typeof parsed;
       } catch {
         /* 忽略解析失败，按空内容处理 */
       }
@@ -518,6 +567,13 @@ const server = http.createServer((req, res) => {
     clearMatches();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  // 未知 /api/* 一律 404 JSON：此前会落到下面的静态回退，返回 **200 + index.html**，
+  // 客户端只能靠 content-type 猜（老服务端没有新接口时尤其容易误判为"接口正常"）
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, msg: '接口不存在' }));
     return;
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
