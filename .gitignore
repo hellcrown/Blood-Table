@@ -6,3 +6,4 @@ node_modules/
 .admin-secret
 server/simdbg.tmp.ts
 server/data/
+.draining

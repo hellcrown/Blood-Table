@@ -34,6 +34,9 @@ ulimit -n 65535 2>/dev/null || ulimit -n "$(ulimit -H)" 2>/dev/null || true
 
 # 4.5 排水（drain）：写入标记 → 服务器向进行中对局广播更新公告 → 等待对局自然结束后再重启。
 # 跳过：DEPLOY_NO_DRAIN=1 bash deploy.sh 或 bash deploy.sh --now；上限：DEPLOY_DRAIN_MAX 秒（默认 900）
+# trap 必须先于排水块安装：等待期间 Ctrl+C 否则会把标记留在磁盘上（此后每局新开局都收假公告）
+trap 'rm -f server/.draining' EXIT
+trap 'rm -f server/.draining; exit 130' INT TERM
 if [ "${1:-}" != "--now" ] && [ "${DEPLOY_NO_DRAIN:-}" != "1" ] && curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
   touch server/.draining # 与服务端 DRAIN_MARKER（cwd=server/）一致
   DRAIN_MAX="${DEPLOY_DRAIN_MAX:-900}"
@@ -53,7 +56,6 @@ if [ "${1:-}" != "--now" ] && [ "${DEPLOY_NO_DRAIN:-}" != "1" ] && curl -sf "htt
     DRAIN_WAITED=$((DRAIN_WAITED + 10))
   done
 fi
-trap 'rm -f server/.draining' EXIT INT TERM
 rm -f server/.draining
 
 pm2 delete blood-table >/dev/null 2>&1 || true

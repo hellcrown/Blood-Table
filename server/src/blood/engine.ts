@@ -1331,6 +1331,8 @@ export function bSpringUse(gs: BloodState, playerId: string, chipId: string, mod
   const p = gs.players.find((x) => x.id === playerId)!;
   const ch = p.chips.find((c) => c.id === chipId);
   if (!ch || ch.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
+  // 决策会 surface 两次（引擎队列语义）：已发动过再点 ± 属于重复扣血，拒绝
+  if (ch.springMod) throw new BloodError('BAD_TARGET', '该弹簧本次对决已发动');
   if (!Number.isInteger(mod) || mod === 0) throw new BloodError('BAD_TARGET', '修正量无效');
   if (p.blood < Math.abs(mod)) throw new BloodError('NO_BLOOD', `血筹不足（需 ${Math.abs(mod)}）`);
   const card = p.play.find((c) => c.id === ch.on)!;

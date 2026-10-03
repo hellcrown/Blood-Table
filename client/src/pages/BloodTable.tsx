@@ -530,6 +530,22 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   // 瞎掰王宣告默认值：取「含芯片/角色修正后的候选首项」——与引擎质疑核对口径一致（诚实宣告无需手改）
   const declareDefault = (cv: BloodCardView): { r: number; s: BloodCardView['s'] } => {
+    // 仿制印章：候选替换为出牌区其他牌基础面的并集（与引擎 applyImitate 口径一致）
+    if (cv.chipIds.some((id) => BLOOD_MARKET_BY_ID.get(id)?.effect.k === 'imitate')) {
+      const ranks = new Set<number>();
+      const suits = new Set<BloodCardView['s']>();
+      (view.me.playCards ?? []).forEach((o) => {
+        if (o.id === cv.id || o.s == null) return;
+        ranks.add(o.r);
+        suits.add(o.s);
+      });
+      if (ranks.size > 0) {
+        return {
+          r: Math.max(...ranks),
+          s: [...suits].includes('s') ? 's' : [...suits][0],
+        };
+      }
+    }
     const ev = applyCharEval([toEval(cv)], myCharId)[0];
     const suit = cv.s != null && ev.suits.includes(cv.s) ? cv.s : ev.suits[0];
     return { r: ev.ranks[0], s: suit };
