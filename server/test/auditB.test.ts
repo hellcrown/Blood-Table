@@ -6,7 +6,7 @@
  * 修复前 tryBarrierAsk 在询问之前就把道具移出并回收，选择不使用/超时同样白丢一张屏障。
  */
 import { describe, expect, it } from 'vitest';
-import { bBarrierDecide, bPinpoint, bRemoveDone, bUseItem, createBloodGame } from '../src/blood/engine';
+import { bBarrierDecide, bBuy, bPinpoint, bRemoveDone, bUseItem, createBloodGame } from '../src/blood/engine';
 import { botAct, createBrain } from '../src/blood/botAI';
 import { promptFor } from '../src/blood/view';
 import type { BloodState } from '../src/blood/types';
@@ -182,6 +182,70 @@ describe('批次 B · 结算保留打出的牌（B2 客户端面板的牌源契�
     const row = gs.result!.rows.find((r) => r.seat === 0);
     expect(row?.cards?.length).toBe(5);
     expect(row!.cards!.every((c) => discardIds.has(c.id))).toBe(true);
+  });
+});
+
+describe('批次 B · 走私客标记必须认「这一张牌」（B6 引擎真实缺陷）', () => {
+  /**
+   * 原 review4 用例是概率性的：建局时供应堆里还有另一张同 def 的牌（约 9% 概率），
+   * 补位翻出它就会让「按 defId 重新定位」把标记转移到新牌上。诊断实测 300 次失败 22 次（7.3%）。
+   * 这里把供应堆里放一张同 def 的牌 → 补位必定翻出 → 从概率失败变成确定性复现。
+   */
+  const LITERAL_MARKET = (markedFirst = false) => [
+    { def: 'calib1', bonus: 0, uid: 101 },
+    { def: 'dealerLic', bonus: 0, uid: 102 },
+    { def: null, bonus: 0, uid: 103 },
+    { def: null, bonus: 0, uid: 104 },
+    { def: null, bonus: 0, uid: 105 },
+  ];
+
+  function buyMarked(): BloodState {
+    const gs = make2p();
+    gs.phase = 'buy';
+    gs.turnSeat = 0;
+    gs.supply.push('dealerLic'); // 与被标记的牌同 def：补位必定翻出另一张
+    gs.market = LITERAL_MARKET();
+    gs.smugglerMark = { slot: 1, by: 'p1', defId: 'dealerLic', uid: 102 };
+    gs.players[0].blood = 50;
+    for (const p of gs.players) p.buyPassed = false;
+    bBuy(gs, 'p0', 1, undefined, NOW); // 买走被标记的那张
+    return gs;
+  }
+
+  it('被标记的牌被买走 → 标记作废，即使补位又翻出同 def 的另一张', () => {
+    const gs = buyMarked();
+    expect(gs.smugglerMark).toBeNull();
+  });
+
+  it('补位新牌不会被误挂标记（否则后来买它的人白付 2 血筹过路费）', () => {
+    const gs = buyMarked();
+    // 新翻出的 dealerLic 与旧标记同 def，但它是另一张牌：不得被标记
+    const dlSlots = gs.market.map((m, i) => (m.def === 'dealerLic' ? i : -1)).filter((i) => i >= 0);
+    expect(dlSlots.length).toBeGreaterThan(0);
+    expect(gs.smugglerMark).toBeNull();
+  });
+
+  it('同 def 两张并存时，标记跟随的是被标记的那一张（按 uid，而非第一个同 def 栏位）', () => {
+    const gs = make2p();
+    gs.phase = 'buy';
+    gs.turnSeat = 0;
+    // 市场里有两张同 def（uid 201=未标记 / 203=被标记），买走 0 号栏位触发右推
+    gs.market = [
+      { def: 'demag', bonus: 0, uid: 200 },
+      { def: 'inkSuit', bonus: 0, uid: 201 },
+      { def: 'calib1', bonus: 0, uid: 202 },
+      { def: 'inkSuit', bonus: 0, uid: 203 }, // ← 被标记的是这一张
+      { def: null, bonus: 0, uid: 204 },
+    ];
+    gs.smugglerMark = { slot: 3, by: 'p1', defId: 'inkSuit', uid: 203 };
+    gs.players[0].blood = 50;
+    for (const p of gs.players) p.buyPassed = false;
+    bBuy(gs, 'p0', 0, undefined, NOW);
+
+    // 被标记那张右移到最后一个 inkSuit 栏位；若按 defId 取「第一个匹配」会错标到另一张
+    const markedSlot = gs.smugglerMark?.slot ?? -1;
+    expect(markedSlot).toBeGreaterThanOrEqual(0);
+    expect(gs.market[markedSlot].uid).toBe(203);
   });
 });
 

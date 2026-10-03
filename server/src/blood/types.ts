@@ -126,6 +126,13 @@ export interface BPlayer {
 export interface MarketSlot {
   def: string | null; // BloodMarketDef.id
   bonus: number; // 叠加的血筹
+  /**
+   * 该栏位的物理身份（自增序号，由 drawMarketSlot 分配）。
+   * 黑市牌堆里同一种牌常有多张（变色墨水 4 张、校准器/限流阀各 2 张…），
+   * 只按 defId 追踪「被走私客标记的那张牌」会在补位翻出同 def 的另一张时张冠李戴
+   *（实测 7.3% 命中：标记漂移到新牌，后来买它的人白付 2 血筹过路费）。
+   */
+  uid?: number;
 }
 
 export type BloodPhase =
@@ -181,6 +188,8 @@ export interface BloodState {
   charExpansion: boolean;
   supply: string[];
   market: MarketSlot[];
+  /** 栏位物理身份的分配计数器（MarketSlot.uid） */
+  marketUid: number;
   recycle: string[];
   turnSeat: number | null;
   deadline: number | null;
@@ -255,7 +264,7 @@ export interface BloodState {
   mynameCat: number | null;
   mynameText: string | null;
   /** 走私客：本回合标记的黑市牌（defId 用于购买补位后按牌重新定位 slot，防索引漂移误收费） */
-  smugglerMark: { slot: number; by: string; defId: string } | null;
+  smugglerMark: { slot: number; by: string; defId: string; uid?: number } | null;
   /** 窥天师：天意（暗置的黑市牌 defId 序列） */
   seerZone: string[];
   /** 特工：本回合的出牌区交换记录（aCards/bCards 为双方交换时的出牌 id） */

@@ -191,6 +191,7 @@ export function createBloodGame(
     charExpansion,
     supply: buildBloodMarketDeck((n) => randomInt(0, n), expansion),
     market: [],
+    marketUid: 0,
     recycle: [],
     turnSeat: null,
     deadline: now + BLOOD_TURN_MS, // 选将/构筑阶段同样有 60s 超时兜底（断线者不再无限阻塞）
@@ -426,7 +427,7 @@ function targetTickets(seatCount: number): number {
 
 function drawMarketSlot(gs: BloodState): MarketSlot {
   const def = gs.supply.pop() ?? null;
-  return { def, bonus: 0 };
+  return { def, bonus: 0, uid: ++gs.marketUid };
 }
 
 function pushLog(gs: BloodState, kind: LogLine['kind'], text: string): LogLine {
@@ -2387,7 +2388,12 @@ function refillMarket(gs: BloodState): void {
   // 右推补位后 slot 索引漂移：按 defId 把走私客标记重新定位到被标记的牌，
   // 否则他人买「新占该栏位的牌」会被误收 2 血筹过路费（标记物未被购买时标记不得转移）
   if (gs.smugglerMark) {
-    const idx = gs.market.findIndex((m) => m.def === gs.smugglerMark!.defId);
+    // 优先按物理身份定位：同 def 可能有多张，按 defId 找会跟错牌（补位翻出同 def 的另一张时尤其明显）
+    const uid = gs.smugglerMark.uid;
+    const idx =
+      uid != null
+        ? gs.market.findIndex((m) => m.uid === uid)
+        : gs.market.findIndex((m) => m.def === gs.smugglerMark!.defId); // 兜底：无 uid 的栏位（测试直接构造）
     if (idx >= 0) gs.smugglerMark.slot = idx;
     else gs.smugglerMark = null; // 被标记的牌已被买走/整格移除：标记作废
   }
@@ -2475,6 +2481,9 @@ export function bBuy(
 
   // 清空该栏位，效果结算完毕后由 refillMarket 右推补位（规则：结算完才翻新牌）
   ms.def = null;
+  // 标记指向的是「这一张牌」：被买走即作废。若留待 refillMarket 按 defId 重新定位，
+  // 补位恰好翻出同 def 的另一张时标记会漂移到新牌上，令后来买它的人白付 2 血筹过路费。
+  if (smuggled) gs.smugglerMark = null;
 
   processMarketDef(gs, p, def, false, insertInto);
 }
@@ -4776,7 +4785,7 @@ export function bSmugglerMark(gs: BloodState, playerId: string, slot: number, no
   }
   const ms = gs.market[slot];
   if (!ms || ms.def == null) throw new BloodError('BAD_SLOT', '该栏位没有黑市牌');
-  gs.smugglerMark = { slot, by: p.id, defId: ms.def };
+  gs.smugglerMark = { slot, by: p.id, defId: ms.def, uid: ms.uid };
   const def = BLOOD_MARKET_BY_ID.get(ms.def)!;
   pushLog(gs, 'action', `🚚 ${pname(p)}【走私客】标记【${def.name}】：自己购买 -2 血筹，他人购买须先支付 2 血筹`);
   processPreBuyQueue(gs, now);
