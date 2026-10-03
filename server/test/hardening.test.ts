@@ -32,11 +32,17 @@ import { RoomManager } from '../src/rooms';
 const NOW = 1000;
 const isRank = (r: number) => (c: BCard) => c.r === r;
 
-/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+/** 竞拍在选将后：随机分配局（crownBid 起手）直接按 1 出价进入构筑；选将局由测试显式选将后调 settleCrownBid */
 function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
   const gs = createBloodGameRaw(...args);
-  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  if (gs.phase === 'crownBid') for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
   return gs;
+}
+
+/** 选将完成后按 1 出价结算竞拍（进入初始构筑） */
+function settleCrownBid(gs: BloodState): void {
+  if (gs.phase !== 'crownBid') throw new Error(`not in crownBid: ${gs.phase}`);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
 }
 
 function mk2p(): BloodState {
@@ -45,6 +51,7 @@ function mk2p(): BloodState {
     p.charOptions = ['dealer', 'noble'];
     bPickChar(gs, p.id, 'dealer', NOW);
   }
+  settleCrownBid(gs);
   return gs;
 }
 
@@ -146,6 +153,7 @@ describe('加固 · 血色引擎', () => {
       p.charOptions = ['tarot', 'dealer'];
       bPickChar(gs, p.id, 'tarot', NOW);
     }
+    settleCrownBid(gs);
     setupDone(gs);
     giveHand(gs, 0, [isRank(13), isRank(12), isRank(11), isRank(10), isRank(9), isRank(8)]);
     const p0 = gs.players[0];

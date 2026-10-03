@@ -3,18 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { autoAction, applyAction, createGame, startHand } from '../src/game/engine';
-import { bloodTick, bCrownBid, createBloodGame as createBloodGameRaw } from '../src/blood/engine';
+import { bloodTick, createBloodGame } from '../src/blood/engine';
 import { verifyRoomPassword } from '../src/rooms';
-import type { BloodState } from '../src/blood/types';
 
 const NOW = 1000;
-
-/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
-function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
-  const gs = createBloodGameRaw(...args);
-  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
-  return gs;
-}
 
 describe('房间密码校验', () => {
   it('无密码房间恒通过', () => {

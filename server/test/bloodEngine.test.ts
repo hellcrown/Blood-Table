@@ -42,11 +42,17 @@ import {
 
 const NOW = 1000;
 
-/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+/** 竞拍在选将后：随机分配局（crownBid 起手）直接按 1 出价进入构筑；选将局由测试显式选将后调 settleCrownBid */
 function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
   const gs = createBloodGameRaw(...args);
-  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  if (gs.phase === 'crownBid') for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
   return gs;
+}
+
+/** 选将完成后按 1 出价结算竞拍（进入初始构筑） */
+function settleCrownBid(gs: BloodState): void {
+  if (gs.phase !== 'crownBid') throw new Error(`not in crownBid: ${gs.phase}`);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
 }
 
 /** 全员确认对决展示（settle → buy） */
@@ -61,6 +67,7 @@ function make2p(): BloodState {
     p.charOptions = ['dealer', 'noble'];
     bPickChar(gs, p.id, 'dealer', NOW);
   }
+  settleCrownBid(gs);
   return gs;
 }
 
@@ -214,6 +221,7 @@ describe('血色引擎 · 完整回合流程（2人局）', () => {
       p.charOptions = ['dealer', 'noble'];
       bPickChar(fresh, p.id, 'dealer', NOW);
     }
+    settleCrownBid(fresh); // 选将完成 → 竞拍（按 1 结算）→ 初始构筑
     expect(fresh.phase).toBe('setup');
     expect(fresh.round).toBe(0);
     expect(fresh.players.every((p) => p.tickets === 0)).toBe(true);
@@ -309,6 +317,7 @@ describe('血色引擎 · 选将与角色技能', () => {
     expect(gs.players[0].charId).not.toBeNull();
     expect(gs.phase).toBe('pick'); // 等另一名玩家
     bPickChar(gs, 'p1', gs.players[1].charOptions[1], NOW);
+    settleCrownBid(gs); // 选将完成 → 竞拍（按 1 结算）→ 初始构筑
     expect(gs.phase).toBe('setup');
     expect(gs.players.every((p) => p.setupHand.length === 8)).toBe(true);
   });
@@ -365,6 +374,7 @@ describe('血色引擎 · 选将与角色技能', () => {
     bPickChar(gs, 'p0', 'noble', NOW);
     gs.players[1].charOptions = ['dealer', 'noble'];
     bPickChar(gs, 'p1', 'dealer', NOW);
+    settleCrownBid(gs);
     expect(gs.phase).toBe('setup');
     const base = gs.players[0].privilege ? 2 : 3;
     expect(gs.players[0].blood).toBe(base + 12);
@@ -1107,6 +1117,7 @@ describe('血色引擎 · 抢跑与连胜（速攻计分）', () => {
         p.charOptions = ['dealer', 'noble'];
         bPickChar(g, p.id, 'dealer', NOW);
       }
+      settleCrownBid(g);
       return g;
     };
     expect(mk().target).toBe(24);
@@ -1199,8 +1210,9 @@ describe('血色引擎 · 4人局选将', () => {
     }
     const all = gs.players.flatMap((p) => p.charOptions);
     expect(new Set(all).size).toBe(8);
-    // 全员选择后进入初始构筑
+    // 全员选择后竞拍（按 1 结算）再进入初始构筑
     for (const p of gs.players) bPickChar(gs, p.id, p.charOptions[0], NOW);
+    settleCrownBid(gs);
     expect(gs.phase).toBe('setup');
   });
 

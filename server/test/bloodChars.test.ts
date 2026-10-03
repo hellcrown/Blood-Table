@@ -57,11 +57,17 @@ import type { BCard, BloodPhase, BloodState, BPlayer } from '../src/blood/types'
 
 const NOW = 1000;
 
-/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+/** 竞拍在选将后：随机分配局（crownBid 起手）直接按 1 出价进入构筑；选将局由测试显式选将后调 settleCrownBid */
 function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
   const gs = createBloodGameRaw(...args);
-  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+  if (gs.phase === 'crownBid') for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
   return gs;
+}
+
+/** 选将完成后按 1 出价结算竞拍（进入初始构筑） */
+function settleCrownBid(gs: BloodState): void {
+  if (gs.phase !== 'crownBid') throw new Error(`not in crownBid: ${gs.phase}`);
+  for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
 }
 
 function makeGame(c0: string, c1: string): BloodState {
@@ -70,6 +76,7 @@ function makeGame(c0: string, c1: string): BloodState {
   gs.players[1].charOptions = [c1, 'clerk'];
   bPickChar(gs, 'p0', c0, NOW);
   bPickChar(gs, 'p1', c1, NOW);
+  settleCrownBid(gs);
   return gs;
 }
 

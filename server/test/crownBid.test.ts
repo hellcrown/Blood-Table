@@ -1,8 +1,8 @@
 /**
  * 特权证暗标竞拍（规则创新）回归测试：
- * - 开局不再掷骰：每人密封出价 1~3，最高者得证（开局血筹 = 3 − 出价，其余 3）
- * - 平局掷骰定得主；全员出 1 时退化为原版「持证 2 血筹」平衡锚点
- * - 超时托管按最低价出价；江东之主夺证按其本人出价重算血筹
+ * - 时序：建局先选将（2人局）/随机分配（基础池 3/4 人局），选将完成后进入 crownBid 竞拍
+ * - 每人密封出价 0~3（0=不参与），最高者得证（开局血筹 = 3 − 出价，其余 3），平局掷骰定得主
+ * - 超时托管按 0 出价；江东之主夺证：竞拍作废、原持证者出价退还，血筹修正为原版 2/3
  */
 import { describe, expect, it } from 'vitest';
 import { BloodError, bCrownBid, bPickChar, bResign, bloodTick, createBloodGame } from '../src/blood/engine';
@@ -17,18 +17,47 @@ function make2p(): BloodState {
   ], NOW);
 }
 
-describe('特权证暗标竞拍 · 开局阶段', () => {
-  it('建局进入 crownBid：全员 3 血筹、无特权证、竞拍未结算', () => {
+/** 全员强制选「赌场荷官」（无开局血筹效果）→ 进入 crownBid，保证竞拍结算断言不受随机角色干扰 */
+function pickAll(gs: BloodState): void {
+  for (const p of gs.players) {
+    p.charOptions = ['dealer', 'noble'];
+    bPickChar(gs, p.id, 'dealer', NOW);
+  }
+}
+
+describe('特权证暗标竞拍 · 时序（选将后）', () => {
+  it('建局先选将：2人局 phase=pick，角色牌已发、血筹全 3、无特权证', () => {
     const gs = make2p();
-    expect(gs.phase).toBe('crownBid');
+    expect(gs.phase).toBe('pick');
+    expect(gs.players.every((p) => p.charOptions.length === 2)).toBe(true);
     expect(gs.players.every((p) => p.blood === 3)).toBe(true);
     expect(gs.players.every((p) => !p.privilege)).toBe(true);
     expect(gs.privilegeSeat).toBeNull();
     expect(Object.keys(gs.crownBids)).toHaveLength(0);
   });
 
+  it('选将完成前出价被拒（BAD_PHASE）；全员选完进入 crownBid', () => {
+    const gs = make2p();
+    expect(() => bCrownBid(gs, 'p0', 1, NOW)).toThrow(BloodError);
+    pickAll(gs);
+    expect(gs.phase).toBe('crownBid');
+    expect(gs.players.every((p) => p.charId != null)).toBe(true);
+  });
+
+  it('竞拍阶段禁止投降（否则凭空产生冠军且可刷天梯胜场）', () => {
+    const gs = make2p();
+    pickAll(gs);
+    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
+    // 结算后（setup 阶段）同样拒绝
+    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
+  });
+});
+
+describe('特权证暗标竞拍 · 结算', () => {
   it('出价边界：-1/4/NaN 拒绝、0 合法；重复出价静默忽略；非竞拍阶段拒绝', () => {
     const gs = make2p();
+    pickAll(gs);
     expect(() => bCrownBid(gs, 'p0', -1, NOW)).toThrow();
     expect(() => bCrownBid(gs, 'p0', 4, NOW)).toThrow();
     expect(() => bCrownBid(gs, 'p0', Number.NaN, NOW)).toThrow();
@@ -39,12 +68,40 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
     expect(gs.phase).toBe('crownBid'); // 未全员出价不结算
     // 结算后阶段守卫生效
     bCrownBid(gs, 'p1', 1, NOW);
-    expect(gs.phase).toBe('pick');
+    expect(gs.phase).toBe('setup');
     expect(() => bCrownBid(gs, 'p0', 1, NOW)).toThrow();
+  });
+
+  it('最高价得证：出价 3 者开局 0 血筹，其余 3；2人局结算后进入初始构筑', () => {
+    const gs = make2p();
+    pickAll(gs);
+    bCrownBid(gs, 'p0', 1, NOW);
+    bCrownBid(gs, 'p1', 3, NOW);
+    const winner = gs.players.find((p) => p.privilege)!;
+    const loser = gs.players.find((p) => !p.privilege)!;
+    expect(winner.id).toBe('p1');
+    expect(winner.blood).toBe(0); // 3 − 出价3
+    expect(loser.blood).toBe(3);
+    expect(gs.privilegeSeat).toBe(winner.seat);
+    expect(gs.phase).toBe('setup');
+  });
+
+  it('平局掷骰：恰好一人得证（血筹 = 3 − 出价），其余 3', () => {
+    for (let i = 0; i < 20; i++) {
+      const gs = make2p();
+      pickAll(gs);
+      bCrownBid(gs, 'p0', 2, NOW);
+      bCrownBid(gs, 'p1', 2, NOW);
+      const holders = gs.players.filter((p) => p.privilege);
+      expect(holders).toHaveLength(1);
+      expect(holders[0]!.blood).toBe(1);
+      expect(gs.players.find((p) => !p.privilege)!.blood).toBe(3);
+    }
   });
 
   it('出价 0 得证者不扣血筹（3 血筹白得）；其余 3', () => {
     const gs = make2p();
+    pickAll(gs);
     bCrownBid(gs, 'p0', 0, NOW);
     bCrownBid(gs, 'p1', 1, NOW);
     const winner = gs.players.find((p) => p.privilege)!;
@@ -56,107 +113,71 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
   it('全员出 0：掷骰产生免费持证者（全员 3 血筹）', () => {
     for (let i = 0; i < 20; i++) {
       const gs = make2p();
+      pickAll(gs);
       for (const p of gs.players) bCrownBid(gs, p.id, 0, NOW);
       expect(gs.players.filter((p) => p.privilege)).toHaveLength(1);
       expect(gs.players.every((p) => p.blood === 3)).toBe(true);
     }
   });
 
-  it('最高价得证：出价 3 者开局 0 血筹，其余 3；2人局随后进入选将', () => {
+  it('超时托管两级：选将超时自动选将 → 竞拍超时按 0（不参与）出价', () => {
     const gs = make2p();
-    bCrownBid(gs, 'p0', 1, NOW);
-    bCrownBid(gs, 'p1', 3, NOW);
-    const winner = gs.players.find((p) => p.privilege)!;
-    const loser = gs.players.find((p) => !p.privilege)!;
-    expect(winner.id).toBe('p1');
-    expect(winner.blood).toBe(0); // 3 − 出价3
-    expect(loser.blood).toBe(3);
-    expect(gs.privilegeSeat).toBe(winner.seat);
-    expect(gs.phase).toBe('pick');
-    expect(gs.players.every((p) => p.charOptions.length === 2)).toBe(true);
+    bloodTick(gs, NOW + 61_000); // 选将超时：全员自动选第一张
+    expect(gs.phase).toBe('crownBid');
+    expect(gs.players.every((p) => p.charId != null)).toBe(true);
+    bloodTick(gs, NOW + 122_000); // 竞拍超时：按 0 托管
+    expect(gs.players.every((p) => gs.crownBids[p.id] === 0)).toBe(true);
+    expect(gs.players.every((p) => p.wasAuto === true)).toBe(true);
+    expect(gs.phase).toBe('setup');
   });
 
-  it('平局掷骰：恰好一人得证（血筹 = 3 − 出价），其余 3', () => {
-    for (let i = 0; i < 20; i++) {
-      const gs = make2p();
-      bCrownBid(gs, 'p0', 2, NOW);
-      bCrownBid(gs, 'p1', 2, NOW);
-      const holders = gs.players.filter((p) => p.privilege);
-      expect(holders).toHaveLength(1);
-      expect(holders[0]!.blood).toBe(1);
-      expect(gs.players.find((p) => !p.privilege)!.blood).toBe(3);
-    }
-  });
-
-  it('全员出 1 退化为原版：得证者 2 血筹、其余 3', () => {
-    const gs = make2p();
-    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
-    const holder = gs.players.find((p) => p.privilege)!;
-    expect(holder.blood).toBe(2);
-    expect(gs.players.find((p) => !p.privilege)!.blood).toBe(3);
-  });
-
-  it('超时托管：未出价者自动按 0（不参与）出价并标记 wasAuto', () => {
-    const gs = make2p();
-    bCrownBid(gs, 'p0', 2, NOW);
-    bloodTick(gs, NOW + 61_000);
-    expect(gs.crownBids['p1']).toBe(0);
-    expect(gs.players.find((p) => p.id === 'p1')!.wasAuto).toBe(true);
-    expect(gs.phase).toBe('pick');
-  });
-
-  it('竞拍阶段禁止投降（否则凭空产生冠军且可刷天梯胜场）', () => {
-    const gs = make2p();
-    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
-    // 结算后（pick 阶段）同样拒绝
-    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
-    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
-  });
-
-  it('3人局：出价结算后直接随机分配角色（不经选将）', () => {
+  it('3人局：建局随机分配角色后直接进入竞拍，结算后进初始构筑', () => {
     const gs = createBloodGame(3, [
       { id: 'p0', name: '甲', seat: 0 },
       { id: 'p1', name: '乙', seat: 1 },
       { id: 'p2', name: '丙', seat: 2 },
     ], NOW);
+    expect(gs.phase).toBe('crownBid'); // 基础池随机分配：无选将交互，直接竞拍
+    expect(gs.players.every((p) => p.charId != null)).toBe(true);
     bCrownBid(gs, 'p0', 3, NOW);
     bCrownBid(gs, 'p1', 2, NOW);
     bCrownBid(gs, 'p2', 2, NOW); // 与 p1 平局掷骰
-    expect(gs.phase).not.toBe('crownBid'); // 已结算（pick 或 setup：基础池 3 人局随机分配）
+    expect(gs.phase).toBe('setup');
     const holder = gs.players.find((p) => p.privilege)!;
     expect(holder.id).toBe('p0'); // 唯一最高价得证
-    // 出价 3 → 竞拍后 0 血筹；随机分配到贵族(+12)/银行职员(+2)会叠加开局效果，故只断言下界与「其余人不低于 3」
-    expect(holder.blood).toBeGreaterThanOrEqual(0);
+    // 竞拍后 0 血筹；开局角色效果（贵族+12/银行职员+2）在此之后叠加
+    const startBonus = holder.charId === 'noble' ? 12 : holder.charId === 'clerk' ? 2 : 0;
+    expect(holder.blood).toBe(startBonus);
+    // 其余人不因竞拍扣血筹（≥3：可能叠加开局加血效果）
     expect(gs.players.filter((p) => p !== holder).every((p) => p.blood >= 3)).toBe(true);
-    expect(gs.players.every((p) => p.charId != null)).toBe(true); // 已分配角色
   });
 });
 
-describe('特权证暗标竞拍 · 江东之主夺证', () => {
-  it('sunwu 夺证：按其本人出价重算（持证 = 3 − 出价），失证者回到 3', () => {
+describe('特权证暗标竞拍 · 江东之主夺证（竞拍作废）', () => {
+  it('sunwu 夺证：拍卖作废，sunwu 血筹修正为 2，原持证者出价退还至 3', () => {
     const gs = make2p();
-    bCrownBid(gs, 'p0', 3, NOW); // p0 赢得竞拍，开局 0 血筹
-    bCrownBid(gs, 'p1', 1, NOW); // p1 开局 3 血筹（非持证）
-    expect(gs.players.find((p) => p.id === 'p0')!.privilege).toBe(true);
-    // 选将：p1 拿到江东之主
     gs.players[0].charOptions = ['dealer', 'noble'];
     gs.players[1].charOptions = ['sunwu', 'clerk'];
     bPickChar(gs, 'p0', 'dealer', NOW);
     bPickChar(gs, 'p1', 'sunwu', NOW);
+    expect(gs.phase).toBe('crownBid');
+    bCrownBid(gs, 'p0', 3, NOW); // p0 赢得竞拍（开局 0 血筹）
+    bCrownBid(gs, 'p1', 1, NOW);
     expect(gs.players.find((p) => p.id === 'p1')!.privilege).toBe(true);
     expect(gs.privilegeSeat).toBe(1);
-    expect(gs.players.find((p) => p.id === 'p1')!.blood).toBe(2); // 3 − 自己出价 1
-    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(3); // 失证回到 3
+    expect(gs.players.find((p) => p.id === 'p1')!.blood).toBe(2); // 原版「始终拥有」：2
+    expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(3); // 出价退还
   });
 
-  it('sunwu 未夺证（自己本就持证）时血筹不被二次修正', () => {
+  it('sunwu 自己赢得竞拍时不重复修正（持证者 = 3 − 出价）', () => {
     const gs = make2p();
-    bCrownBid(gs, 'p0', 2, NOW);
-    bCrownBid(gs, 'p1', 1, NOW);
     gs.players[0].charOptions = ['sunwu', 'clerk'];
     gs.players[1].charOptions = ['dealer', 'noble'];
     bPickChar(gs, 'p0', 'sunwu', NOW);
     bPickChar(gs, 'p1', 'dealer', NOW);
+    bCrownBid(gs, 'p0', 2, NOW);
+    bCrownBid(gs, 'p1', 1, NOW);
     expect(gs.players.find((p) => p.id === 'p0')!.blood).toBe(1); // 3 − 出价 2，无二次修正
+    expect(gs.players.find((p) => p.id === 'p1')!.blood).toBe(3);
   });
 });

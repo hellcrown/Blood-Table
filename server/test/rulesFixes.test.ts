@@ -9,20 +9,20 @@ import { legalActionsFor } from '../src/game/betting';
 
 const NOW = 1000;
 
-/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
-function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
-  const gs = createBloodGameRaw(...args);
+/** 选将完成后按 1 出价结算竞拍（进入初始构筑）；竞拍在选将后 */
+function settleCrownBid(gs: BloodState): void {
+  if (gs.phase !== 'crownBid') throw new Error(`not in crownBid: ${gs.phase}`);
   for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
-  return gs;
 }
 
 function makeGame(charIds: [string, string]): BloodState {
-  const gs = createBloodGame(2, [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }], NOW);
+  const gs = createBloodGameRaw(2, [{ id: 'p0', name: '甲', seat: 0 }, { id: 'p1', name: '乙', seat: 1 }], NOW);
   for (const [i, cid] of charIds.entries()) {
     const p = gs.players[i];
     p.charOptions = [cid, 'noble'];
     bPickChar(gs, p.id, cid, NOW);
   }
+  settleCrownBid(gs);
   return gs;
 }
 
