@@ -32,7 +32,7 @@ import { RoomManager } from '../src/rooms';
 const NOW = 1000;
 const isRank = (r: number) => (c: BCard) => c.r === r;
 
-/** 开局特权证暗标辅助：全员按最低价 1 出价并结算（平局掷骰），保持旧测试「建局即选将」语义 */
+/** 开局特权证暗标辅助：全员出价 1 并结算（平局掷骰），保持旧测试「建局即选将」语义 */
 function createBloodGame(...args: Parameters<typeof createBloodGameRaw>): BloodState {
   const gs = createBloodGameRaw(...args);
   for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);

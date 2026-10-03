@@ -9,6 +9,7 @@ import {
   BLOOD_PLAY_COUNT,
   BLOOD_SD_WAIT_MS,
   BLOOD_SETUP_KEEP,
+  BLOOD_CROWN_MIN_BID,
   BLOOD_CROWN_MAX_BID,
   BLOOD_TURN_MS,
   type BCard,
@@ -225,12 +226,12 @@ export function createBloodGame(
   };
   for (let i = 0; i < 5; i++) gs.market.push(drawMarketSlot(gs));
 
-  // 特权证不再掷骰：开局暗标竞拍（每人密封出价 1~3 血筹，最高者得证，开局血筹 = 3 − 出价）
+  // 特权证不再掷骰：开局暗标竞拍（每人密封出价 0~3，0=不参与；最高者得证，开局血筹 = 3 − 出价）
   for (const p of bps) p.blood = 3;
   pushLog(
     gs,
     'sys',
-    `👑 特权证暗标：每人秘密出价 1~${BLOOD_CROWN_MAX_BID}（愿意少拿几血筹换特权证），出价最高者得证（开局血筹 = ${BLOOD_CROWN_MAX_BID} − 出价），平局掷骰定得主`,
+    `👑 特权证暗标：每人秘密出价 ${BLOOD_CROWN_MIN_BID}~${BLOOD_CROWN_MAX_BID}（愿意少拿几血筹换特权证，0=不参与），出价最高者得证（开局血筹 = ${BLOOD_CROWN_MAX_BID} − 出价），平局掷骰定得主`,
   );
   gs.deadline = now + BLOOD_TURN_MS;
   return gs;
@@ -241,15 +242,15 @@ export function crownBlood(bid: number): number {
   return 3 - bid;
 }
 
-/** 特权证暗标：玩家密封出价（1~3）；全员出价后立即结算并进入选将 */
+/** 特权证暗标：玩家密封出价（0~3，0=不参与）；全员出价后立即结算并进入选将 */
 export function bCrownBid(gs: BloodState, playerId: string, bidRaw: number, now: number): void {
   if (gs.phase !== 'crownBid') throw new BloodError('BAD_PHASE', '不在特权证竞拍阶段');
   const p = gs.players.find((x) => x.id === playerId);
   if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
   if (gs.crownBids[p.id] != null) return; // 已出价：静默忽略（与选将重复提交同口径）
   const bid = Math.floor(Number(bidRaw));
-  if (!Number.isFinite(bid) || bid < 1 || bid > BLOOD_CROWN_MAX_BID) {
-    throw new BloodError('BAD_MSG', `出价须为 1~${BLOOD_CROWN_MAX_BID} 的整数`);
+  if (!Number.isFinite(bid) || bid < BLOOD_CROWN_MIN_BID || bid > BLOOD_CROWN_MAX_BID) {
+    throw new BloodError('BAD_MSG', `出价须为 ${BLOOD_CROWN_MIN_BID}~${BLOOD_CROWN_MAX_BID} 的整数`);
   }
   gs.crownBids[p.id] = bid;
   if (gs.players.every((x) => gs.crownBids[x.id] != null)) resolveCrownAuction(gs, now);
@@ -3055,12 +3056,12 @@ export function bloodTick(gs: BloodState, now: number): boolean {
   };
   switch (gs.phase) {
     case 'crownBid': {
-      // 特权证暗标超时托管：未出价者按最低价 1 出价
+      // 特权证暗标超时托管：未出价者按 0（不参与）托管——不替断线/挂机玩家花血筹
       for (const p of gs.players) {
         if (gs.phase !== 'crownBid') break;
         if (gs.crownBids[p.id] == null) {
           p.wasAuto = true;
-          act(() => bCrownBid(gs, p.id, 1, now));
+          act(() => bCrownBid(gs, p.id, BLOOD_CROWN_MIN_BID, now));
         }
       }
       return true;

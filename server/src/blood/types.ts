@@ -299,5 +299,6 @@ export const BLOOD_SD_WAIT_MS = 30_000; // 对决展示确认等待上限（演�
 export const BLOOD_SETUP_KEEP = 4; // 每轮初始构筑最多删 4 张
 export const BLOOD_HAND_CAP = 6;
 export const BLOOD_PLAY_COUNT = 5;
-/** 特权证暗标出价上限（出价 1~3，得证者开局血筹 = 3 − 出价；全员出 1 时退化为原版「持证 2 血筹」） */
+/** 特权证暗标出价范围（0~3：0=不参与竞拍，得证则白得；得证者开局血筹 = 3 − 出价，全员出 0 时掷骰定免费持证者） */
+export const BLOOD_CROWN_MIN_BID = 0;
 export const BLOOD_CROWN_MAX_BID = 3;

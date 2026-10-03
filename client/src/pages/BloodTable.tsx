@@ -265,6 +265,12 @@ function toEval(cv: BloodCardView): EvalCard {
 
 type ZoneModal = null | { kind: 'discard' | 'removed' | 'items' };
 
+/** 牌区展示排序：点数从小到大（王排最后，同点按花色稳定）——仅影响显示顺序，不动服务端牌区真实顺序 */
+function byRankAsc(a: { r: number; s: string | null }, b: { r: number; s: string | null }): number {
+  if ((a.r === 0) !== (b.r === 0)) return a.r === 0 ? 1 : -1; // 王（r=0）置底
+  return a.r - b.r || (a.s ?? '').localeCompare(b.s ?? '');
+}
+
 export function BloodTable({ view }: { view: BloodView }) {
   const me = view.players.find((p) => p.seat === view.me.seat) ?? view.players[0];
   // 对手按相对座位排序：下家→左、对家→上、上家→右（环绕牌桌）
@@ -592,7 +598,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const myTurnText = (): string => {
     switch (view.prompt.k) {
       case 'crownBid':
-        return '特权证暗标：秘密出价（1稳/2进/3搏），出价最高者获得特权证';
+        return '特权证暗标：秘密出价（0弃/1稳/2进/3搏），出价最高者获得特权证';
       case 'pick':
         return '选将：点击角色牌放大查看技能，选择其一（超时自动选择）';
       case 'setup':
@@ -851,7 +857,11 @@ export function BloodTable({ view }: { view: BloodView }) {
         ? `删牌区（${view.me.removed.length}）`
         : '道具区';
   const zoneCards: BloodCardView[] =
-    zoneModal?.kind === 'discard' ? view.me.discard : zoneModal?.kind === 'removed' ? view.me.removed : [];
+    zoneModal?.kind === 'discard'
+      ? [...view.me.discard].sort(byRankAsc)
+      : zoneModal?.kind === 'removed'
+        ? [...view.me.removed].sort(byRankAsc)
+        : [];
 
   return (
     <div className="blood-shell">
@@ -1047,7 +1057,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                   {opp.impDiscard && opp.impDiscard.length > 0 && (
                     <div className="bp-impdiscard">
                       <span className="hint">🃏 公开弃牌区：</span>
-                      {opp.impDiscard.map((c) => (
+                      {[...opp.impDiscard].sort(byRankAsc).map((c) => (
                         <BCard key={c.id} c={c} size="sm" />
                       ))}
                     </div>
@@ -1751,7 +1761,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                 {view.prompt.k === 'reorg' && myCharId === 'inspector' && view.me.discard.length > 0 && (
                   <div className="act-row wrap">
                     <span className="hint">质检员 · 不重洗时可公示 1 张弃牌置顶：</span>
-                    {view.me.discard.map((c) => (
+                    {[...view.me.discard].sort(byRankAsc).map((c) => (
                       <button
                         key={c.id}
                         className={`btn tiny ${inspectorPick === c.id ? 'primary' : ''}`}
@@ -2367,7 +2377,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                         {(view.prompt.zones ?? [])
                           .filter((z) => z.seat === cleanSeat)
                           .flatMap((z) =>
-                            z.cards.map((c) => (
+                            [...z.cards].sort(byRankAsc).map((c) => (
                               <button
                                 key={c.id}
                                 className="btn tiny"
@@ -2742,11 +2752,13 @@ export function BloodTable({ view }: { view: BloodView }) {
               <>
                 <p className="hint" style={{ maxWidth: 460 }}>
                   秘密出价「愿意少拿几血筹换特权证」：出价最高者获得特权证（先手行动 + 平局判定占优），
-                  开局血筹 = 3 − 出价；平局掷骰定得主。出价对他人保密，全员出价后统一开价。
+                  开局血筹 = 3 − 出价；平局掷骰定得主。出价 0 = 不参与（得证也只会在全场都出 0 时掷骰白得）。
+                  出价对他人保密，全员出价后统一开价。
                 </p>
                 <div className="crown-bid-row">
                   {(
                     [
+                      [0, '弃', '开局 3🩸'],
                       [1, '稳', '开局 2🩸'],
                       [2, '进', '开局 1🩸'],
                       [3, '搏', '开局 0🩸'],
@@ -2770,7 +2782,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                   ))}
                 </div>
                 <p className="hint">
-                  {myCrownBid != null ? '已提交出价（保密中），等待其他玩家…' : '超时未出价按最低价 1 自动托管'}
+                  {myCrownBid != null ? '已提交出价（保密中），等待其他玩家…' : '超时未出价按 0（不参与）自动托管'}
                 </p>
               </>
             ) : (

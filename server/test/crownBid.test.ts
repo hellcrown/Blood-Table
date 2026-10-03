@@ -27,20 +27,39 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
     expect(Object.keys(gs.crownBids)).toHaveLength(0);
   });
 
-  it('出价边界：0/4/NaN 拒绝；重复出价静默忽略；非竞拍阶段拒绝', () => {
+  it('出价边界：-1/4/NaN 拒绝、0 合法；重复出价静默忽略；非竞拍阶段拒绝', () => {
     const gs = make2p();
-    expect(() => bCrownBid(gs, 'p0', 0, NOW)).toThrow();
+    expect(() => bCrownBid(gs, 'p0', -1, NOW)).toThrow();
     expect(() => bCrownBid(gs, 'p0', 4, NOW)).toThrow();
     expect(() => bCrownBid(gs, 'p0', Number.NaN, NOW)).toThrow();
     expect(() => bCrownBid(gs, 'ghost', 1, NOW)).toThrow(); // 不在对局中
-    bCrownBid(gs, 'p0', 2, NOW);
+    bCrownBid(gs, 'p0', 0, NOW); // 0 = 不参与，合法
     bCrownBid(gs, 'p0', 3, NOW); // 重复出价忽略
-    expect(gs.crownBids['p0']).toBe(2);
+    expect(gs.crownBids['p0']).toBe(0);
     expect(gs.phase).toBe('crownBid'); // 未全员出价不结算
     // 结算后阶段守卫生效
     bCrownBid(gs, 'p1', 1, NOW);
     expect(gs.phase).toBe('pick');
     expect(() => bCrownBid(gs, 'p0', 1, NOW)).toThrow();
+  });
+
+  it('出价 0 得证者不扣血筹（3 血筹白得）；其余 3', () => {
+    const gs = make2p();
+    bCrownBid(gs, 'p0', 0, NOW);
+    bCrownBid(gs, 'p1', 1, NOW);
+    const winner = gs.players.find((p) => p.privilege)!;
+    expect(winner.id).toBe('p1');
+    expect(winner.blood).toBe(2); // 3 − 1
+    expect(gs.players.find((p) => !p.privilege)!.blood).toBe(3);
+  });
+
+  it('全员出 0：掷骰产生免费持证者（全员 3 血筹）', () => {
+    for (let i = 0; i < 20; i++) {
+      const gs = make2p();
+      for (const p of gs.players) bCrownBid(gs, p.id, 0, NOW);
+      expect(gs.players.filter((p) => p.privilege)).toHaveLength(1);
+      expect(gs.players.every((p) => p.blood === 3)).toBe(true);
+    }
   });
 
   it('最高价得证：出价 3 者开局 0 血筹，其余 3；2人局随后进入选将', () => {
@@ -77,11 +96,11 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
     expect(gs.players.find((p) => !p.privilege)!.blood).toBe(3);
   });
 
-  it('超时托管：未出价者自动按最低价 1 出价并标记 wasAuto', () => {
+  it('超时托管：未出价者自动按 0（不参与）出价并标记 wasAuto', () => {
     const gs = make2p();
     bCrownBid(gs, 'p0', 2, NOW);
     bloodTick(gs, NOW + 61_000);
-    expect(gs.crownBids['p1']).toBe(1);
+    expect(gs.crownBids['p1']).toBe(0);
     expect(gs.players.find((p) => p.id === 'p1')!.wasAuto).toBe(true);
     expect(gs.phase).toBe('pick');
   });
