@@ -4,7 +4,7 @@ import type { C2S, GameMode, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
-import { buildBloodView, promptFor } from './blood/view';
+import { buildBloodView, LOG_TAIL_LINES, promptFor } from './blood/view';
 import { botAct, createBrain, updateBrains, type BotBrain } from './blood/botAI';
 import type { BloodState } from './blood/types';
 import { GameError, RESULT_MS, type GState } from './game/types';
@@ -636,6 +636,9 @@ export class RoomManager {
         });
         room.matchLogged = false;
         room.gameStartedAt = now;
+        // 新一局：logSeq 归零重排，必须让各会话的日志增量游标归零，
+        // 否则新局日志的 seq（从 1 开始）会被客户端按"已见过"去重，日志面板停在上一局
+        for (const s of room.sessions.values()) s.lastEventSeq = 0;
         this.drainNotified.delete(room.code); // 同上：再来一场的新对局重新预告
         if (this.draining) this.notifyDrain(room);
         break;
@@ -1023,6 +1026,8 @@ export class RoomManager {
       });
       room.matchLogged = false;
       room.gameStartedAt = now;
+      // 新一局：logSeq 归零重排，让各会话的日志增量游标归零（否则新局日志会被客户端按已见过去重）
+      for (const s of room.sessions.values()) s.lastEventSeq = 0;
       this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告（旧局收过不代表新局知道）
       if (this.draining) this.notifyDrain(room);
     } else {
@@ -1564,6 +1569,9 @@ export class RoomManager {
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {
+        // 该会话落后多少条日志、以及是否为首次下发（必须在更新 lastEventSeq 之前算）
+        const behind = lastSeq - s.lastEventSeq;
+        const wasFresh = s.lastEventSeq === 0;
         if (g) {
           for (const line of g.log) {
             if (line.seq > s.lastEventSeq) send(s.ws, { t: 'event', line });
@@ -1571,7 +1579,11 @@ export class RoomManager {
         }
         s.lastEventSeq = lastSeq;
         if (g && room.mode === 'blood' && 'market' in g) {
-          const view: BloodView = buildBloodView(room, g, s.id);
+          // 首帧（新入房/重连）或落后超过尾部窗口 → 下发全量日志；其余帧只带尾部，
+          // 增量由上面的 event 补齐 —— 避免每帧重传整局记录
+          //（实测一局 4 人局日志 497 行 ≈ 29.5KB，占整条 state 的 84%）
+          const logFull = wasFresh || behind > LOG_TAIL_LINES;
+          const view: BloodView = buildBloodView(room, g, s.id, { logFull, logTail: LOG_TAIL_LINES });
           send(s.ws, { t: 'state', view });
         } else if (g) {
           send(s.ws, { t: 'state', view: buildView(room, s.id) });

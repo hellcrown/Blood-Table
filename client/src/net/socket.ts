@@ -1,4 +1,4 @@
-import type { C2S, S2C } from '@shared/protocol';
+import type { C2S, LogLine, S2C } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 
 export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
@@ -78,6 +78,13 @@ class Net {
   private started = false;
   /** 已写入 lastRoom 的房间码（避免每条 state 消息重复写 localStorage） */
   private notedCode: string | null = null;
+  /**
+   * 本地累积的血战日志（按 seq 有序、去重、有上限）。
+   * 服务端只在首帧/落后过多时下发全量，其余帧仅带尾部 + `event` 增量 ——
+   * 这里合并成一个完整且有界的数组再交给视图消费者，组件因此无需感知协议细节。
+   */
+  private bloodLog: LogLine[] = [];
+  private static readonly LOG_CAP = 2000; // 与服务端 gs.log 的上限一致
 
   view: AnyView | null = null;
   token: string | null = Net.loadSessionToken();
@@ -165,8 +172,17 @@ class Net {
           this.notedCode = code;
           saveLastRoom(code);
         }
-        this.view = msg.view as AnyView;
-        this.viewListeners.forEach((l) => l(msg.view as AnyView));
+        const v = msg.view as AnyView;
+        if (v.kind === 'blood') {
+          // 服务端常规帧只带日志尾部（全量帧标记 logFull），与本地累积合并后再交给消费者
+          v.log = this.mergeBloodLog(v.log ?? [], v.logFull !== false);
+        }
+        this.view = v;
+        this.viewListeners.forEach((l) => l(v));
+      } else if (msg.t === 'event') {
+        // 血战日志增量：服务端把每帧新增的行单独下发（随后必有一条 state），
+        // 先并入本地累积，这样滑出尾部窗口的旧行也不会丢
+        this.mergeBloodLog([msg.line], false);
       } else if (msg.t === 'fx') {
         this.fxListeners.forEach((l) => l(msg));
       } else if (msg.t === 'error') {
@@ -355,6 +371,29 @@ class Net {
   onView(l: ViewListener): () => void {
     this.viewListeners.add(l);
     return () => this.viewListeners.delete(l);
+  }
+
+  /**
+   * 合并日志：按 seq 去重排序后截断到上限。
+   * full=true 时用本次下发的内容**重置**本地累积（首帧/重连/落后过多），否则并入。
+   * 服务端保证同一 seq 内容一致，故重复到达只需忽略。
+   */
+  private mergeBloodLog(incoming: LogLine[], full: boolean): LogLine[] {
+    const inMax = incoming.length > 0 ? incoming[incoming.length - 1].seq : 0;
+    const bufMax = this.bloodLog.length > 0 ? this.bloodLog[this.bloodLog.length - 1].seq : 0;
+    // 序号回退 = 服务端开了新的一局（logSeq 归零重排）：必须重置，
+    // 否则按 seq 去重会把新一局的日志整段当成"已见过"而吞掉，面板停在上一局
+    const reset = full || (inMax > 0 && bufMax > 0 && inMax < bufMax);
+    const merged = reset ? [] : this.bloodLog.slice();
+    const seen = new Set(merged.map((l) => l.seq));
+    for (const line of incoming) {
+      if (seen.has(line.seq)) continue;
+      seen.add(line.seq);
+      merged.push(line);
+    }
+    merged.sort((a, b) => a.seq - b.seq);
+    this.bloodLog = merged.length > Net.LOG_CAP ? merged.slice(-Net.LOG_CAP) : merged;
+    return this.bloodLog;
   }
 
   onError(l: ErrorListener): () => void {

@@ -228,6 +228,13 @@ export interface BloodView {
   result: { rows: BloodSettleRowView[]; winnerSeat: number; comparePipsFirst: boolean } | null;
   final: { winnerSeat: number; ranking: { seat: number; name: string; tickets: number; blood: number; wasAuto?: boolean }[] } | null;
   log: LogLine[];
+  /**
+   * 本次下发的 log 是否为**全量**。
+   * false = 只带最近若干行（尾部窗口），客户端应与本地按 seq 累积的日志合并 ——
+   * 一局血战的日志可达上千行（实测 4 人局 497 行 ≈ 29.5KB，占整条 state 的 84%），
+   * 每帧重发全量在移动网络上是纯粹的浪费。增量经 `event` 消息补齐。
+   */
+  logFull: boolean;
   logSeq: number;
   me: {
     seat: number;

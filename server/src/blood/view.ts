@@ -198,7 +198,15 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
   }
 }
 
-export function buildBloodView(room: Room, gs: BloodState, viewerId: string | null): BloodView {
+/** 常规帧下发的日志尾部行数：够日志面板与最近事件回溯，又不至于每帧重传整局记录 */
+export const LOG_TAIL_LINES = 200;
+
+export function buildBloodView(
+  room: Room,
+  gs: BloodState,
+  viewerId: string | null,
+  opts: { logFull?: boolean; logTail?: number } = {},
+): BloodView {
   const me = gs.players.find((p) => p.id === viewerId) ?? null;
   const revealPublic = gs.phase === 'reveal';
 
@@ -342,7 +350,8 @@ export function buildBloodView(room: Room, gs: BloodState, viewerId: string | nu
         }
       : null,
     final: gs.final,
-    log: gs.log, // 全量牌局记录（服务端仅防膨胀截断）
+    log: opts.logFull ? gs.log : gs.log.slice(-(opts.logTail ?? LOG_TAIL_LINES)),
+    logFull: !!opts.logFull,
     logSeq: gs.logSeq,
   me: me
     ? {
