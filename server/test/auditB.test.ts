@@ -6,7 +6,19 @@
  * 修复前 tryBarrierAsk 在询问之前就把道具移出并回收，选择不使用/超时同样白丢一张屏障。
  */
 import { describe, expect, it } from 'vitest';
-import { bBarrierDecide, bBuy, bPinpoint, bRemoveDone, bSecretDelete, bUseItem, bViolent, createBloodGame, finalRank } from '../src/blood/engine';
+import {
+  bBarrierDecide,
+  bBuy,
+  bDemagPick,
+  bPinpoint,
+  bRemoveDone,
+  bSecretDelete,
+  bSecretTarget,
+  bUseItem,
+  bViolent,
+  createBloodGame,
+  finalRank,
+} from '../src/blood/engine';
 import { botAct, createBrain } from '../src/blood/botAI';
 import { promptFor, buildBloodView } from '../src/blood/view';
 import type { Room } from '../src/rooms';
@@ -350,6 +362,43 @@ describe('批次 B · 皇叔宿命胜利必须及时（B5）', () => {
     bViolent(gs, 'p1', 0, NOW); // 对手对皇叔发动
     expect(me.removed.length).toBe(54);
     expect(gs.phase).toBe('gameover');
+  });
+});
+
+describe('批次 B5 · 消磁枪在「屏障放弃反制」后仍由使用者挑芯片', () => {
+  /** 甲用消磁枪指着持有防护屏障、出牌区有两张芯片（一贵一便宜）的乙 */
+  function reachBarrierDeclined(): BloodState {
+    const gs = make2p();
+    const t = gs.players[1];
+    t.items.push({ id: 'it-barrier', def: 'barrier' });
+    t.play = t.draw.splice(0, 2);
+    t.chips.push({ id: 'ch-1', def: 'twinLens', on: t.play[0].id }); // 最贵（10 血筹）
+    t.chips.push({ id: 'ch-2', def: 'calib1', on: t.play[1].id }); // 便宜（4 血筹）
+    gs.phase = 'reveal';
+    gs.turnSeat = 0;
+    gs.secretPending = { seat: 'p0', kind: 'demagTarget', defId: 'demag' };
+    bSecretTarget(gs, 'p0', 1, NOW); // 使用者已指定目标 → 进入屏障询问
+    return gs;
+  }
+
+  it('目标放弃反制后：挂起交给使用者选芯片，而不是引擎按最贵自动挑', () => {
+    const gs = reachBarrierDeclined();
+    expect(gs.secretPending?.kind).toBe('barrierAsk');
+    bBarrierDecide(gs, 'p1', false, NOW); // 放弃反制 → 效果生效
+    // 修复前：引擎直接把最贵的双生镜片失效并推进（使用者失去选择权）
+    expect(gs.secretPending?.kind).toBe('demagPick');
+    expect(gs.secretPending?.seat).toBe('p0');
+    expect(gs.players[1].chips.every((c) => !c.off)).toBe(true); // 尚未有芯片被失效
+  });
+
+  it('使用者选定后只失效他挑的那一张', () => {
+    const gs = reachBarrierDeclined();
+    bBarrierDecide(gs, 'p1', false, NOW);
+    const t = gs.players[1];
+    bDemagPick(gs, 'p0', t.play[1].id, 'calib1', NOW); // 主动挑便宜的那张
+    const off = t.chips.filter((c) => c.off);
+    expect(off).toHaveLength(1);
+    expect(off[0].def).toBe('calib1');
   });
 });
 

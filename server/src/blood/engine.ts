@@ -1275,6 +1275,9 @@ function resolveBarrier(gs: BloodState, use: boolean, now: number): void {
     pushLog(gs, 'action', `【防护屏障】未发动，效果生效`);
     applyBarrierEffect(gs, eff, now);
   }
+  // 效果自身若又挂了新的抉择（消磁枪：屏障放弃反制后交回使用者选芯片），
+  // 窗口推进交给该决策完成时处理，避免这里直接推进把挂起覆盖掉
+  if (gs.secretPending) return;
   if (eff.after === 'market') afterMarketResolved(gs, attacker, false);
   else if (eff.after === 'reveal') nextRevealOrSettle(gs, now);
   else if (eff.after === 'none') advanceItemWindow(gs, now); // 信号干扰器（道具窗口来源）：继续推进询问
@@ -1348,16 +1351,17 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
       break;
     }
     case 'demag': {
+      // 与「目标无屏障」分支同口径：把选择权交回**使用者**，而不是引擎按最贵替他挑。
+      // 自动挑最贵 ≠ 对使用者最有利（贵而无用的双生镜片是典型），同一张道具在两条分支上
+      // 行为不一致会让玩家莫名其妙地失去决策权。
       const chips = t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off);
       if (chips.length === 0) {
         pushLog(gs, 'action', `【消磁枪】${pname(t)} 出牌区没有强化芯片，落空`);
-      } else {
-        const best = chips
-          .map((ch) => ({ ch, def: BLOOD_MARKET_BY_ID.get(ch.def)! }))
-          .sort((a, b) => b.def.cost - a.def.cost)[0];
-        best.ch.off = true;
-        pushLog(gs, 'action', `【消磁枪】生效：${pname(t)} 出牌区的【${best.def.name}】本次对决失效`);
+        break;
       }
+      gs.secretPending = { seat: by.id, kind: 'demagPick', defId: 'demag', targetSeat: t.id };
+      gs.deadline = now + BLOOD_TURN_MS; // 二级选芯片重置窗口（同消磁链整体时限）
+      pushLog(gs, 'action', `【消磁枪】${pname(by)} 请选择 ${pname(t)} 出牌区要失效的芯片`);
       break;
     }
   }
@@ -1365,6 +1369,9 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
 
 /** 当前宣告窗口的自动触发（镀层出/夺）；若该玩家无任何可决定事项则立即推进 */
 function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
+  // 本次窗口该玩家挂了几张镀层（夺）：每张各自掠夺 1 点、各自选目标
+  let stealCount = 0;
+  let stealBlood = 1;
   for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
     const def = BLOOD_MARKET_BY_ID.get(ch.def);
     if (!def) continue;
@@ -1373,14 +1380,22 @@ function openRevealWindow(gs: BloodState, p: BPlayer, now: number): void {
       p.blood += eff.blood;
       pushLog(gs, 'action', `${pname(p)} 的【${def.name}】发动：获得 ${eff.blood} 血筹`);
     } else if (eff.k === 'revealSteal') {
-      // 同玩家多张镀层（夺）合并为一次掠夺（总额），避免后者覆盖前者少结算
-      if (gs.stealPending && gs.stealPending.seat === p.id) gs.stealPending.blood += eff.blood;
-      else gs.stealPending = { seat: p.id, blood: eff.blood };
+      // 每张镀层（夺）各自掠夺 1 血筹、**各自选目标**：不能把多张合并成"总额"——
+      // 卡面是「选择并掠夺一位对手 1 血筹」，合并后要求单一目标持有总额，
+      // 对手各只有 1 血筹时两张会整体落空（凭空亏两张牌）。
+      stealCount += 1;
+      stealBlood = eff.blood;
       pushLog(gs, 'action', `${pname(p)} 的【${def.name}】发动：需选择掠夺目标`);
     }
   }
+  if (stealCount > 0) {
+    // 该玩家若已有待选（复制芯片复制到镀层（夺）），则追加次数而非覆盖
+    if (gs.stealPending && gs.stealPending.seat === p.id) gs.stealPending.left = (gs.stealPending.left ?? 0) + stealCount;
+    else gs.stealPending = { seat: p.id, blood: stealBlood, left: stealCount - 1 };
+  }
   const needSteal = gs.stealPending != null && gs.stealPending.seat === p.id;
   if (needSteal) {
+    // 按**单次**掠夺点数判断合法性：每次 1 点，故任一位对手有 1 血筹即可
     const anyValid = gs.players.some((o) => o.id !== p.id && o.blood >= (gs.stealPending?.blood ?? 1));
     if (!anyValid) {
       gs.stealPending = null;
@@ -1499,10 +1514,12 @@ export function bRevealChipTarget(
       p.blood += srcFx.blood;
       pushLog(gs, 'action', `【复制芯片】发动：${pname(p)} 获得 ${srcFx.blood} 血筹`);
     } else if (srcFx.k === 'revealSteal') {
-      // 与原版镀层（夺）同规则：无合法目标直接落空（否则 stealPending 无解会卡死亮牌窗口）
+      // 与原版镀层（夺）同规则：每次掠夺 srcFx.blood 点、各自选目标；
+      // 无合法目标直接落空（否则 stealPending 无解会卡死亮牌窗口）
       const anyValid = gs.players.some((o) => o.id !== p.id && o.blood >= srcFx.blood);
       if (anyValid) {
-        gs.stealPending = { seat: p.id, blood: srcFx.blood };
+        if (gs.stealPending && gs.stealPending.seat === p.id) gs.stealPending.left = (gs.stealPending.left ?? 0) + 1;
+        else gs.stealPending = { seat: p.id, blood: srcFx.blood, left: 0 };
         pushLog(gs, 'action', `【复制芯片】发动：${pname(p)} 需选择掠夺目标`);
       } else {
         pushLog(gs, 'action', `【复制芯片】掠夺无合法目标，落空`);
@@ -1639,10 +1656,18 @@ export function bSteal(gs: BloodState, playerId: string, targetSeat: number, now
   const target = bySeat(gs, targetSeat);
   if (!target || target.id === playerId) throw new BloodError('BAD_TARGET', '掠夺目标无效');
   if (target.blood < gs.stealPending.blood) throw new BloodError('BAD_TARGET', '目标血筹不足');
-  target.blood -= gs.stealPending.blood;
-  p.blood += gs.stealPending.blood;
-  pushLog(gs, 'action', `${pname(p)} 掠夺 ${pname(target)} ${gs.stealPending.blood} 血筹`);
-  gs.stealPending = null;
+  const amount = gs.stealPending.blood;
+  const left = gs.stealPending.left ?? 0;
+  target.blood -= amount;
+  p.blood += amount;
+  pushLog(gs, 'action', `${pname(p)} 掠夺 ${pname(target)} ${amount} 血筹`);
+  // 同玩家多张镀层（夺）：每张各自 1 点、各自选目标 —— 结算一次后若还有剩余次数，
+  // 保持挂起让玩家继续选（而不是一次抢光同一人、也不是把剩余次数丢掉）
+  gs.stealPending = left > 0 ? { seat: playerId, blood: amount, left: left - 1 } : null;
+  if (left > 0) {
+    pushLog(gs, 'action', `还剩 ${left} 次掠夺待选择目标`);
+    return; // 停留等待下一次选择
+  }
   // 掠夺完成后推进亮牌窗口：该玩家已无道具可宣告、或已不在其宣告窗口
   // （复制芯片的延迟决策阶段）时必须继续推进，否则没有任何合法动作能走出等待，
   // 只能干等 60s 回合超时托管（与超时兜底的处理一致：清 stealPending + 推进）

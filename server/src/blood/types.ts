@@ -193,7 +193,8 @@ export interface BloodState {
   recycle: string[];
   turnSeat: number | null;
   deadline: number | null;
-  stealPending: { seat: string; blood: number } | null;
+  /** 掠夺待选目标：blood = 本次掠夺点数；left = 还需再选几次（同玩家多张镀层（夺）各自 1 点、各自选目标） */
+  stealPending: { seat: string; blood: number; left?: number } | null;
   secretPending: {
     seat: string;
     kind: 'deleteUpTo' | 'violentTarget' | 'insertChip' | 'refreshPick'
