@@ -150,12 +150,13 @@ cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 说明：前端构建产物 `client/dist` 已随仓库提交，服务器上无需构建（1G 内存小机也跑得动）；
 `deploy.sh` 使用 pm2 守护进程并开机自启（`pm2 save` 后执行一次 `pm2 startup` 按提示操作）。
 
-| 命令                        | 作用                       |
-| --------------------------- | -------------------------- |
-| bloodtable update           | 拉最新代码并重启（最常用） |
-| bloodtable restart / reboot | 重启游戏服务               |
-| bloodtable clear            | 一键清空所有房间           |
-| bloodtable status / logs    | 看运行状态 / 看日志        |
+| 命令                        | 作用                                    |
+| --------------------------- | --------------------------------------- |
+| bloodtable update           | 拉最新代码并重启（最常用）              |
+| bloodtable deploy           | 只部署当前代码并重启（**不联网**，见下） |
+| bloodtable restart / reboot | 重启游戏服务                            |
+| bloodtable clear            | 一键清空所有房间                        |
+| bloodtable status / logs    | 看运行状态 / 看日志                     |
 
 `bloodtable` 本体就在仓库里（`bin/bloodtable`），不再是只存在于服务器上的手写脚本——换机器、重装服务器都不再丢命令。
 脚本会自行定位仓库目录（顺序：`$BLOOD_TABLE_DIR` → 脚本所在仓库 → `~/Blood-Table`），因此从 `/usr/local/bin` 调用也能找到代码。
@@ -168,5 +169,10 @@ bloodtable help                                              # 查看全部子�
 
 > **两种上线方式**：① 服务器上 `git pull && bash deploy.sh`（= `bloodtable update`，最常用）；
 > ② 本机 `git push server main` —— 线上仓库设置了 `receive.denyCurrentBranch=updateInstead`，
-> 推送会直接更新服务器的工作区，但**不会重启进程**，还须执行 `bloodtable restart`（或 `bash deploy.sh` 走排水）才生效。
+> 推送会直接更新服务器的工作区，但**不会重启进程**，还须执行 `bloodtable deploy`（只跑 deploy.sh，
+> 不依赖外网）或 `bloodtable restart` 才生效。
 > 本仓库另有一个指向线上仓库的 `server` 远端（地址见本机 `.git/config`，不写入本文档）。
+
+> **为什么要有 `deploy`**：线上机器出网到 GitHub 并不稳定（实测多次连接超时 / TLS 中断），
+> 而 `update` 的第一步就是 `git pull` —— 网络一抖，明明代码已由推送到达服务器却上不了线。
+> `update` 现在会在拉取失败时**明确告警后继续部署当前工作区代码**，只想上线当前代码可直接用 `deploy`。

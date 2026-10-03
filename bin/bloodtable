@@ -37,7 +37,18 @@ PORT="${PORT:-3000}"
 case "${1:-status}" in
   update)
     cd "$REPO"
-    git pull --ff-only
+    # 这台机器的出网到 GitHub 经常不可达（实测多次连接超时 / TLS 中断），而代码通常是本机
+    # `git push server` 直达本仓库的（线上仓库 receive.denyCurrentBranch=updateInstead）——
+    # 拉取失败不该挡住建部署，否则「推送已成功、服务却上不了线」。故失败时明确告警后继续。
+    if ! git pull --ff-only; then
+      echo "⚠️ git pull 失败（网络不可达或本地与远端分叉）：将用**当前工作区的代码**继续部署"
+      echo "   仅想上线当前代码（例如刚 git push server 过）可直接用：bloodtable deploy"
+    fi
+    bash deploy.sh
+    ;;
+  deploy)
+    # 明确不联网的部署：适用于「本机 push 直达服务器仓库」的上线方式
+    cd "$REPO"
     bash deploy.sh
     ;;
   restart | reboot)
@@ -65,8 +76,9 @@ case "${1:-status}" in
     echo "✅ 已安装：/usr/local/bin/bloodtable → $SELF"
     ;;
   help | -h | --help)
-    echo "用法: bloodtable {update|restart|reboot|stop|start|logs|clear|status|install}"
+    echo "用法: bloodtable {update|deploy|restart|reboot|stop|start|logs|clear|status|install}"
     echo "  update    拉最新代码并重启（git pull --ff-only && bash deploy.sh，含排水等待）"
+    echo "  deploy    只部署当前工作区代码并重启（不联网，适用于「本机 push 直达本仓库」）"
     echo "  restart   重启游戏服务（reboot 同义）"
     echo "  stop/start  停止 / 启动游戏服务"
     echo "  logs      查看最近 50 行日志（Ctrl+C 退出）"
@@ -77,7 +89,7 @@ case "${1:-status}" in
     echo "仓库目录：$REPO"
     ;;
   *)
-    echo "用法: bloodtable {update|restart|reboot|stop|start|logs|clear|status|install}" >&2
+    echo "用法: bloodtable {update|deploy|restart|reboot|stop|start|logs|clear|status|install}" >&2
     exit 1
     ;;
 esac
