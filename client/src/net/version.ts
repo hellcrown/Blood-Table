@@ -65,6 +65,9 @@ export async function fetchServerVersion(): Promise<VersionRef | null> {
   try {
     const r = await fetch('/api/version', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (!r.ok) return null;
+    // 必须是 JSON：未升级的老服务端会把未知路径交给 SPA 回退，返回 200 + index.html，
+    // 此时宁可当作「拿不到版本」（不提示）也不要让 HTML 进 JSON.parse 抛异常
+    if (!(r.headers.get('content-type') ?? '').includes('application/json')) return null;
     const j = (await r.json()) as { ok?: boolean; latest?: { date?: unknown; title?: unknown } | null };
     const date = typeof j?.latest?.date === 'string' ? j.latest.date : '';
     const title = typeof j?.latest?.title === 'string' ? j.latest.title : '';
