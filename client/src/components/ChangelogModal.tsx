@@ -1,4 +1,4 @@
-import { CHANGELOG } from '../data/changelog';
+import { CHANGELOG } from '@shared/changelog';
 
 /** 更新日志弹窗（大厅「📜 更新日志」入口）：展示版本演进，让玩家感知游戏在持续生长 */
 export function ChangelogModal({ onClose }: { onClose: () => void }) {
@@ -14,7 +14,7 @@ export function ChangelogModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="codex-body">
           {CHANGELOG.map((e) => (
-            <div key={e.date} className="log-entry">
+            <div key={`${e.date}|${e.title}`} className="log-entry">
               <div className="log-entry-head">
                 <b>{e.title}</b>
                 <span className="hint">{e.date}</span>

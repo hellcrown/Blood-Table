@@ -60,6 +60,12 @@ cd Blood-Table && bash deploy.sh
 
 访问 `http://服务器IP:3000` 即玩；更新版本：`git pull && bash deploy.sh`。
 
+> **发版后玩家侧感知**：服务端 `GET /api/version` 下发「服务器上跑的是哪一条更新日志」
+> （取自 `shared/src/changelog.ts` 的最新条目），前端每 5 分钟 / 回到前台时比对一次：
+> 发现服务器版本比页面打包的版本新，就在大厅顶部弹出「🆕 新版本已发布」横幅与「立即刷新」按钮——
+> 仍开着旧页面（浏览器缓存里的旧 JS）的玩家由此能明确知道该刷新了，而不是靠运气。
+> 玩家没读过的更新日志另在「📜 更新日志」入口显示角标，点开即消。
+
 > **更新与进行中对局**：deploy.sh 默认进入「排水」模式——先向所有进行中的对局广播更新公告，等待对局自然结束（上限 900 秒，超时强制重启）再重启服务。`DEPLOY_NO_DRAIN=1 bash deploy.sh` 或 `bash deploy.sh --now` 可跳过等待；`DEPLOY_DRAIN_MAX=1800` 可调上限。重启会清空内存中的对局状态（玩家会被送回大厅）。
 前端构建产物 `client/dist` 已随仓库提交，服务器无需构建（1G 内存小机可跑）。
 建仓后执行一次 `pm2 save && pm2 startup` 可开机自启。
@@ -87,6 +93,7 @@ cd Blood-Table && bash deploy.sh
 ```
 shared/src/
   protocol.ts             前后端共享的 WS 消息与类型
+  changelog.ts            更新日志（前端渲染 + 服务端 /api/version 的版本比对口径）
   bloodCards.ts           黑市牌定义（基础 25 种 57 张，拓展黑市另 27 种 55 张，数据驱动）
   bloodEval.ts            血色对决评估器（前后端共用，出牌实时牌型提示）
 server/src/
@@ -97,8 +104,10 @@ server/src/
 server/test/              单元测试 + 随机整场模拟 + WS 端到端冒烟
 client/src/
   net/socket.ts           WS 客户端、自动重连、token 管理
+  net/version.ts          版本提示（旧包检测 + 更新日志未读标记）
   pages/Lobby|Room|Table|BloodTable
   components/             卡牌、座位、操作栏、结算浮层、日志
+bin/bloodtable            服务器运维命令（update/restart/logs/clear/status…）
 ```
 
 服务端为权威服务器：规则判定全在服务端，私有信息（手牌/牌堆/弃牌区）只下发给所有者。
@@ -106,7 +115,7 @@ client/src/
 ## 测试
 
 ```bash
-npm test           # 163 个用例：德扑回归 34 + 血色评估器 19 + 血色引擎流程 42 + 角色技能 37 + 机器人 26 + 血色随机整场模拟 5
+npm test           # 290 个用例：德扑规则回归 + 血色评估器 + 血色引擎流程 + 角色技能 + 机器人 + 随机整场模拟 + 账号/天梯 + 更新日志版本口径
 ```
 
 端到端脚本（先启动服务器）：
@@ -142,3 +151,17 @@ cd server && npx tsx test/smoke.ts        # 经典模式联机 + 断线重连
 | bloodtable restart / reboot | 重启游戏服务               |
 | bloodtable clear            | 一键清空所有房间           |
 | bloodtable status / logs    | 看运行状态 / 看日志        |
+
+`bloodtable` 本体就在仓库里（`bin/bloodtable`），不再是只存在于服务器上的手写脚本——换机器、重装服务器都不再丢命令。
+脚本会自行定位仓库目录（顺序：`$BLOOD_TABLE_DIR` → 脚本所在仓库 → `~/Blood-Table`），因此从 `/usr/local/bin` 调用也能找到代码。
+新机器安装与查看用法：
+
+```bash
+sudo ln -sf "$PWD/bin/bloodtable" /usr/local/bin/bloodtable   # 或 bash bin/bloodtable install
+bloodtable help                                              # 查看全部子命令
+```
+
+> **两种上线方式**：① 服务器上 `git pull && bash deploy.sh`（= `bloodtable update`，最常用）；
+> ② 本机 `git push server main` —— 线上仓库设置了 `receive.denyCurrentBranch=updateInstead`，
+> 推送会直接更新服务器的工作区，但**不会重启进程**，还须执行 `bloodtable restart`（或 `bash deploy.sh` 走排水）才生效。
+> 本仓库另有一个指向线上仓库的 `server` 远端（地址见本机 `.git/config`，不写入本文档）。

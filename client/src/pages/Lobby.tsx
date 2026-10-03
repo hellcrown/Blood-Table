@@ -8,6 +8,8 @@ import { LeaderboardModal } from '../components/LeaderboardModal';
 import { TutorialModal } from '../components/TutorialModal';
 import { ChangelogModal } from '../components/ChangelogModal';
 import { SettingsModal } from '../components/SettingsModal';
+import { UpdateNotice } from '../components/UpdateNotice';
+import { hasUnseen, initSeenIfFirstVisit, markSeen } from '../net/version';
 
 export function Lobby({ connected }: { connected: boolean }) {
   const [name, setName] = useState(net.loadName());
@@ -26,6 +28,20 @@ export function Lobby({ connected }: { connected: boolean }) {
   const [logOpen, setLogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
+  /** 有未读的更新日志内容：大厅入口显示角标 */
+  const [unseenLog, setUnseenLog] = useState(() => hasUnseen());
+
+  // 首次到访静默记下当前版本（新玩家不该看到「新版本已发布」），之后发版才会提示
+  useEffect(() => {
+    initSeenIfFirstVisit();
+  }, []);
+
+  /** 打开更新日志：读到即消角标（点提示条的「查看更新」也走这里） */
+  const openChangelog = () => {
+    markSeen();
+    setUnseenLog(false);
+    setLogOpen(true);
+  };
 
   /** 复制 QQ 群号到剪贴板（https 下可用；失败时按钮文本本身仍展示群号） */
   const copyQqGroup = async () => {
@@ -225,6 +241,15 @@ export function Lobby({ connected }: { connected: boolean }) {
 
         {!connected && <p className="hint">正在连接服务器…</p>}
 
+        <UpdateNotice
+          unseen={unseenLog}
+          onOpenChangelog={openChangelog}
+          onDismissUnseen={() => {
+            markSeen();
+            setUnseenLog(false);
+          }}
+        />
+
         <div className="lobby-links">
           <button className="btn small primary" onClick={() => setTutorialOpen(true)}>
             📚 教程
@@ -245,8 +270,9 @@ export function Lobby({ connected }: { connected: boolean }) {
           <button className="btn small ghost" onClick={() => setFeedbackOpen(true)}>
             📨 反馈
           </button>
-          <button className="btn small ghost" onClick={() => setLogOpen(true)}>
+          <button className="btn small ghost" onClick={openChangelog}>
             📜 更新日志
+            {unseenLog && <span className="new-dot">新</span>}
           </button>
         </div>
 

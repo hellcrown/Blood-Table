@@ -1,11 +1,30 @@
-/** 更新日志（新→旧）；条目面向玩家，避免提交口吻 */
-export interface ChangelogEntry {
+/**
+ * 更新日志（新→旧）；条目面向玩家，避免提交口吻。
+ * 前后端共用：客户端用它渲染「📜 更新日志」弹窗与「新版本已发布」提示，
+ * 服务端用它经 GET /api/version 告知在线页面「服务器上的最新版本是哪一条」——
+ * 于是仍开着旧包（浏览器缓存里的旧 JS）的玩家能被明确提示刷新，而不是靠运气。
+ */
+/** 版本标识所需的最小信息：服务端只需下发这两项即可参与版本比对 */
+export interface ChangelogRef {
   date: string;
   title: string;
+}
+
+export interface ChangelogEntry extends ChangelogRef {
   items: string[];
 }
 
+/** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: '2026-10-03',
+    title: '版本提示 · 运维命令入库',
+    items: [
+      '大厅新增「新版本已发布」提示：服务器发版后，仍开着旧页面的玩家会直接看到提示，点一下即刷新到最新版',
+      '「📜 更新日志」按钮在有新内容未读时显示角标，打开日志即消，不错过每次改动',
+      '运维命令 bloodtable（update/restart/reboot/stop/start/logs/clear/status）纳入仓库：换机器、重装服务器不再丢命令（bash bin/bloodtable install 一键安装）',
+    ],
+  },
   {
     date: '2026-10-03',
     title: '账号系统 · 天梯积分 · 开局竞拍',
@@ -97,3 +116,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
 ];
+
+/** 最新一条日志（无条目时为 null） */
+export const LATEST: ChangelogEntry | null = CHANGELOG[0] ?? null;
+
+/**
+ * 版本标识：日期 + 标题。
+ * 只用日期会让「同一天发两次版」互相覆盖（09-28 当天就有三条），带上标题即可区分；
+ * 日期是等宽前缀，故 key 的字典序比较天然等价于时间先后。
+ */
+export function versionKey(e: ChangelogRef | null | undefined): string {
+  return e ? `${e.date}|${e.title}` : '';
+}
+
+/** a 是否比 b 更新：先比日期，同日标题不同视为「有更新」 */
+export function isNewerVersion(a: ChangelogRef | null | undefined, b: ChangelogRef | null | undefined): boolean {
+  if (!a) return false;
+  if (!b) return true;
+  if (a.date !== b.date) return a.date > b.date;
+  return a.title !== b.title;
+}

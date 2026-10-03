@@ -19,6 +19,7 @@ import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from '
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
+import { CHANGELOG, LATEST } from '@shared/changelog';
 
 const PORT = Number(process.env.PORT) || 3000;
 const CLIENT_DIST = path.resolve(process.cwd(), '../client/dist');
@@ -244,6 +245,19 @@ const server = http.createServer((req, res) => {
     publicStatsCache = { at: Date.now(), body };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(body);
+    return;
+  }
+  // 版本提示：把「服务器上跑的是哪一条更新日志」告诉在线页面，
+  // 页面据此判断自己是不是旧包（浏览器缓存里的旧 JS）并提示刷新。no-store 防中间层缓存旧版本号。
+  if (url.pathname === '/api/version' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        latest: LATEST ? { date: LATEST.date, title: LATEST.title } : null,
+        total: CHANGELOG.length,
+      }),
+    );
     return;
   }
   if (url.pathname === '/api/health') {

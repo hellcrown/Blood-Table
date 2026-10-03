@@ -3786,6 +3786,68 @@ body {
   line-height: 1.8;
 }
 
+/* ---------- 新版本已发布提示 ---------- */
+
+/* 旧包横幅：金色实线，页面不刷新就一直在旧逻辑上跑，故比提示条更醒目 */
+.update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(216, 169, 78, 0.16), rgba(216, 169, 78, 0.05));
+}
+
+.update-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.update-banner-text b {
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.update-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 未读提示条：本页已是最新版，只是这次的更新日志还没看 */
+.update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px dashed var(--gold-dim);
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.new-dot {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
 /* ---------- 角色难度徽标 ---------- */
 
 .char-diff {

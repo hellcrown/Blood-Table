@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# 血色牌局运维命令（云服务器端）
+#
+#   bloodtable {update|restart|reboot|stop|start|logs|clear|status|install}
+#
+# 原为线上服务器手写、游离于版本控制之外的 /usr/local/bin/bloodtable（换机器/重装即丢），
+# 现纳入仓库。命令语义与线上原版完全一致，仅两点加固：
+#   1. 仓库目录不再硬编码 ~/Blood-Table：优先 $BLOOD_TABLE_DIR，其次脚本自身所在仓库
+#      （含符号链接解析），最后回退 ~/Blood-Table —— 装在 /usr/local/bin 也能找到代码。
+#   2. update 使用 git pull --ff-only：部署机上不产出意外合并提交（宁可失败也不脏历史）。
+#
+# 安装（服务器上，仓库根目录）：
+#   sudo ln -sf "$PWD/bin/bloodtable" /usr/local/bin/bloodtable
+#   或 bash bin/bloodtable install
+set -euo pipefail
+
+# 解析脚本真实路径（忽略软链）：从 /usr/local/bin/bloodtable 也能反查到仓库
+SELF="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SELF="$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
+if [ -n "${BLOOD_TABLE_DIR:-}" ]; then
+  REPO="$BLOOD_TABLE_DIR"
+elif [ -f "$SCRIPT_DIR/../deploy.sh" ]; then
+  REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$HOME/Blood-Table/deploy.sh" ]; then
+  REPO="$HOME/Blood-Table"
+else
+  echo "❌ 找不到血色牌局仓库：请设置 BLOOD_TABLE_DIR=/path/to/Blood-Table" >&2
+  exit 1
+fi
+
+PORT="${PORT:-3000}"
+
+case "${1:-status}" in
+  update)
+    cd "$REPO"
+    git pull --ff-only
+    bash deploy.sh
+    ;;
+  restart | reboot)
+    pm2 restart blood-table
+    ;;
+  stop)
+    pm2 stop blood-table
+    ;;
+  start)
+    pm2 start blood-table
+    ;;
+  logs)
+    pm2 logs blood-table --lines 50
+    ;;
+  clear)
+    # /api/rooms/clear 是服务端本机运维接口（非本机来源一律 403），故无需管理密码
+    curl -fsS -X POST "http://127.0.0.1:$PORT/api/rooms/clear"
+    echo ""
+    ;;
+  status)
+    pm2 ls
+    ;;
+  install)
+    sudo ln -sf "$SELF" /usr/local/bin/bloodtable
+    echo "✅ 已安装：/usr/local/bin/bloodtable → $SELF"
+    ;;
+  help | -h | --help)
+    echo "用法: bloodtable {update|restart|reboot|stop|start|logs|clear|status|install}"
+    echo "  update    拉最新代码并重启（git pull --ff-only && bash deploy.sh，含排水等待）"
+    echo "  restart   重启游戏服务（reboot 同义）"
+    echo "  stop/start  停止 / 启动游戏服务"
+    echo "  logs      查看最近 50 行日志（Ctrl+C 退出）"
+    echo "  clear     清空所有房间（本机运维接口）"
+    echo "  status    查看 pm2 进程列表（默认命令）"
+    echo "  install   把本脚本软链到 /usr/local/bin/bloodtable"
+    echo ""
+    echo "仓库目录：$REPO"
+    ;;
+  *)
+    echo "用法: bloodtable {update|restart|reboot|stop|start|logs|clear|status|install}" >&2
+    exit 1
+    ;;
+esac
