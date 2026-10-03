@@ -24,7 +24,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY ?? '';
 /** 管理员会话 token → 过期时间（24h） */
 const adminTokens = new Map<string, number>();
 /** 管理登录失败限速：IP → 失败次数与锁定截止时间 */
-const loginFails = new Map<string, { count: number; until: number }>();
+const loginFails = new Map<string, { count: number; until: number; last: number }>();
 
 function loginBlocked(req: http.IncomingMessage): number {
   const ip = clientIp(req);
@@ -39,8 +39,9 @@ function loginBlocked(req: http.IncomingMessage): number {
 
 function recordLoginFail(req: http.IncomingMessage): void {
   const ip = clientIp(req);
-  const rec = loginFails.get(ip) ?? { count: 0, until: 0 };
+  const rec = loginFails.get(ip) ?? { count: 0, until: 0, last: 0 };
   rec.count += 1;
+  rec.last = Date.now();
   if (rec.count >= 5) {
     rec.until = Date.now() + 60_000;
     rec.count = 0;
@@ -188,7 +189,7 @@ const authTryLimit = new IpTable(
   (w, now) => w.idle(now),
 );
 /** 登录失败锁定：连续 5 次失败锁 60s（与 admin 登录同口径） */
-const authFails = new Map<string, { count: number; until: number }>();
+const authFails = new Map<string, { count: number; until: number; last: number }>();
 
 function authBlocked(ip: string): number {
   const rec = authFails.get(ip);
@@ -201,8 +202,9 @@ function authBlocked(ip: string): number {
 }
 
 function recordAuthFail(ip: string): void {
-  const rec = authFails.get(ip) ?? { count: 0, until: 0 };
+  const rec = authFails.get(ip) ?? { count: 0, until: 0, last: 0 };
   rec.count += 1;
+  rec.last = Date.now();
   if (rec.count >= 5) {
     rec.until = Date.now() + 60_000;
     rec.count = 0;
@@ -268,6 +270,7 @@ const server = http.createServer((req, res) => {
       } catch {
         /* 忽略解析失败，按空内容处理 */
       }
+      if (parsed == null || typeof parsed !== 'object') parsed = {}; // 字面量 null/原始值：归一化防解引用异常挂起连接
       const r = authRegister(parsed.name, parsed.password);
       if (!r.ok) {
         send(r.code === 'NAME_TAKEN' ? 409 : 400, { ok: false, msg: r.msg });
@@ -302,6 +305,7 @@ const server = http.createServer((req, res) => {
       } catch {
         /* 忽略解析失败 */
       }
+      if (parsed == null || typeof parsed !== 'object') parsed = {}; // 字面量 null/原始值：归一化防解引用异常挂起连接
       const r = authLogin(parsed.name, parsed.password);
       if (!r.ok) {
         recordAuthFail(ip);
@@ -511,13 +515,13 @@ const ipNewConn = new IpTable(
 );
 setInterval(() => ipNewConn.prune(), 5 * 60_000).unref();
 setInterval(() => {
-  // 管理登录失败表清理：锁定已过期的条目直接删除
+  // 登录失败表清理：锁定已过期的直接删除；未达锁定阈值的陈旧条目（10 分钟无新失败）也删，防慢性泄漏
+  const stale = Date.now() - 10 * 60_000;
   for (const [ip, rec] of loginFails) {
-    if (rec.until > 0 && Date.now() >= rec.until) loginFails.delete(ip);
+    if ((rec.until > 0 && Date.now() >= rec.until) || (rec.until === 0 && rec.last < stale)) loginFails.delete(ip);
   }
-  // 玩家账号登录失败表同口径清理
   for (const [ip, rec] of authFails) {
-    if (rec.until > 0 && Date.now() >= rec.until) authFails.delete(ip);
+    if ((rec.until > 0 && Date.now() >= rec.until) || (rec.until === 0 && rec.last < stale)) authFails.delete(ip);
   }
   regLimit.prune();
   authTryLimit.prune();

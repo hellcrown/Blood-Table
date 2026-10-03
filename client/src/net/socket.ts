@@ -235,6 +235,12 @@ class Net {
     }
   }
 
+  /** 其他标签页登录/登出后同步内存令牌（storage 事件不会在改动方自身触发） */
+  syncAuthTokenFromStorage(): void {
+    this.authToken = Net.loadAuthToken();
+    if (!this.authToken) this.setAccount(null); // 被他页登出：清掉本页登录态展示
+  }
+
   setAccount(a: AccountInfo | null): void {
     if (a?.id === this.account?.id && a?.name === this.account?.name) return;
     this.account = a;
@@ -327,6 +333,10 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => net.forceReconnectIfClosed());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') net.forceReconnectIfClosed();
+  });
+  // 其他标签页登录/登出：同步内存中的账号令牌（后续入房消息即带/不带 auth；注意此事件不跨标签页触发本页 storage 监听自身）
+  window.addEventListener('storage', (e) => {
+    if (e.key === AUTH_KEY || e.key === null) net.syncAuthTokenFromStorage();
   });
 }
 

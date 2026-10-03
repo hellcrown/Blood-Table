@@ -5,7 +5,7 @@
  * - 超时托管按最低价出价；江东之主夺证按其本人出价重算血筹
  */
 import { describe, expect, it } from 'vitest';
-import { bCrownBid, bPickChar, bloodTick, createBloodGame } from '../src/blood/engine';
+import { BloodError, bCrownBid, bPickChar, bResign, bloodTick, createBloodGame } from '../src/blood/engine';
 import type { BloodState } from '../src/blood/types';
 
 const NOW = 1000;
@@ -86,6 +86,14 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
     expect(gs.phase).toBe('pick');
   });
 
+  it('竞拍阶段禁止投降（否则凭空产生冠军且可刷天梯胜场）', () => {
+    const gs = make2p();
+    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
+    // 结算后（pick 阶段）同样拒绝
+    for (const p of gs.players) bCrownBid(gs, p.id, 1, NOW);
+    expect(() => bResign(gs, 'p0', NOW)).toThrow(BloodError);
+  });
+
   it('3人局：出价结算后直接随机分配角色（不经选将）', () => {
     const gs = createBloodGame(3, [
       { id: 'p0', name: '甲', seat: 0 },
@@ -97,8 +105,9 @@ describe('特权证暗标竞拍 · 开局阶段', () => {
     bCrownBid(gs, 'p2', 2, NOW); // 与 p1 平局掷骰
     expect(gs.phase).not.toBe('crownBid'); // 已结算（pick 或 setup：基础池 3 人局随机分配）
     const holder = gs.players.find((p) => p.privilege)!;
-    expect(holder.blood).toBe(0); // 出价 3
-    // 其余人不因竞拍扣血筹（≥3：开局角色效果可能额外加血，如贵族 +12 / 银行职员 +2）
+    expect(holder.id).toBe('p0'); // 唯一最高价得证
+    // 出价 3 → 竞拍后 0 血筹；随机分配到贵族(+12)/银行职员(+2)会叠加开局效果，故只断言下界与「其余人不低于 3」
+    expect(holder.blood).toBeGreaterThanOrEqual(0);
     expect(gs.players.filter((p) => p !== holder).every((p) => p.blood >= 3)).toBe(true);
     expect(gs.players.every((p) => p.charId != null)).toBe(true); // 已分配角色
   });

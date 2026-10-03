@@ -390,6 +390,11 @@ export function BloodTable({ view }: { view: BloodView }) {
     if (view.phase !== 'crownBid') setMyCrownBid(null); // 离开竞拍阶段清除本地出价回显
   }, [view.phase]);
 
+  // 服务端确认「我还没出价」（断线期间点过出价但消息丢了 / 重连后）：清掉本地回显，重新可出价
+  useEffect(() => {
+    if (view.phase === 'crownBid' && view.prompt.k === 'crownBid') setMyCrownBid(null);
+  }, [view.phase, view.prompt.k]);
+
   // 结算音：以「结算数据出现」为准（比阶段切换更可靠——settle 视图可能被快速确认跳过渲染）
   const prevResultRoundRef = useRef<number | null>(null);
   useEffect(() => {
@@ -2750,6 +2755,8 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <button
                       key={n}
                       className={`btn big crown-bid ${myCrownBid === n ? 'primary' : ''}`}
+                      // 出价是一次性密封动作：点了任何一档立即整排禁用（250ms 发送节流内改点会被静默丢弃，禁用可防止本地高亮与服务端实际出价背离）
+                      disabled={myCrownBid != null}
                       onClick={() => {
                         setMyCrownBid(n);
                         send({ t: 'bCrownBid', bid: n });
@@ -2762,11 +2769,15 @@ export function BloodTable({ view }: { view: BloodView }) {
                     </button>
                   ))}
                 </div>
-                <p className="hint">超时未出价按最低价 1 自动托管</p>
+                <p className="hint">
+                  {myCrownBid != null ? '已提交出价（保密中），等待其他玩家…' : '超时未出价按最低价 1 自动托管'}
+                </p>
               </>
             ) : (
               <p className="char-pick-waiting">
-                {myCrownBid != null ? `已出价（保密中）· 等待其他玩家出价…` : '竞拍进行中 · 等待玩家出价…'}
+                {view.prompt.bidDone
+                  ? '你已出价（保密中）· 等待开价…'
+                  : '竞拍进行中 · 等待玩家出价…'}
               </p>
             )}
           </div>

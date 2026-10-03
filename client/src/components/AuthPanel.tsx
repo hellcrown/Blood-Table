@@ -28,23 +28,40 @@ export function AuthPanel() {
     }
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => {
+        // 仅 401（令牌确已过期/失效）才登出：网络抖动 / 5xx（如部署重启瞬间）不清令牌，避免用户被无声登出
+        if (r.status === 401) {
+          net.clearAuthToken();
+          setMe(null);
+          return;
+        }
         if (!r.ok) throw new Error(String(r.status));
         return r.json() as Promise<MeData & { ok: boolean }>;
       })
       .then((d) => {
+        if (!d) return; // 401 分支已处理
+        if (net.authToken !== token) return; // 响应期间已登出/换号：丢弃过期响应，防复活假登录态
         setMe(d);
         net.setAccount(d.account);
+        net.saveName(d.account.name); // 房内强制显示账号名：本地昵称以服务端为准，避免预填值与实际显示不一致
       })
       .catch(() => {
-        // 令牌失效（过期/服务端换密钥）：回匿名态
-        net.clearAuthToken();
+        // 网络异常/服务端错误：保留令牌，仅不展示积分（下个生命周期或 storage 事件会重试）
         setMe(null);
       });
   };
 
   useEffect(() => {
     refreshMe(net.authToken);
-    return net.onAccount(setAccount);
+    // 其他标签页登录/登出（localStorage blood.auth 变化）时同步本页登录态
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'blood.auth' || e.key === null) refreshMe(net.authToken);
+    };
+    window.addEventListener('storage', onStorage);
+    const offAccount = net.onAccount(setAccount);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      offAccount();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

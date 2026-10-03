@@ -169,6 +169,8 @@ export interface BloodMyPrompt {
   options?: string[];
   /** ceoGive：已给出的累计血筹 */
   given?: number;
+  /** crownBid 已出价等待开价（不下发出价数值；接替机器人/刷新后回显用） */
+  bidDone?: boolean;
   /** cleanerDel：所有玩家的弃牌区（全牌库自选删除用） */
   zones?: { seat: number; cards: { id: string; r: number; s: string | null }[] }[];
 }

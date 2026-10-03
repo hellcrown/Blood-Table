@@ -199,30 +199,32 @@ export function matchPlayerStats(accountId: string): PlayerStats | null {
   const recent: PlayerMatchRow[] = [];
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i]!;
-    const pl = m.players.find((p) => p.accountId === accountId);
-    if (!pl) continue;
-    games++;
-    rankSum += pl.rank;
-    if (pl.rank === 1) wins++;
-    if (pl.charId && m.mode === 'blood') {
-      const a = chars.get(pl.charId) ?? { games: 0, wins: 0, rankSum: 0 };
-      a.games++;
-      a.rankSum += pl.rank;
-      if (pl.rank === 1) a.wins++;
-      chars.set(pl.charId, a);
-    }
-    if (recent.length < 10) {
-      recent.push({
-        endedAt: m.endedAt,
-        mode: m.mode,
-        ...(m.durationMin != null ? { durationMin: m.durationMin } : {}),
-        seatCount: m.seatCount,
-        rank: pl.rank,
-        ...(pl.charId ? { charId: pl.charId } : {}),
-        ...(pl.tickets != null ? { tickets: pl.tickets } : {}),
-        ...(pl.blood != null ? { blood: pl.blood } : {}),
-        ...(pl.chips != null ? { chips: pl.chips } : {}),
-      });
+    // 同账号可能在同局占多座（双标签页）：逐行全部计入
+    for (const pl of m.players) {
+      if (pl.accountId !== accountId) continue;
+      games++;
+      rankSum += pl.rank;
+      if (pl.rank === 1) wins++;
+      if (pl.charId && m.mode === 'blood') {
+        const a = chars.get(pl.charId) ?? { games: 0, wins: 0, rankSum: 0 };
+        a.games++;
+        a.rankSum += pl.rank;
+        if (pl.rank === 1) a.wins++;
+        chars.set(pl.charId, a);
+      }
+      if (recent.length < 10) {
+        recent.push({
+          endedAt: m.endedAt,
+          mode: m.mode,
+          ...(m.durationMin != null ? { durationMin: m.durationMin } : {}),
+          seatCount: m.seatCount,
+          rank: pl.rank,
+          ...(pl.charId ? { charId: pl.charId } : {}),
+          ...(pl.tickets != null ? { tickets: pl.tickets } : {}),
+          ...(pl.blood != null ? { blood: pl.blood } : {}),
+          ...(pl.chips != null ? { chips: pl.chips } : {}),
+        });
+      }
     }
   }
   if (games === 0) return null;

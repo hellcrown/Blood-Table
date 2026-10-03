@@ -143,7 +143,8 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
   }
   switch (gs.phase) {
     case 'crownBid':
-      return gs.crownBids[p.id] != null ? { k: 'wait' } : { k: 'crownBid' };
+      // 已出价者 prompt=wait + bidDone（只告诉客户端"已出价"，不泄露数值；接替机器人/刷新页面后回显正确）
+      return gs.crownBids[p.id] != null ? { k: 'wait', bidDone: true } : { k: 'crownBid' };
     case 'pick':
       return p.charId ? { k: 'wait' } : { k: 'pick' };
     case 'setup':

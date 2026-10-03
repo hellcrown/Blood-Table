@@ -33,8 +33,12 @@ export function LeaderboardModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let alive = true;
     if (tab === 'chars' && chars == null) {
+      setError(''); // 重试时清掉上次错误（期间显示加载中；再次失败会在 catch 里重新置位）
       fetch('/api/stats/chars')
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status)); // 5xx/4xx 不再被 ?? 兜底成「空榜单」假象
+          return r.json();
+        })
         .then((d: { total?: number; chars?: LeaderRow[] }) => {
           if (alive) setChars({ total: d.total ?? 0, rows: d.chars ?? [] });
         })
@@ -43,8 +47,12 @@ export function LeaderboardModal({ onClose }: { onClose: () => void }) {
         });
     }
     if (tab === 'ladder' && ladder == null) {
+      setError('');
       fetch('/api/stats/ladder')
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return r.json();
+        })
         .then((d: { board?: LadderRow[] }) => {
           if (alive) setLadder(d.board ?? []);
         })

@@ -3840,7 +3840,8 @@ function act2(fn: () => void): void {
 export function bResign(gs: BloodState, playerId: string, now: number): void {
   void now;
   if (gs.phase === 'gameover') return;
-  if (gs.phase === 'pick' || gs.phase === 'setup') throw new BloodError('BAD_PHASE', '当前阶段无法投降');
+  // crownBid/pick/setup 均为「尚未实际开局」阶段：投降会凭空产生冠军（3/4人局退化为准座位序）且可刷天梯胜场
+  if (gs.phase === 'crownBid' || gs.phase === 'pick' || gs.phase === 'setup') throw new BloodError('BAD_PHASE', '当前阶段无法投降');
   const p = gs.players.find((x) => x.id === playerId);
   if (!p) throw new BloodError('NO_PLAYER', '玩家不在对局中');
   const others = gs.players.filter((x) => x.id !== playerId);

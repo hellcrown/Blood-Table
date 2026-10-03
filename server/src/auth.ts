@@ -142,6 +142,9 @@ export function initAuthStore(usersPath: string, pointsPath: string, secretPath:
   } catch (e) {
     console.error('[auth] 初始化存储失败（账号功能暂存内存）:', e);
   }
+  // 密钥兜底：加载半途异常会让 secret 保持空串——空密钥 HMAC 等于任何人可自签令牌，必须保证非空
+  // （兜底密钥不落盘：重启后再次生成，旧 token 全失效，属可接受的降安全模式）
+  if (!secret) secret = randomBytes(32).toString('hex');
 }
 
 function appendLine(file: string | null, obj: unknown): void {
@@ -239,11 +242,19 @@ export function login(nameRaw: unknown, passwordRaw: unknown): AuthResult {
   const accountId = byName.get(name.toLowerCase());
   const row = accountId ? byId.get(accountId) : undefined;
   if (!row || !verifyPassword(typeof passwordRaw === 'string' ? passwordRaw : '', row.pw)) {
+    // 对未命中账号同样跑一次 scrypt：抹平「存在/不存在」的响应时序差（防用户枚举）
+    dummyVerify(typeof passwordRaw === 'string' ? passwordRaw : '');
     return { ok: false, code: 'BAD_CREDENTIALS', msg: '昵称或密码错误' };
   }
-  row.lastLogin = Date.now();
-  appendLine(usersFile, row); // 追加最新行（lastLogin 更新，加载时后者覆盖）
+  row.lastLogin = Date.now(); // 仅内存：无消费方读历史 lastLogin，落盘会让 users.jsonl 随每次登录无限增长
   return { ok: true, account: { accountId: row.accountId, name: row.name }, token: issueToken(row.accountId) };
+}
+
+/** 内置哑哈希：登录未命中账号时跑一次等价 scrypt，抹平时序（懒初始化） */
+let dummyHash: string | null = null;
+function dummyVerify(pw: string): boolean {
+  dummyHash ??= hashPassword('dummy-password-for-timing');
+  return verifyPassword(pw, dummyHash);
 }
 
 /** 昵称是否已被注册占用（匿名会话昵称保护用；输入先做同口径清洗） */

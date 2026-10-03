@@ -10,7 +10,9 @@ const NOW = 1000;
 type BCardLike = BCard;
 
 /** 用 bot 决策驱动对局直到目标阶段或终局 */
-function driveBots(gs: BloodState, botIds: string[], until: 'gameover' | BloodState['phase'], maxSteps = 200_000): void {
+function driveBots(gs: BloodState, botIds: string[], until: 'gameover' | BloodState['phase'], maxSteps = 300_000): void {
+  // maxSteps 防的是死循环；全量并行跑测试时其他文件抢 CPU 会使 bot 的 MC 截止时间失效、决策降级出现超长局，
+  // 300k 步给足余量（真死锁仍会被抓住；隔离运行下完整对局数千步即收敛）
   const brains = new Map<string, BotBrain>(botIds.map((id) => [id, createBrain()]));
   let now = NOW;
   let guard = 0;
@@ -89,16 +91,22 @@ describe('血色机器人 · AI 行为', () => {
   it('换牌：保留成对牌，弃孤立低牌', () => {
     const gs = toSwap('clerk', 'clerk');
     const p0 = gs.players[0];
-    // 布置手牌：K 对 + 孤立低牌
+    // 布置手牌：K 对 + 孤立低牌。取牌按「花色使用次数最少优先」：
+    // 若不管花色，6 张可能凑出 5 张同花（cat 5 成手）→ bot 正确停牌而断言失败（既有偶发源）
     const pool = [...p0.draw, ...p0.hand, ...p0.discard, ...p0.setupHand];
     const used = new Set<string>();
+    const suitCount = new Map<string, number>();
     const pick = (r: number): BCardLike => {
-      const found = pool.find((c) => c.r === r && !used.has(c.id));
+      const candidates = pool.filter((c) => c.r === r && !used.has(c.id));
+      candidates.sort((a, b) => (suitCount.get(a.s ?? '') ?? 0) - (suitCount.get(b.s ?? '') ?? 0));
+      const found = candidates[0];
       if (!found) throw new Error(`no rank ${r}`);
       used.add(found.id);
+      suitCount.set(found.s ?? '', (suitCount.get(found.s ?? '') ?? 0) + 1);
       return found;
     };
     const hand = [pick(13), pick(13), pick(5), pick(4), pick(3), pick(2)];
+    // 每花色 ≤2 张 ⇒ 无同花；点数 2,3,4,5,13 ⇒ 无顺子（A 恒 14 无轮子）——整手必为「一对K」以下
     for (const c of hand) if (!used.has(c.id)) used.delete(c.id);
     p0.hand = hand;
     p0.draw = pool.filter((c) => !used.has(c.id));

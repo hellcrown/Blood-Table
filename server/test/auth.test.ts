@@ -242,6 +242,22 @@ describe('天梯榜聚合与个人战绩', () => {
     expect(matchPlayerStats('nobody')).toBeNull(); // 无记录
   });
 
+  it('同账号同局占多座：每行都计入个人战绩（不再漏计）', () => {
+    recordMatch({
+      endedAt: 4000,
+      mode: 'blood',
+      seatCount: 2,
+      winnerSeat: 0,
+      players: [
+        { name: '双开甲', seat: 0, rank: 1, accountId: A, charId: 'clerk', tickets: 24, blood: 6 },
+        { name: '双开甲#2', seat: 1, rank: 2, accountId: A, charId: 'clerk', tickets: 10, blood: 3 },
+      ],
+    });
+    const a2 = matchPlayerStats(A);
+    expect(a2!.games).toBe(5); // 3 局各 1 行 + 双开 1 局 2 行
+    expect(a2!.wins).toBe(2);
+  });
+
   it('昵称清洗与 rooms.cleanName 同口径', () => {
     expect(cleanAccountName('  a\u200bb  ')).toBe('ab'); // 零宽字符剔除
     expect(cleanAccountName(' a  b ')).toBe('a b'); // 连续空白折叠

@@ -375,7 +375,10 @@ export class RoomManager {
     }
     switch (msg.t) {
       case 'bCrownBid':
-        blood.bCrownBid(bs, pid, clampInt(msg.bid, 1, 3, 1), now);
+        // 已出价：静默忽略并直接返回（不落收尾的 wasAuto 清除，防托管标记被迟到的重复消息洗掉；状态无变化无需广播）。
+        // 出价数值不做钳制直传引擎：越界/畸形由引擎统一按 BAD_MSG 拒绝（竞拍是离散选择，拒绝优于静默改值）
+        if (bs.crownBids[pid] != null) return;
+        blood.bCrownBid(bs, pid, msg.bid, now);
         break;
       case 'bPickChar':
         blood.bPickChar(bs, pid, msg.charId, now);
@@ -821,10 +824,15 @@ export class RoomManager {
     // 登录态强制使用账号昵称（防冒名，天梯榜展示一致）；匿名不得占用已注册昵称
     let name = accountId ? (accountName(accountId) ?? cleanName(nameRaw, room.sessions.size + 1)) : cleanName(nameRaw, room.sessions.size + 1);
     const names = new Set([...room.sessions.values()].map((s) => s.name));
+    // 后缀候选同样要避开注册名表：否则匿名者可拿到「小明#2」冒充已注册用户「小明#2」（真号进房反被挤成 #2#2）
     if (names.has(name) || (!accountId && isNameRegistered(name))) {
       let i = 2;
-      while (names.has(`${name.slice(0, 10)}#${i}`)) i++;
-      name = `${name.slice(0, 10)}#${i}`;
+      let cand = `${name.slice(0, 10)}#${i}`;
+      while (names.has(cand) || isNameRegistered(cand)) {
+        i++;
+        cand = `${name.slice(0, 10)}#${i}`;
+      }
+      name = cand;
     }
     let seat = -1;
     if (!spectator) {
@@ -916,7 +924,10 @@ export class RoomManager {
       if (bp) {
         try {
           const now = Date.now();
-          if (bs.phase === 'crownBid' && bs.crownBids[bp.id] == null) blood.bCrownBid(bs, bp.id, 1, now);
+          if (bs.phase === 'crownBid' && bs.crownBids[bp.id] == null) {
+            bp.wasAuto = true; // 与超时托管同口径：非本人出价
+            blood.bCrownBid(bs, bp.id, 1, now);
+          }
           else if (bs.phase === 'pick' && !bp.charId) blood.bPickChar(bs, bp.id, bp.charOptions[0], now);
           else if (bs.phase === 'setup' && bp.setupRound < 2) blood.bSetup(bs, bp.id, [], now);
         } catch {
@@ -1104,6 +1115,8 @@ export class RoomManager {
     }
     target.connected = false;
     this.tokenIndex.delete(target.token); // 被请离者的会话令牌失效，无法自动重回房间
+    // 账号令牌同步除名：否则被踢者可凭 30 天登录令牌经账号重连找回鬼位会话，踢人对登录玩家形同虚设
+    delete target.accountId;
   }
 
   /** 等待界面：已入座玩家进入观战席（释放座位；开局后不可） */
@@ -1445,15 +1458,16 @@ export class RoomManager {
   }
 
   /**
-   * 天梯积分结算（仅血色局）：冠军已注册、且除自己外至少 1 名真人才计分；
+   * 天梯积分结算（仅血色局）：冠军已注册、且除自己外至少 1 名「非同账号」真人才计分；
    * 全机器人局不计分。0 分胜局也落事件（累计胜场）。
    */
   private maybeAwardLadderPoints(room: Room, entry: MatchEntry, durationMin: number | undefined): void {
     try {
       const winner = entry.players[0];
       if (!winner?.accountId) return;
-      const humanRivals = entry.players.filter((p) => p.rank !== 1 && !p.isBot).length;
-      if (humanRivals < 1) return; // 对手全是机器人：不计分
+      // 排除同账号双开占座：否则一人两座即可自己满足「真人对手」条件，单机自刷积分
+      const humanRivals = entry.players.filter((p) => p.rank !== 1 && !p.isBot && p.accountId !== winner.accountId).length;
+      if (humanRivals < 1) return; // 对手全是机器人（或自己的小号座位）：不计分
       const target =
         entry.settings?.targetTickets ?? (entry.seatCount <= 2 ? 24 : entry.seatCount === 3 ? 20 : 16);
       const points = computeLadderPoints(
