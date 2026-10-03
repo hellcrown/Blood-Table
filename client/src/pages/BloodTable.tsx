@@ -2395,7 +2395,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             {view.players.length >= 4 && (
               <div className="result-row"><span className="r-name">🥉 第 3 名</span><span className="r-hand">+1 🎫 +3 🩸</span></div>
             )}
-            <div className="result-row"><span className="r-name">末位（第 {Math.min(3, view.players.length) + 1} 名）</span><span className="r-hand">+4 🩸</span></div>
+            <div className="result-row"><span className="r-name">末位</span><span className="r-hand">+4 🩸</span></div>
             {view.players.length === 2 && (
               <div className="result-row"><span className="r-name">⚡ 速攻</span><span className="r-hand">首夺魁 +1🎫 · 连胜再 +1🎫</span></div>
             )}
