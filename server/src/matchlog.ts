@@ -10,6 +10,8 @@ import path from 'node:path';
 export interface MatchPlayerRow {
   name: string;
   seat: number;
+  /** 注册账号 id（登录态玩家才有；机器人/匿名玩家没有） */
+  accountId?: string;
   /** 名次（1 = 冠军，按 ranking 顺序） */
   rank: number;
   /** 血色模式：角色 id */
@@ -163,6 +165,77 @@ export function matchCharLeaderboard(minGames = 5): CharLeaderRow[] {
 /** 管理端：全部记录（内存副本） */
 export function listMatches(): MatchEntry[] {
   return list.slice();
+}
+
+export interface PlayerMatchRow {
+  endedAt: number;
+  mode: 'blood' | 'classic';
+  durationMin?: number;
+  seatCount: number;
+  rank: number;
+  charId?: string;
+  tickets?: number;
+  blood?: number;
+  chips?: number;
+}
+
+export interface PlayerStats {
+  games: number;
+  wins: number;
+  /** 平均名次（null = 无数据） */
+  avgRank: number | null;
+  /** 分角色统计（按出场次数降序） */
+  chars: CharStat[];
+  /** 最近 10 局（新→旧） */
+  recent: PlayerMatchRow[];
+}
+
+/** 个人战绩：按 accountId 聚合全部落库对局（登录后 /api/auth/me 用） */
+export function matchPlayerStats(accountId: string): PlayerStats | null {
+  let games = 0;
+  let wins = 0;
+  let rankSum = 0;
+  const chars = new Map<string, { games: number; wins: number; rankSum: number }>();
+  const recent: PlayerMatchRow[] = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]!;
+    const pl = m.players.find((p) => p.accountId === accountId);
+    if (!pl) continue;
+    games++;
+    rankSum += pl.rank;
+    if (pl.rank === 1) wins++;
+    if (pl.charId && m.mode === 'blood') {
+      const a = chars.get(pl.charId) ?? { games: 0, wins: 0, rankSum: 0 };
+      a.games++;
+      a.rankSum += pl.rank;
+      if (pl.rank === 1) a.wins++;
+      chars.set(pl.charId, a);
+    }
+    if (recent.length < 10) {
+      recent.push({
+        endedAt: m.endedAt,
+        mode: m.mode,
+        ...(m.durationMin != null ? { durationMin: m.durationMin } : {}),
+        seatCount: m.seatCount,
+        rank: pl.rank,
+        ...(pl.charId ? { charId: pl.charId } : {}),
+        ...(pl.tickets != null ? { tickets: pl.tickets } : {}),
+        ...(pl.blood != null ? { blood: pl.blood } : {}),
+        ...(pl.chips != null ? { chips: pl.chips } : {}),
+      });
+    }
+  }
+  if (games === 0) return null;
+  const charsOut: CharStat[] = [...chars.entries()]
+    .map(([charId, a]) => ({
+      charId,
+      games: a.games,
+      wins: a.wins,
+      winRate: Math.round((a.wins / a.games) * 1000) / 10,
+      avgRank: Math.round((a.rankSum / a.games) * 100) / 100,
+    }))
+    .sort((a, b) => b.games - a.games);
+  return { games, wins, avgRank: Math.round((rankSum / games) * 100) / 100, chars: charsOut, recent };
 }
 
 /** 管理端清空（内存与文件） */

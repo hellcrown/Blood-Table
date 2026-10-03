@@ -142,13 +142,13 @@ export type PlayerAction =
   | PlayerActionAllIn;
 
 export type C2S =
-  | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode; password?: string }
-  | { t: 'join'; name: string; code: string; password?: string }
-  | { t: 'spectate'; name: string; code: string; password?: string }
+  | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode; password?: string; auth?: string }
+  | { t: 'join'; name: string; code: string; password?: string; auth?: string }
+  | { t: 'spectate'; name: string; code: string; password?: string; auth?: string }
   | { t: 'enterSpectate' }
   | { t: 'replaceBot'; seat: number }
   | { t: 'backToRoom' }
-  | { t: 'rejoin'; token: string }
+  | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
   | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string }
@@ -166,7 +166,7 @@ export type C2S =
 /* ---------------- 服务端 → 客户端 ---------------- */
 
 export type S2C =
-  | { t: 'hello'; token: string; playerId: string }
+  | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
   | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView }
   | { t: 'event'; line: LogLine }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }

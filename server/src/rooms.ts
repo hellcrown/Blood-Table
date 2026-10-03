@@ -10,6 +10,7 @@ import type { BloodState } from './blood/types';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
+import { accountName, computeLadderPoints, isNameRegistered, recordLadderEvent, verifyToken } from './auth';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -38,6 +39,8 @@ export interface Session {
   ws: WebSocket | null;
   /** 该会话已收到的事件序号（用于增量推送） */
   lastEventSeq: number;
+  /** 注册账号 id（登录态玩家才有；战绩/天梯积分按此归属，机器人/匿名没有） */
+  accountId?: string;
   /** 服务端机器人（不占用 WebSocket 连接，广播时跳过序列化） */
   bot?: boolean;
   /** 观战者：不占座位、只收视图（seat 恒为 -1） */
@@ -666,10 +669,25 @@ export class RoomManager {
     const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
     if (spectatorCount >= MAX_SPECTATORS) throw new GameError('ROOM_LIMIT', '观战人数已达上限');
     this.detachBinding(ws);
-    const session = this.addSession(room, msg.name, true);
+    const session = this.addSession(room, msg.name, true, this.resolveAccount(msg.auth));
     this.bind(ws, room, session);
-    send(ws, { t: 'hello', token: session.token, playerId: session.id });
+    this.sendHello(ws, session);
     this.broadcast(room);
+  }
+
+  /** 校验客户端携带的账号令牌；无效/缺失一律按匿名处理（匿名即玩不受影响） */
+  private resolveAccount(auth: unknown): string | undefined {
+    return verifyToken(auth)?.accountId;
+  }
+
+  /** 会话问候：登录态附带账号信息（客户端据此展示已登录身份） */
+  private sendHello(ws: WebSocket, session: Session): void {
+    send(ws, {
+      t: 'hello',
+      token: session.token,
+      playerId: session.id,
+      ...(session.accountId ? { account: { id: session.accountId, name: session.name } } : {}),
+    });
   }
 
   private handleCreate(ws: WebSocket, msg: Extract<C2S, { t: 'create' }>): void {
@@ -684,9 +702,9 @@ export class RoomManager {
     const room = this.createRoom(msg.maxPlayers, mode, ip);
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
     if (pw) room.password = pw;
-    const session = this.addSession(room, msg.name);
+    const session = this.addSession(room, msg.name, false, this.resolveAccount(msg.auth));
     this.bind(ws, room, session);
-    send(ws, { t: 'hello', token: session.token, playerId: session.id });
+    this.sendHello(ws, session);
     this.broadcast(room);
   }
 
@@ -715,15 +733,18 @@ export class RoomManager {
       }
     }
     this.detachBinding(ws);
-    const session = this.addSession(room, msg.name);
+    const session = this.addSession(room, msg.name, false, this.resolveAccount(msg.auth));
     this.bind(ws, room, session);
-    send(ws, { t: 'hello', token: session.token, playerId: session.id });
+    this.sendHello(ws, session);
     this.broadcast(room);
   }
 
   private handleRejoin(ws: WebSocket, msg: Extract<C2S, { t: 'rejoin' }>): void {
     this.detachBinding(ws); // 该连接此前绑定的会话先离场清理，防幽灵占座
-    const loc = this.tokenIndex.get(String(msg.token ?? ''));
+    const acc = this.resolveAccount(msg.auth);
+    // 会话 token 优先；查不到时（换设备/换浏览器）回退按账号找活跃会话 → 跨设备回到座位
+    const loc =
+      this.tokenIndex.get(String(msg.token ?? '')) ?? (acc ? this.findSessionByAccount({ accountId: acc }) : undefined);
     if (!loc) throw new GameError('TOKEN_INVALID', '会话已失效，请重新加入');
     const { room, sessionId } = loc;
     const session = room.sessions.get(sessionId);
@@ -742,8 +763,22 @@ export class RoomManager {
     room.pendingRemove.delete(session.id);
     if (!room.hostId && !session.spectator) room.hostId = session.id; // 房主空缺（原房主离开后只剩 bot）时由重连者接任
     this.bind(ws, room, session);
-    send(ws, { t: 'hello', token: session.token, playerId: session.id });
+    this.sendHello(ws, session);
     this.broadcast(room);
+  }
+
+  /** 按账号找活跃会话（跨设备重连）：优先已入座会话，其次观战会话 */
+  private findSessionByAccount(acc: { accountId: string }): { room: Room; sessionId: string } | undefined {
+    let fallback: { room: Room; sessionId: string } | undefined;
+    for (const room of this.rooms.values()) {
+      for (const s of room.sessions.values()) {
+        if (s.bot || s.accountId !== acc.accountId) continue;
+        const loc = { room, sessionId: s.id };
+        if (!s.spectator) return loc;
+        fallback ??= loc;
+      }
+    }
+    return fallback;
   }
 
   private bind(ws: WebSocket, room: Room, session: Session): void {
@@ -779,10 +814,11 @@ export class RoomManager {
     return room;
   }
 
-  private addSession(room: Room, nameRaw: unknown, spectator = false): Session {
-    let name = cleanName(nameRaw, room.sessions.size + 1);
+  private addSession(room: Room, nameRaw: unknown, spectator = false, accountId?: string): Session {
+    // 登录态强制使用账号昵称（防冒名，天梯榜展示一致）；匿名不得占用已注册昵称
+    let name = accountId ? (accountName(accountId) ?? cleanName(nameRaw, room.sessions.size + 1)) : cleanName(nameRaw, room.sessions.size + 1);
     const names = new Set([...room.sessions.values()].map((s) => s.name));
-    if (names.has(name)) {
+    if (names.has(name) || (!accountId && isNameRegistered(name))) {
       let i = 2;
       while (names.has(`${name.slice(0, 10)}#${i}`)) i++;
       name = `${name.slice(0, 10)}#${i}`;
@@ -801,6 +837,7 @@ export class RoomManager {
       connected: true,
       ws: null,
       lastEventSeq: room.game?.logSeq ?? 0,
+      ...(accountId ? { accountId } : {}),
       ...(spectator ? { spectator: true } : {}),
     };
     room.sessions.set(session.id, session);
@@ -1094,6 +1131,7 @@ export class RoomManager {
     this.tokenIndex.delete(oldBotToken);
     bot.token = session.token;
     bot.name = session.name;
+    bot.accountId = session.accountId;
     bot.spectator = false;
     bot.bot = false;
     bot.ws = session.ws;
@@ -1104,7 +1142,7 @@ export class RoomManager {
     if (!room.hostId) room.hostId = bot.id;
     gp.name = bot.name;
     bs.log.push({ seq: ++bs.logSeq, kind: 'action', text: `👋 ${bot.name} 接替机器人入座` });
-    send(session.ws, { t: 'hello', token: bot.token, playerId: bot.id });
+    this.sendHello(session.ws!, bot);
     this.broadcast(room);
   }
 
@@ -1331,7 +1369,7 @@ export class RoomManager {
 
   /* ---------------- 广播 ---------------- */
 
-  /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次） */
+  /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次）；血色局同时结算天梯积分 */
   private maybeRecordFinal(room: Room, g: GState | BloodState | null): void {
     if (!g || room.matchLogged || !('final' in g) || !g.final) return;
     room.matchLogged = true;
@@ -1355,18 +1393,21 @@ export class RoomManager {
         },
         players: g.final.ranking.map((r, i): MatchPlayerRow => {
           const p = g.players.find((x) => x.seat === r.seat);
+          const sess = room.sessions.get(p?.id ?? '');
           return {
             name: r.name,
             seat: r.seat,
             rank: i + 1,
+            ...(sess?.accountId ? { accountId: sess.accountId } : {}),
             ...(p?.charId ? { charId: p.charId } : {}),
             tickets: r.tickets,
             blood: r.blood,
-            isBot: room.sessions.get(p?.id ?? '')?.bot ?? false,
+            isBot: sess?.bot ?? false,
             wasAuto: !!r.wasAuto,
           };
         }),
       };
+      this.maybeAwardLadderPoints(room, entry, durationMin);
     } else {
       const cg = g as GState;
       const final = cg.final!; // 外层守卫已保证非空（as GState 丢失收窄）
@@ -1379,12 +1420,14 @@ export class RoomManager {
         settings: { ...room.settings },
         players: final.ranking.map((r, i): MatchPlayerRow => {
           const p = cg.players.find((x) => x.seat === r.seat);
+          const sess = room.sessions.get(p?.id ?? '');
           return {
             name: r.name,
             seat: r.seat,
             rank: i + 1,
+            ...(sess?.accountId ? { accountId: sess.accountId } : {}),
             chips: r.chips,
-            isBot: room.sessions.get(p?.id ?? '')?.bot ?? false,
+            isBot: sess?.bot ?? false,
             wasAuto: !!r.wasAuto,
           };
         }),
@@ -1394,6 +1437,39 @@ export class RoomManager {
       recordMatch(entry);
     } catch (e) {
       console.error('[room] 对局落库失败:', e);
+    }
+  }
+
+  /**
+   * 天梯积分结算（仅血色局）：冠军已注册、且除自己外至少 1 名真人才计分；
+   * 全机器人局不计分。0 分胜局也落事件（累计胜场）。
+   */
+  private maybeAwardLadderPoints(room: Room, entry: MatchEntry, durationMin: number | undefined): void {
+    try {
+      const winner = entry.players[0];
+      if (!winner?.accountId) return;
+      const humanRivals = entry.players.filter((p) => p.rank !== 1 && !p.isBot).length;
+      if (humanRivals < 1) return; // 对手全是机器人：不计分
+      const target =
+        entry.settings?.targetTickets ?? (entry.seatCount <= 2 ? 24 : entry.seatCount === 3 ? 20 : 16);
+      const points = computeLadderPoints(
+        durationMin ?? 0,
+        winner.tickets ?? 0,
+        entry.players[1]?.tickets ?? 0,
+        target,
+      );
+      recordLadderEvent({
+        accountId: winner.accountId,
+        ts: entry.endedAt,
+        durationMin: durationMin ?? 0,
+        tickets: winner.tickets ?? 0,
+        secondTickets: entry.players[1]?.tickets ?? 0,
+        targetTickets: target,
+        seatCount: entry.seatCount,
+        points,
+      });
+    } catch (e) {
+      console.error('[room] 天梯积分结算失败:', e);
     }
   }
 

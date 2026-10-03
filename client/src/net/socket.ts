@@ -14,11 +14,19 @@ export interface FxEvent {
 }
 type FxListener = (fx: FxEvent) => void;
 
+export interface AccountInfo {
+  id: string;
+  name: string;
+}
+type AccountListener = (a: AccountInfo | null) => void;
+
 const TOKEN_KEY = 'blood.token';
 const NAME_KEY = 'blood.name';
 const LAST_ROOM_KEY = 'blood.lastRoom';
+const AUTH_KEY = 'blood.auth';
 // token 存 sessionStorage：每个标签页独立会话，同浏览器多开互不干扰；刷新仍可恢复
 // lastRoom 存 localStorage：跨标签页/会话保留「最近房间码」，供大厅「回到房间」横幅使用
+// auth 存 localStorage：账号登录令牌（30 天有效），跨标签页/设备共享登录态
 
 export interface LastRoomRef {
   code: string;
@@ -64,6 +72,7 @@ class Net {
   private errorListeners = new Set<ErrorListener>();
   private statusListeners = new Set<StatusListener>();
   private fxListeners = new Set<FxListener>();
+  private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
   private started = false;
@@ -74,6 +83,18 @@ class Net {
   token: string | null = sessionStorage.getItem(TOKEN_KEY);
   playerId: string | null = null;
   status: ConnStatus = 'connecting';
+  /** 账号登录令牌（localStorage 持久；null = 匿名游玩） */
+  authToken: string | null = Net.loadAuthToken();
+  /** 服务端确认的登录身份（hello 下发；null = 匿名或令牌失效） */
+  account: AccountInfo | null = null;
+
+  private static loadAuthToken(): string | null {
+    try {
+      return localStorage.getItem(AUTH_KEY);
+    } catch {
+      return null; // 隐私模式/禁存储
+    }
+  }
 
   start(): void {
     if (this.started) return;
@@ -110,6 +131,12 @@ class Net {
           sessionStorage.setItem(TOKEN_KEY, msg.token);
         } catch {
           /* 隐私模式：token 仅内存持有，刷新需重新加入 */
+        }
+        // 服务端确认（或刷新）登录身份：令牌失效/匿名时为 undefined → 清空本地展示
+        const account = msg.account ?? null;
+        if (account?.id !== this.account?.id || account?.name !== this.account?.name) {
+          this.account = account;
+          this.accountListeners.forEach((l) => l(account));
         }
       } else if (msg.t === 'state') {
         const code = typeof msg.view?.code === 'string' ? msg.view.code : null;
@@ -174,9 +201,49 @@ class Net {
   }
 
   send(msg: C2S): void {
+    // 入房类消息自动携带账号令牌：登录玩家在房内以账号身份记账（战绩/天梯积分）
+    if (
+      this.authToken &&
+      !('auth' in msg) &&
+      (msg.t === 'create' || msg.t === 'join' || msg.t === 'spectate' || msg.t === 'rejoin')
+    ) {
+      (msg as { auth?: string }).auth = this.authToken;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  /* ---------------- 账号登录态 ---------------- */
+
+  saveAuthToken(token: string): void {
+    this.authToken = token;
+    try {
+      localStorage.setItem(AUTH_KEY, token);
+    } catch {
+      /* 隐私模式：仅内存持有 */
+    }
+  }
+
+  clearAuthToken(): void {
+    this.authToken = null;
+    this.setAccount(null);
+    try {
+      localStorage.removeItem(AUTH_KEY);
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  setAccount(a: AccountInfo | null): void {
+    if (a?.id === this.account?.id && a?.name === this.account?.name) return;
+    this.account = a;
+    this.accountListeners.forEach((l) => l(a));
+  }
+
+  onAccount(l: AccountListener): () => void {
+    this.accountListeners.add(l);
+    return () => this.accountListeners.delete(l);
   }
 
   leaveRoom(): void {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { loadLastRoom, net } from '../net/socket';
 import { AdminPanel } from '../components/AdminPanel';
+import { AuthPanel } from '../components/AuthPanel';
 import { CodexModal } from '../components/CodexModal';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { LeaderboardModal } from '../components/LeaderboardModal';
@@ -114,6 +115,9 @@ export function Lobby({ connected }: { connected: boolean }) {
           <small>德州扑克联机</small>
         </h1>
         <p className="subtitle">2-4 人 · 建房后把房间码告诉朋友即可开局</p>
+        <p className="subtitle dim">支持匿名即玩（无需注册）· 注册登录后赢真人局可累积天梯积分上榜</p>
+
+        <AuthPanel />
 
         {lastRoom && (
           <div className="rejoin-banner">
@@ -229,7 +233,7 @@ export function Lobby({ connected }: { connected: boolean }) {
             📖 图鉴
           </button>
           <button className="btn small ghost" onClick={() => setBoardOpen(true)}>
-            🏆 角色胜率榜
+            🏆 排行榜
           </button>
           <button
             className="btn small ghost"

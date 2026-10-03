@@ -4,8 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+import {
+  accountLadder,
+  initAuthStore,
+  ladderBoard,
+  login as authLogin,
+  register as authRegister,
+  verifyToken,
+} from './auth';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
-import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchStats } from './matchlog';
+import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { RoomManager } from './rooms';
 
@@ -168,6 +176,46 @@ function serveStatic(pathname: string, res: http.ServerResponse): void {
 /** 公开角色胜率榜缓存（60s）：防刷同时省去每次全量聚合 */
 let publicStatsCache: { at: number; body: string } | null = null;
 
+/* ---------------- 玩家账号接口限流 ---------------- */
+/** 注册频率：单 IP 10 次/小时（防脚本刷号） */
+const regLimit = new IpTable(
+  () => new SlidingWindow(3600_000, 10),
+  (w, now) => w.idle(now),
+);
+/** 登录尝试频率：单 IP 20 次/10 分钟 */
+const authTryLimit = new IpTable(
+  () => new SlidingWindow(600_000, 20),
+  (w, now) => w.idle(now),
+);
+/** 登录失败锁定：连续 5 次失败锁 60s（与 admin 登录同口径） */
+const authFails = new Map<string, { count: number; until: number }>();
+
+function authBlocked(ip: string): number {
+  const rec = authFails.get(ip);
+  if (!rec) return 0;
+  if (rec.until > 0 && Date.now() >= rec.until) {
+    authFails.delete(ip);
+    return 0;
+  }
+  return rec.until > 0 ? Math.ceil((rec.until - Date.now()) / 1000) : 0;
+}
+
+function recordAuthFail(ip: string): void {
+  const rec = authFails.get(ip) ?? { count: 0, until: 0 };
+  rec.count += 1;
+  if (rec.count >= 5) {
+    rec.until = Date.now() + 60_000;
+    rec.count = 0;
+  }
+  authFails.set(ip, rec);
+}
+
+/** 从 Authorization 头解析 Bearer 令牌并校验账号身份 */
+function authAccount(req: http.IncomingMessage) {
+  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? '');
+  return m ? verifyToken(m[1]) : null;
+}
+
 const manager = new RoomManager();
 
 const server = http.createServer((req, res) => {
@@ -191,6 +239,100 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, rooms: manager.roomCount(), games: manager.countActiveGames(), draining: manager.isDraining() }));
+    return;
+  }
+  if (url.pathname === '/api/stats/ladder' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        board: ladderBoard().slice(0, 50).map(({ accountId, ...row }) => row),
+      }),
+    );
+    return;
+  }
+  if (url.pathname === '/api/auth/register' && req.method === 'POST') {
+    void readBody(req).then((body) => {
+      const send = (code: number, obj: unknown): void => {
+        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(obj));
+      };
+      const ip = clientIp(req);
+      if (!regLimit.get(ip).allow()) {
+        send(429, { ok: false, msg: '注册过于频繁，请 1 小时后再试' });
+        return;
+      }
+      let parsed: { name?: unknown; password?: unknown } = {};
+      try {
+        parsed = JSON.parse(body) as typeof parsed;
+      } catch {
+        /* 忽略解析失败，按空内容处理 */
+      }
+      const r = authRegister(parsed.name, parsed.password);
+      if (!r.ok) {
+        send(r.code === 'NAME_TAKEN' ? 409 : 400, { ok: false, msg: r.msg });
+        return;
+      }
+      send(200, { ok: true, token: r.token, account: r.account });
+    })
+      .catch(() => {
+        /* body 超限已断开连接 */
+      });
+    return;
+  }
+  if (url.pathname === '/api/auth/login' && req.method === 'POST') {
+    void readBody(req).then((body) => {
+      const send = (code: number, obj: unknown): void => {
+        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(obj));
+      };
+      const ip = clientIp(req);
+      const blocked = authBlocked(ip);
+      if (blocked > 0) {
+        send(429, { ok: false, msg: `失败次数过多，请 ${blocked} 秒后再试` });
+        return;
+      }
+      if (!authTryLimit.get(ip).allow()) {
+        send(429, { ok: false, msg: '尝试过于频繁，请稍后再试' });
+        return;
+      }
+      let parsed: { name?: unknown; password?: unknown } = {};
+      try {
+        parsed = JSON.parse(body) as typeof parsed;
+      } catch {
+        /* 忽略解析失败 */
+      }
+      const r = authLogin(parsed.name, parsed.password);
+      if (!r.ok) {
+        recordAuthFail(ip);
+        send(401, { ok: false, msg: r.msg });
+        return;
+      }
+      authFails.delete(ip);
+      send(200, { ok: true, token: r.token, account: r.account });
+    })
+      .catch(() => {
+        /* body 超限已断开连接 */
+      });
+    return;
+  }
+  if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+    const send = (code: number, obj: unknown): void => {
+      res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(obj));
+    };
+    const acc = authAccount(req);
+    if (!acc) {
+      send(401, { ok: false, msg: '未登录或登录已过期' });
+      return;
+    }
+    const ladder = accountLadder(acc.accountId);
+    send(200, {
+      ok: true,
+      account: { id: acc.accountId, name: acc.name },
+      ladder: ladder ?? { points: 0, wins: 0 },
+      stats: matchPlayerStats(acc.accountId),
+    });
     return;
   }
   if (url.pathname === '/api/info') {
@@ -350,6 +492,11 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 initFeedbackStore(path.resolve(process.cwd(), 'data', 'feedback.jsonl'));
 initMatchStore(path.resolve(process.cwd(), 'data', 'matches.jsonl'));
+initAuthStore(
+  path.resolve(process.cwd(), 'data', 'users.jsonl'),
+  path.resolve(process.cwd(), 'data', 'points.jsonl'),
+  path.resolve(process.cwd(), 'data', 'auth-secret'),
+);
 
 // 公网滥用防护：全局并发上限 / 单 IP 并发与新建连接频率
 // 1200 ≈ 千人同时在线余量（1GB 内存实测 1000 连接约占 150-250MB，先于内存见顶的是这个常量）
@@ -368,6 +515,12 @@ setInterval(() => {
   for (const [ip, rec] of loginFails) {
     if (rec.until > 0 && Date.now() >= rec.until) loginFails.delete(ip);
   }
+  // 玩家账号登录失败表同口径清理
+  for (const [ip, rec] of authFails) {
+    if (rec.until > 0 && Date.now() >= rec.until) authFails.delete(ip);
+  }
+  regLimit.prune();
+  authTryLimit.prune();
 }, 5 * 60_000).unref();
 
 wss.on('connection', (ws, req) => {
