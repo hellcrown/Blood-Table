@@ -2189,9 +2189,17 @@ function finishByTickets(
   gs.deadline = null;
   gs.final = {
     winnerSeat: champion.seat,
+    // 冠军恒在首位：winnerSeat 与 ranking 是同一事实的两处表达，必须自洽。
+    // 只按车票排序会出错——皇叔只能靠「删光整副牌」获胜、已被 reached 过滤掉，
+    // 但他的票数可能高于常规冠军，于是名次表首位成了没赢的人，进而污染落库名次、
+    // 天梯积分（取 players[0]）与终局面板的 👑 标记。
     ranking: gs.players
       .slice()
-      .sort((a, b) => b.tickets - a.tickets || b.blood - a.blood || dist(a) - dist(b))
+      .sort((a, b) => {
+        if (a.id === champion.id) return -1;
+        if (b.id === champion.id) return 1;
+        return b.tickets - a.tickets || b.blood - a.blood || dist(a) - dist(b);
+      })
       .map((p) => ({ seat: p.seat, name: p.name, tickets: p.tickets, blood: p.blood, wasAuto: !!p.wasAuto })),
   };
   pushLog(gs, 'sys', `🏆 ${pname(champion)} 集齐 ${champion.tickets} 张车票（目标 ${gs.target}），赢得比赛！`);
@@ -2872,12 +2880,10 @@ function advanceBuyTurn(gs: BloodState, fromSeat: number, now: number): void {
         gs.auction = null;
         if (def) {
           pushLog(gs, 'action', `🔨 ${pname(p)} 获得拍卖得牌【${def.name}】`);
-          if (def.kind === 'chip') {
-            processMarketDef(gs, p, def, true); // 插入决策挂起，解决后推进（该回合的购买机会随插入消耗）
-          } else {
-            p.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
-            pushLog(gs, 'action', `${pname(p)} 将【${def.name}】正面朝上放入道具区`);
-          }
+          // 统一走 processMarketDef：它按 kind 分派（chip 插牌 / item 入道具区 / secret 立即结算）。
+          // 原先只对 chip 调用、其余一律塞道具区，导致拍卖到的秘密交易变成永远用不出去的死牌
+          // （bUseItem / bItemAsk 都不接受它）。
+          processMarketDef(gs, p, def, true);
           return;
         }
       }
@@ -2909,6 +2915,11 @@ function endBuy(gs: BloodState, now: number): void {
       pushLog(gs, 'action', `🔨 ${pname(w)} 购买阶段结束前补发拍卖得牌【${def.name}】`);
       if (def.kind === 'item') {
         w.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
+        pushLog(gs, 'action', `${pname(w)} 将【${def.name}】正面朝上放入道具区`);
+      } else if (def.kind === 'secret') {
+        // 秘密交易必须立即结算：塞进道具区会成为死牌，而被当成强化芯片插到牌上
+        // 更糟——该效果将永远不会被消费（isChipInsertable 对秘密交易返回 true）
+        processMarketDef(gs, w, def, true);
       } else {
         const target = w.discard.find((c) => isChipInsertable(w, c, def));
         if (target) {

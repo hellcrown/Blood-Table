@@ -7,7 +7,7 @@
  * 永远抛 PENDING、被 act() 吞掉，阶段永不推进（线上表现为零推进零广播，只能解散房间）。
  */
 import { describe, expect, it } from 'vitest';
-import { bPassBuy, bloodTick, createBloodGame } from '../src/blood/engine';
+import { bPassBuy, bUseItem, bloodTick, createBloodGame } from '../src/blood/engine';
 import type { BloodState } from '../src/blood/types';
 
 const NOW = 1000;
@@ -114,5 +114,82 @@ describe('批次 A · 局规模按实际开局人数（S6）', () => {
     const gs = createBloodGame(4, [P(0), P(1)], NOW, false, false, { targetTickets: 12 });
     expect(gs.seatCount).toBe(2);
     expect(gs.target).toBe(12);
+  });
+});
+
+describe('批次 A · 终局冠军与名次表必须自洽（S7）', () => {
+  /**
+   * 皇叔只能靠「删光整副 54 张」获胜，因此常规胜利判定会把他排除（reached 里过滤 liu）。
+   * 此时他的车票可能高于常规冠军 —— 名次表若只按车票排序，第一位就不是冠军，
+   * 而落库（rank i+1）、天梯积分（取 players[0]）、终局面板（i===0 加👑）全部读的是名次表。
+   */
+  function reachSettleWithLiuAhead(): BloodState {
+    const gs = make2p();
+    gs.players[0].charId = 'liu';
+    gs.players[1].charId = 'dealer';
+    gs.phase = 'reveal';
+    gs.turnSeat = 0;
+    gs.privilegeSeat = 0;
+    // 牌面必须**显式指定**：newPlayerDeck 洗过牌，从牌堆前 5 张取材会让夺魁者随机、
+    // 用例随之变成偶发失败（花色交错是为了避免意外凑成同花）
+    const deal = (p: (typeof gs.players)[number], ranks: number[], suits: ('s' | 'h' | 'c' | 'd')[]): void => {
+      p.play = p.draw.splice(0, 5);
+      p.play.forEach((c, i) => {
+        c.r = ranks[i];
+        c.s = suits[i];
+      });
+    };
+    deal(gs.players[0], [2, 2, 4, 5, 6], ['s', 'h', 's', 'h', 's']); // 一对
+    deal(gs.players[1], [9, 9, 8, 8, 7], ['s', 'h', 's', 'h', 's']); // 两对（稳胜）
+    gs.players[0].tickets = 30; // 皇叔票数领先（结算后仍高于夺冠者的 22+4 名次票+1 抢跑票）
+    gs.players[1].tickets = 22; // 结算再拿名次票即达标（2 人局目标 24）
+    gs.deadline = NOW + 60_000;
+    return gs;
+  }
+
+  it('皇叔票数领先但由对手达标：winnerSeat 与名次表首位必须是同一人', () => {
+    const gs = reachSettleWithLiuAhead();
+    // p0 宣告完毕 → 窗口交给 p1；p1 无事可宣告时引擎会自动结算，故第二步需要判断阶段
+    bUseItem(gs, 'p0', null, NOW);
+    if (gs.phase === 'reveal') bUseItem(gs, 'p1', null, NOW);
+    expect(gs.final).not.toBeNull();
+    expect(gs.final!.winnerSeat).toBe(1); // 对手达标夺魁
+    expect(gs.final!.ranking[0].seat).toBe(gs.final!.winnerSeat);
+  });
+});
+
+describe('批次 A · 拍卖得牌按类型正确落地（S8）', () => {
+  it('拍到秘密交易：必须结算效果，不能塞进道具区变成死牌', () => {
+    const gs = make2p();
+    gs.phase = 'buy';
+    gs.turnSeat = 0;
+    gs.privilegeSeat = 0;
+    for (const p of gs.players) p.buyPassed = false;
+    gs.auction = { defId: 'poison', highestBy: 'p1', highest: 3 };
+    gs.deadline = NOW + 60_000;
+
+    bPassBuy(gs, 'p0', NOW); // 轮到 p1 的购买回合 → 发放拍卖得牌
+
+    const p1 = gs.players[1];
+    expect(p1.items.some((i) => i.def === 'poison')).toBe(false);
+  });
+
+  it('拍到秘密交易且得牌者已跳过购买：补发时同样按秘密交易结算', () => {
+    const gs = make2p();
+    gs.phase = 'buy';
+    gs.turnSeat = 0;
+    gs.privilegeSeat = 0;
+    gs.players[0].buyPassed = false;
+    gs.players[1].buyPassed = true; // 得牌者本回合不再购买 → 走 endBuy 补发
+    // 给出合法芯片宿主：否则补发路径会因「无合法宿主」退款弃置，掩盖真正的缺陷
+    gs.players[1].discard = gs.players[1].draw.splice(0, 2);
+    gs.auction = { defId: 'poison', highestBy: 'p1', highest: 3 };
+    gs.deadline = NOW + 60_000;
+
+    bPassBuy(gs, 'p0', NOW); // 全员跳过 → endBuy → 补发
+
+    const p1 = gs.players[1];
+    expect(p1.items.some((i) => i.def === 'poison')).toBe(false);
+    expect(p1.chips.some((c) => c.def === 'poison')).toBe(false); // 秘密交易不得被当成芯片插牌
   });
 });
