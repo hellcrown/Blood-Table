@@ -169,6 +169,11 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
       return p.sdSeen ? { k: 'wait' } : { k: 'sdConfirm' };
     case 'buy': {
       const pend = gs.secretPending;
+      // 别人的抉择未结清时，轮到本回合的玩家不该看到「购买 / 跳过购买」：
+      // 这一刻任何购买动作都会被引擎按 PENDING 拒绝，人类看到的是原始错误
+      //「其他玩家的结算尚未完成，请稍候」，bot 则每 600ms 重试刷一条「决策异常（回退托管）」告警。
+      // 与引擎闸门口径对齐：挂起存在且不属于本人 → 等待。
+      if (pend && pend.seat !== p.id) return { k: 'wait' };
       if (pend && pend.seat === p.id) {
         if (pend.kind === 'insertChip') return { k: 'insertChip', defId: pend.defId };
         if (pend.kind === 'deleteUpTo') return { k: 'secretDelete', max: pend.max ?? 0 };

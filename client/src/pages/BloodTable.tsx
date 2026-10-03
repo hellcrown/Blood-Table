@@ -2001,34 +2001,44 @@ export function BloodTable({ view }: { view: BloodView }) {
                     </button>
                   </div>
                 )}
-                {view.prompt.k === 'fryerDel' && (
-                  <>
-                    <div className="my-hand">
-                      {(view.me.playCards ?? []).map((c) => (
-                        <div key={c.id} className="hand-cell">
-                          {/* 预算 = min(剩余次数, 血筹)：超预算点击必报 TOO_MANY/NO_BLOOD，禁点并给提示 */}
-                          <BCard
-                            c={c}
-                            size="lg"
-                            onClick={
-                              view.me.blood >= 1 && (view.prompt.max ?? 3) >= 1
-                                ? () => send({ t: 'bFryerDel', cardIds: [c.id], done: false })
-                                : undefined
-                            }
-                          />
+                {view.prompt.k === 'fryerDel' &&
+                  (() => {
+                    // 牌源不能取 view.me.playCards：引擎在挂起 fryerDel **之前**就把出牌区并入了弃牌区
+                    // （engine: p.discard.push(...p.play); p.play = []），于是面板恒为空、技能只能放弃。
+                    // 结算结果里保留着本座位这一行打出的牌，与自己的弃牌区相交即服务端校验的
+                    //「本回合打出的牌 ∩ 弃牌堆」，重连后也能恢复。
+                    const mine = new Set((view.me.discard ?? []).map((c) => c.id));
+                    const row = (view.result?.rows ?? []).find((r) => r.seat === view.me.seat);
+                    const cards = (row?.cards ?? []).filter((c) => mine.has(c.id));
+                    return (
+                      <>
+                        <div className="my-hand">
+                          {cards.map((c) => (
+                            <div key={c.id} className="hand-cell">
+                              {/* 预算 = min(剩余次数, 血筹)：超预算点击必报 TOO_MANY/NO_BLOOD，禁点并给提示 */}
+                              <BCard
+                                c={c}
+                                size="lg"
+                                onClick={
+                                  view.me.blood >= 1 && (view.prompt.max ?? 3) >= 1
+                                    ? () => send({ t: 'bFryerDel', cardIds: [c.id], done: false })
+                                    : undefined
+                                }
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                    <div className="act-row">
-                      <span className="hint">
-                        剩余可删 {Math.min(view.prompt.max ?? 3, view.me.blood)} 张（每张 1🩸）
-                      </span>
-                      <button className="btn" onClick={() => send({ t: 'bFryerDel', cardIds: [], done: true })}>
-                        结束删牌
-                      </button>
-                    </div>
-                  </>
-                )}
+                        <div className="act-row">
+                          <span className="hint">
+                            剩余可删 {Math.min(view.prompt.max ?? 3, view.me.blood)} 张（每张 1🩸）
+                          </span>
+                          <button className="btn" onClick={() => send({ t: 'bFryerDel', cardIds: [], done: true })}>
+                            结束删牌
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 {view.prompt.k === 'curseTake' && (
                   <>
                     <div className="my-hand">

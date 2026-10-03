@@ -165,7 +165,7 @@ describe('批次 A · 拍卖得牌按类型正确落地（S8）', () => {
     gs.turnSeat = 0;
     gs.privilegeSeat = 0;
     for (const p of gs.players) p.buyPassed = false;
-    gs.auction = { defId: 'poison', highestBy: 'p1', highest: 3 };
+    gs.auction = { defId: 'poison', highest: 3, highestBy: 'p1', queue: [], by: 'p0' };
     gs.deadline = NOW + 60_000;
 
     bPassBuy(gs, 'p0', NOW); // 轮到 p1 的购买回合 → 发放拍卖得牌
@@ -183,7 +183,7 @@ describe('批次 A · 拍卖得牌按类型正确落地（S8）', () => {
     gs.players[1].buyPassed = true; // 得牌者本回合不再购买 → 走 endBuy 补发
     // 给出合法芯片宿主：否则补发路径会因「无合法宿主」退款弃置，掩盖真正的缺陷
     gs.players[1].discard = gs.players[1].draw.splice(0, 2);
-    gs.auction = { defId: 'poison', highestBy: 'p1', highest: 3 };
+    gs.auction = { defId: 'poison', highest: 3, highestBy: 'p1', queue: [], by: 'p0' };
     gs.deadline = NOW + 60_000;
 
     bPassBuy(gs, 'p0', NOW); // 全员跳过 → endBuy → 补发

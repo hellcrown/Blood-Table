@@ -1216,13 +1216,22 @@ function chipEffectsFor(p: BPlayer, ch: ChipInst): BloodEffect[] {
 
 /** 亮牌决策队列：弹出当前决策并挂起下一条；队列空则推进窗口 */
 /** 防护屏障：受害者持有屏障则消耗并进入询问窗口，返回 true 表示已拦截 */
-function tryBarrierAsk(gs: BloodState, defenderId: string, attackerId: string, eff: BarrierEffect): boolean {
+function tryBarrierAsk(
+  gs: BloodState,
+  defenderId: string,
+  attackerId: string,
+  eff: BarrierEffect,
+  now: number,
+): boolean {
   const d = gs.players.find((x) => x.id === defenderId)!;
   const barrier = d.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'barrierFx');
   if (!barrier) return false;
-  d.items = d.items.filter((i) => i.id !== barrier.id);
-  gs.recycle.push(barrier.def);
+  // 卡面「取消即将对你使用的效果」+ 规则书「之后可使用一次，用后弃入回收站」：
+  // 只有真正发动才消耗。此前在这里就移出道具并回收，导致「选择不使用」也白丢一张屏障。
   gs.secretPending = { seat: defenderId, kind: 'barrierAsk', barrier: eff, eff: barrierText(gs, eff) };
+  // 反制窗口必须给防御者完整时限：原先沿用发起者回合的旧 deadline，攻击者在回合末段发动时
+  // 受害者的倒计时只剩几秒，下一次 tick 立刻按「不发动」托管 —— 面板一闪而过、道具又白扣。
+  gs.deadline = now + BLOOD_TURN_MS;
   pushLog(gs, 'action', `【防护屏障】${pname(d)} 可以抵消该效果`);
   return true;
 }
@@ -1243,9 +1252,20 @@ function resolveBarrier(gs: BloodState, use: boolean, now: number): void {
   if (!pend || pend.kind !== 'barrierAsk' || !pend.barrier) return;
   const eff = pend.barrier;
   const attacker = gs.players.find((x) => x.id === eff.by)!;
+  const defender = gs.players.find((x) => x.id === pend.seat);
   gs.secretPending = null;
   if (use) {
-    pushLog(gs, 'action', `【防护屏障】${pname(attacker)} 的效果被抵消（费用不退）`);
+    // 发动才消耗：从防御者道具区取出并弃入回收站
+    const barrier = defender?.items.find((i) => BLOOD_MARKET_BY_ID.get(i.def)?.effect.k === 'barrierFx');
+    if (barrier && defender) {
+      defender.items = defender.items.filter((i) => i.id !== barrier.id);
+      gs.recycle.push(barrier.def);
+      pushLog(gs, 'action', `【防护屏障】${pname(attacker)} 的效果被抵消（费用不退）`);
+    } else {
+      // 异常路径：屏障在窗口内已不在手上（理论上不可达）——不做「空手抵消」，按生效处理
+      pushLog(gs, 'action', '【防护屏障】已不在手中，效果生效');
+      applyBarrierEffect(gs, eff, now);
+    }
   } else {
     pushLog(gs, 'action', `【防护屏障】未发动，效果生效`);
     applyBarrierEffect(gs, eff, now);
@@ -2788,7 +2808,7 @@ export function bViolent(gs: BloodState, playerId: string, targetSeat: number, n
   // 防护屏障询问（对自己发动不触发）
   if (target.id !== p.id) {
     const eff: BarrierEffect = { t: 'violent', by: p.id, seat: target.id, after: 'market' };
-    if (tryBarrierAsk(gs, target.id, p.id, eff)) return;
+    if (tryBarrierAsk(gs, target.id, p.id, eff, now)) return;
   }
   const top = target.draw.splice(-3, 3);
   target.removed.push(...top);
@@ -3041,11 +3061,15 @@ function checkLiuWin(gs: BloodState, p: BPlayer, now: number): void {
 }
 
 export function bRemoveDone(gs: BloodState, playerId: string, now: number): void {
-  void now;
   if (gs.phase !== 'remove') throw new BloodError('BAD_PHASE', '不在删牌阶段');
   const p = gs.players.find((x) => x.id === playerId)!;
   if (p.removeDone) return;
   if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成当前角色技能抉择');
+  // 皇叔的宿命胜利挂在「任何时候」：第 54 张牌可能是被别的路径删掉的（廉价删除/精准删除/
+  // 炸鸡店老板/清洁工/枪手·自毁·炸弹客结算删牌），此后玩家只能点「跳过删牌」——
+  // 若这里不判胜，一个只能靠删光整副牌获胜的角色会永远错失胜利。
+  checkLiuWin(gs, p, now);
+  if (gs.phase !== 'remove') return; // 已达成宿命胜利
   p.removeDone = true;
   p.lastAction = '跳过删牌';
   pushLog(gs, 'action', `${pname(p)} 跳过删牌`);
@@ -3677,7 +3701,7 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
   const effKind = barrierMap[pend.kind];
   if (effKind) {
     const eff: BarrierEffect = { t: effKind, by: p.id, seat: t.id, after: pend.kind === 'signalTarget' ? 'none' : 'market' };
-    if (tryBarrierAsk(gs, t.id, p.id, eff)) return; // 进入反制询问窗口
+    if (tryBarrierAsk(gs, t.id, p.id, eff, now)) return; // 进入反制询问窗口
   }
   switch (pend.kind) {
     case 'poisonTarget': {
@@ -3731,7 +3755,7 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
     case 'demagTarget': {
       // 防护屏障询问（消磁枪单独指向）
       const eff: BarrierEffect = { t: 'demag', by: p.id, seat: t.id, after: 'reveal' };
-      if (tryBarrierAsk(gs, t.id, p.id, eff)) return;
+      if (tryBarrierAsk(gs, t.id, p.id, eff, now)) return;
       const chips = t.chips.filter((ch) => t.play.some((card) => card.id === ch.on) && !ch.off);
       if (chips.length === 0) {
         gs.recycle.push(pend.defId ?? 'demag');
@@ -3798,7 +3822,7 @@ export function bPinpoint(gs: BloodState, playerId: string, seat: number, rank: 
   if (!Number.isInteger(rank) || rank < 2 || rank > 14) throw new BloodError('BAD_TARGET', '点数无效');
   // 防护屏障询问
   const eff: BarrierEffect = { t: 'pinpoint', by: p.id, seat: t.id, rank, after: 'market' };
-  if (tryBarrierAsk(gs, t.id, p.id, eff)) return;
+  if (tryBarrierAsk(gs, t.id, p.id, eff, now)) return;
   const matches = t.discard.filter((c) => finalRank(t, c) === rank);
   if (matches.length === 0) {
     pushLog(gs, 'action', `【定点爆破】${pname(t)} 公示弃牌堆：没有 ${rank} 点的牌，效果落空`);

@@ -450,6 +450,15 @@ function stratKeepWeight(c: BCard, strat: Strat): number {
   }
 }
 
+/**
+ * 「先删最差」排序用的取值：点数越小越差，但**王（r=0）绝不能当最小牌删掉**——
+ * 它在对决阶段可视为任意点数与花色，是本作灵活度最高的牌。
+ * 直接按 r 升序会让黑客的初始构筑必删自己两张王、精准删除也优先删掉抽到的王。
+ */
+function worstFirstValue(c: { r: number }): number {
+  return c.r === 0 ? 20 : c.r;
+}
+
 /** 芯片可插入的弃牌区目标（无芯片、点数合法、非 JOKER 限制、排除零增益目标）；有策略时优先服务策略目标 */
 function insertableTarget(gs: BloodState, p: BPlayer, defId: string, strat?: Strat): BCard | null {
   const def = BLOOD_MARKET_BY_ID.get(defId);
@@ -725,7 +734,10 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return false;
     }
     case 'preciseDel': {
-      const drawn = (prompt.cards ?? []).slice().sort((a, b) => a.r - b.r).slice(0, 2);
+      const drawn = (prompt.cards ?? [])
+        .slice()
+        .sort((a, b) => worstFirstValue(a) - worstFirstValue(b))
+        .slice(0, 2);
       blood.bPreciseDel(gs, p.id, drawn.map((c) => c.id), now);
       return true;
     }
@@ -861,7 +873,10 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
       return true;
     }
     case 'hackerSetup': {
-      const cards = (prompt.cards ?? []).slice().sort((a, b) => a.r - b.r).slice(0, 8);
+      const cards = (prompt.cards ?? [])
+        .slice()
+        .sort((a, b) => worstFirstValue(a) - worstFirstValue(b))
+        .slice(0, 8);
       blood.bHackerSetup(gs, p.id, cards.map((c) => c.id), now);
       return true;
     }
@@ -1158,17 +1173,20 @@ function actRevealDecide(gs: BloodState, p: BPlayer, t: string | undefined, chip
     else blood.bSkipDecision(gs, p.id, now);
     return true;
   }
-  // 复制/屏蔽：选对手最贵的芯片
+  // 复制/屏蔽：选对手最贵的芯片。引擎只禁止「复制」双生镜片，对「屏蔽」它是合法目标
+  //（因此不能一律排除 twinLens：对手最贵的芯片几乎总是双生镜片，一律跳过会让屏蔽器形同不存在）
+  const allowTwinLens = t === 'shield';
   let best: { seat: number; cardId: string; defId: string; cost: number } | null = null;
   for (const o of opponentsOf(gs, p)) {
     for (const c of o.play) {
       for (const ch of o.chips.filter((x) => x.on === c.id && !x.off)) {
+        if (!allowTwinLens && ch.def === 'twinLens') continue;
         const cost = BLOOD_MARKET_BY_ID.get(ch.def)?.cost ?? 0;
         if (!best || cost > best.cost) best = { seat: o.seat, cardId: c.id, defId: ch.def, cost };
       }
     }
   }
-  if (best && best.defId !== 'twinLens') {
+  if (best) {
     blood.bRevealChipTarget(gs, p.id, best.seat, best.cardId, best.defId, now);
   } else {
     blood.bSkipDecision(gs, p.id, now);
@@ -1213,7 +1231,9 @@ function topSeenRank(brain: BotBrain, seat: number): number | null {
     if (!m) continue;
     const idx = Number(m[1]);
     if (idx >= 52) continue; // 大小王无点数
-    const r = 2 + Math.floor(idx / 4);
+    // 牌堆布局（engine.newPlayerDeck）：外层花色、内层点数 2..14，故每 13 张为一组花色
+    // —— 换算必须是 idx % 13；写成 floor(idx / 4) 会让宣称点数几乎必错，定点爆破永远落空
+    const r = 2 + (idx % 13);
     counts.set(r, (counts.get(r) ?? 0) + 1);
   }
   let best: { r: number; n: number } | null = null;
