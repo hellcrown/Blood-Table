@@ -9,6 +9,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const PORT = 3179;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -92,5 +94,24 @@ describe('批次 C · HTTP 接入层', () => {
     const r = await fetchWithTimeout('/ABCD');
     expect(r.status).toBe(200);
     expect(r.headers.get('content-type')).toContain('text/html');
+  });
+
+  it('纯前端发版（只换 dist、不重启服务）后 /api/version 立刻报出新构建标识', async () => {
+    // 构建标识是**部署状态**而不是进程状态：若在启动时读一次就缓存，纯前端发版后客户端会把自己
+    // 误判为旧包 —— 弹出「新版本已发布」而刷新无效（横幅永远消不掉，实测踩过）。
+    // 这里直接改磁盘上的 client/dist/index.html 模拟该场景（finally 保证还原，且断言已还原）。
+    const p = path.join(process.cwd(), '..', 'client', 'dist', 'index.html');
+    const original = fs.readFileSync(p, 'utf8');
+    try {
+      await new Promise((r) => setTimeout(r, 10)); // 避开 mtime 的同毫秒粒度
+      const fake = original.replace(/index-[A-Za-z0-9_-]+\.js/, 'index-FAKEBUILD.js');
+      expect(fake).not.toBe(original); // 替换必须真的发生，否则用例形同虚设
+      fs.writeFileSync(p, fake);
+      const j = (await (await fetchWithTimeout('/api/version')).json()) as { build?: string };
+      expect(j.build).toBe('index-FAKEBUILD.js');
+    } finally {
+      fs.writeFileSync(p, original);
+    }
+    expect(fs.readFileSync(p, 'utf8')).toBe(original); // 不得污染仓库
   });
 });

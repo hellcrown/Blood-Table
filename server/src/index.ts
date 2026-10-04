@@ -28,15 +28,25 @@ const CLIENT_DIST = path.resolve(process.cwd(), '../client/dist');
  * 页面用 import.meta.url 拿到自己的构建标识，两者不等即说明页面是旧包 —— 比"更新日志日期"
  * 精确得多（同一日内多次发版也认得出，而最近 30 个提交里 21 个根本没动更新日志）。
  * 读不到（未构建 / 老部署）时为 null，客户端自动回退到日期口径。
+ *
+ * **必须按磁盘现状读，不能在启动时读一次就缓存**：构建标识是**部署状态**而不是进程状态。
+ * 纯前端发版（只换 client/dist、不重启服务）时若仍报旧标识，客户端会把自己判成旧包，
+ * 弹出"新版本已发布"而刷新无效（永远消不掉）。按 mtime 缓存以省去每次请求的读盘。
  */
-const BUILD_ID: string | null = (() => {
+let buildIdCache: { mtimeMs: number; id: string | null } | null = null;
+function currentBuildId(): string | null {
   try {
-    const html = fs.readFileSync(path.join(CLIENT_DIST, 'index.html'), 'utf8');
-    return /assets\/(index-[A-Za-z0-9_-]+\.js)/.exec(html)?.[1] ?? null;
+    const p = path.join(CLIENT_DIST, 'index.html');
+    const mtimeMs = fs.statSync(p).mtimeMs;
+    if (!buildIdCache || buildIdCache.mtimeMs !== mtimeMs) {
+      const html = fs.readFileSync(p, 'utf8');
+      buildIdCache = { mtimeMs, id: /assets\/(index-[A-Za-z0-9_-]+\.js)/.exec(html)?.[1] ?? null };
+    }
+    return buildIdCache.id;
   } catch {
     return null;
   }
-})();
+}
 /** 管理员密钥（环境变量 ADMIN_KEY；未设置时管理员功能停用） */
 const ADMIN_KEY = process.env.ADMIN_KEY ?? '';
 /** 管理员会话 token → 过期时间（24h） */
@@ -308,7 +318,7 @@ const server = http.createServer((req, res) => {
       JSON.stringify({
         ok: true,
         latest: LATEST ? { date: LATEST.date, title: LATEST.title } : null,
-        build: BUILD_ID,
+        build: currentBuildId(),
         total: CHANGELOG.length,
       }),
     );
