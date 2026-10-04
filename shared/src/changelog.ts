@@ -22,6 +22,14 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-04',
+    title: '塔罗师手感优化',
+    items: [
+      '塔罗师换牌不再「先选牌再合并确认」：点「先抽 1/2 张」立即到手（金色高亮），看完新牌后再点选要弃置的牌（0-2 张）一键完成',
+      '顺手修好一个老问题：塔罗师先抽的牌面不再出现在牌局记录里（此前全桌都能看到你抽了什么）',
+    ],
+  },
+  {
     date: '2026-10-03',
     title: '新版本提示',
     items: [

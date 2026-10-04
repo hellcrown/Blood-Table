@@ -264,6 +264,8 @@ export interface BloodView {
     firstBuyUsed?: boolean;
     /** 魏王：本回合是否已购买过黑市牌（客户端计算实付价用） */
     boughtAny?: boolean;
+    /** 塔罗师分步换牌：本步已「先抽」的牌 id（高亮显示；空 = 不在先抽后的弃置步） */
+    swapDrawnIds: string[];
   };
   prompt: BloodMyPrompt;
 }
@@ -275,6 +277,7 @@ export type BloodAction =
   | { t: 'bPickChar'; charId: string }
   | { t: 'bSetup'; removed: string[] }
   | { t: 'bSwap'; cardIds: string[]; drawCount?: number }
+  | { t: 'bSwapDraw'; count: number }
   | { t: 'bSwapStop' }
   | { t: 'bPlay'; cardIds: string[] }
   | { t: 'bUseItem'; itemId: string | null }

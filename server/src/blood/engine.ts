@@ -148,6 +148,7 @@ export function createBloodGame(
       privilege: false,
       swapLeft: 0,
       swapDone: false,
+      swapDrawnIds: [],
       locked: false,
       buyPassed: false,
       removeDone: false,
@@ -639,6 +640,7 @@ function finishDrawPhase(gs: BloodState, now: number): void {
     }
     if (effChar(p) === 'bartender') swapBase += 1;
     p.swapLeft = swapBase;
+    p.swapDrawnIds = []; // 新回合：塔罗师分步换牌的暂存抽牌清空
     // 换牌次数被投毒到 0：直接视为已完成换牌，不给「剩 0 次仍可换一组」的漏洞
     p.swapDone = swapBase <= 0;
     if (p.swapDone) {
@@ -705,9 +707,15 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
   if (p.swapLeft <= 0) throw new BloodError('NO_SWAP', '没有剩余换牌次数');
   const tarot = effChar(p) === 'tarot';
-  // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）；drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）
+  // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）；drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）。
+  // 分步流程（bSwapDraw 已先抽）进入弃置步：不允许再抽，弃置完成时消耗本次换牌
   const dc = Number(drawCount ?? 0);
-  const draw = tarot && Number.isFinite(dc) ? Math.max(0, Math.min(2, Math.floor(dc))) : 0;
+  let draw = tarot && Number.isFinite(dc) ? Math.max(0, Math.min(2, Math.floor(dc))) : 0;
+  const staged = tarot && p.swapDrawnIds.length > 0;
+  if (staged && draw > 0) {
+    throw new BloodError('BAD_MSG', '已先抽牌：点选手牌弃置（0-2 张）完成本次换牌');
+  }
+  if (staged) draw = 0;
   const maxN = Math.min(tarot ? 2 : charSwapMax(effChar(p)), p.hand.length + draw);
   if (cardIds.length > maxN) {
     throw new BloodError('TOO_MANY', tarot ? '塔罗师每次换牌最多弃置2张' : effChar(p) === 'idol' ? '弃置张数不能超过手牌数' : '每次换牌最多弃置3张');
@@ -719,10 +727,12 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   if (draw > 0) {
     const drawn = drawN(gs, p, draw);
     p.hand.push(...drawn);
-    pushLog(gs, 'action', `${pname(p)}【塔罗师】先抽牌：${drawn.map(bloodCardText).join(' ') || '（牌库已空）'}`);
+    // 手牌私有：只记张数（牌面进日志等于公示给全桌）
+    pushLog(gs, 'action', `${pname(p)}【塔罗师】先抽 ${drawn.length} 张`);
   }
   p.hand = p.hand.filter((c) => !set.has(c.id));
   p.discard.push(...discardCards);
+  p.swapDrawnIds = []; // 弃置步完成（或合体路径）：暂存抽牌清空
 
   // 特级大厨：换牌阶段每弃置1张【3】获得1血筹
   const chefThrees = discardCards.filter((c) => finalRank(p, c) === 3).length;
@@ -761,6 +771,29 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
     afterSwapEnded(gs, p, now);
   }
   checkSwapEnd(gs, now);
+}
+
+/**
+ * 塔罗师分步换牌·第一步「先抽」：立即抽 1-2 张入手（不弃牌、不消耗换牌次数、不补至上限）。
+ * 抽完进入弃置步——客户端点选手牌（0-2 张）后发 bSwap{drawCount:0} 完成本次换牌；
+ * 或 bSwapStop 保留抽到的牌并计一次换牌。抽到的牌 id 存 swapDrawnIds 供视图高亮。
+ */
+export function bSwapDraw(gs: BloodState, playerId: string, count: number, now: number): void {
+  void now;
+  if (gs.phase !== 'swap') throw new BloodError('BAD_PHASE', '不在换牌阶段');
+  const p = gs.players.find((x) => x.id === playerId)!;
+  if (gs.secretPending && gs.secretPending.seat === p.id) throw new BloodError('PENDING', '先完成当前角色技能抉择');
+  if (effChar(p) !== 'tarot') throw new BloodError('BAD_TIMING', '仅塔罗师可先抽牌');
+  if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
+  if (p.swapLeft <= 0) throw new BloodError('NO_SWAP', '没有剩余换牌次数');
+  if (p.swapDrawnIds.length > 0) throw new BloodError('PENDING', '已先抽过：点选手牌弃置完成本次换牌');
+  const n = Math.floor(Number(count));
+  if (!Number.isFinite(n) || n < 1 || n > 2) throw new BloodError('BAD_MSG', '先抽数量须为 1-2');
+  const drawn = drawN(gs, p, n);
+  p.hand.push(...drawn);
+  p.swapDrawnIds = drawn.map((c) => c.id);
+  // 手牌私有：只记张数（牌面进日志等于公示给全桌）
+  pushLog(gs, 'action', `${pname(p)}【塔罗师】先抽 ${drawn.length} 张：点选手牌弃置完成本次换牌`);
 }
 
 /** 宣告换牌结束（停止或次数用尽）：白蔷薇判定首位 */
@@ -867,6 +900,13 @@ export function bSwapStop(gs: BloodState, playerId: string, now: number): void {
     throw new BloodError('PENDING', '先完成当前角色技能抉择');
   }
   if (p.swapDone) return;
+  // 塔罗师已先抽未弃：停止换牌则抽到的牌保留、该次换牌照常计次（否则可白嫖多看 2 张不付费）
+  if (p.swapDrawnIds.length > 0) {
+    p.swapDrawnIds = [];
+    drawToCap(gs, p);
+    p.swapLeft = Math.max(0, p.swapLeft - 1);
+    pushLog(gs, 'action', `${pname(p)} 保留先抽的牌，计入一次换牌`);
+  }
   p.swapDone = true;
   p.lastAction = '停止换牌';
   pushLog(gs, 'action', `${pname(p)} 停止换牌`);

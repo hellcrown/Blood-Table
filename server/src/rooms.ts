@@ -407,6 +407,9 @@ export class RoomManager {
       case 'bSwap':
         blood.bSwap(bs, pid, strArr(msg.cardIds), (msg as { drawCount?: number }).drawCount, now);
         break;
+      case 'bSwapDraw':
+        blood.bSwapDraw(bs, pid, (msg as { count?: number }).count ?? 0, now);
+        break;
       case 'bSwapStop':
         blood.bSwapStop(bs, pid, now);
         break;

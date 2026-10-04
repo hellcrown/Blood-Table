@@ -62,6 +62,8 @@ export interface BPlayer {
   privilege: boolean;
   swapLeft: number;
   swapDone: boolean;
+  /** 塔罗师分步换牌：本步已「先抽」的牌 id（弃置步完成或停止时清空；空 = 尚未先抽） */
+  swapDrawnIds: string[];
   locked: boolean;
   buyPassed: boolean;
   removeDone: boolean;

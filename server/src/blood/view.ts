@@ -370,6 +370,7 @@ export function buildBloodView(
           setupHand: me.setupHand.map((c) => cardView(c, me)),
           items: myItems,
           swapLeft: me.swapLeft,
+          swapDrawnIds: me.swapDrawnIds,
           playCards: me.play.map((c) => cardView(c, me)),
           stash: {
             curse: me.curseStash.map((c) => cardView(c, me)),
@@ -411,6 +412,7 @@ export function buildBloodView(
           setupHand: [],
           items: [],
           swapLeft: 0,
+          swapDrawnIds: [],
         },
     prompt: me ? promptFor(gs, me) : { k: 'wait' },
   };

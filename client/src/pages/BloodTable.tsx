@@ -319,7 +319,6 @@ export function BloodTable({ view }: { view: BloodView }) {
     setCeoSeat(-1);
     setBlufferDecl({});
     setInspectorPick('');
-    setTarotDraw(0);
     setCursePick([]);
   }, [view.round, view.phase]);
 
@@ -358,7 +357,6 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [mynameText, setMynameText] = useState('');
   const [blufferDecl, setBlufferDecl] = useState<Record<string, { r: number; s: string }>>({});
   const [inspectorPick, setInspectorPick] = useState('');
-  const [tarotDraw, setTarotDraw] = useState(0);
   const [cursePick, setCursePick] = useState<string[]>([]);
   /** 芯片购买：{defId, slot} —— 点购买后立即弹出弃牌区选牌 */
   const [chipBuying, setChipBuying] = useState<{ defId: string; slot: number } | null>(null);
@@ -628,8 +626,16 @@ export function BloodTable({ view }: { view: BloodView }) {
         return '选将：点击角色牌放大查看技能，选择其一（超时自动选择）';
       case 'setup':
         return '初始构筑：选择至多 4 张删除（也可以全保留）';
-      case 'swap':
+      case 'swap': {
+        // 塔罗师分步换牌：先抽（可选）→ 点选手牌弃置完成
+        if (myCharId === 'tarot') {
+          const drawn = view.me.swapDrawnIds.length;
+          return drawn > 0
+            ? `已先抽 ${drawn} 张（高亮）：点选手牌选择弃置（0-2 张），完成本次换牌`
+            : `换牌：可先抽 1-2 张，再点选手牌弃置（剩 ${view.me.swapLeft} 次，未用次数按 1次=1血筹 返还）`;
+        }
         return `换牌：选至多 3 张弃置并抽满（剩 ${view.me.swapLeft} 次，未用次数按 1次=1血筹 返还）`;
+      }
       case 'play':
         return '出牌：恰好选 5 张暗扣';
       case 'steal':
@@ -763,6 +769,9 @@ export function BloodTable({ view }: { view: BloodView }) {
   const handClickable = view.prompt.k === 'setup' || view.prompt.k === 'swap' || view.prompt.k === 'play';
   const handSel = view.prompt.k === 'setup' ? selSetup : view.prompt.k === 'play' ? selPlay : selSwap;
   const handSetSel = view.prompt.k === 'setup' ? setSelSetup : view.prompt.k === 'play' ? setSelPlay : setSelSwap;
+  // 塔罗师分步换牌：本步「先抽」到手的牌（高亮显示，提示刚到手可弃）
+  const justDrawnIds =
+    view.prompt.k === 'swap' && myCharId === 'tarot' ? view.me.swapDrawnIds ?? [] : [];
   const handMax =
     view.prompt.k === 'setup'
       ? 4
@@ -1306,13 +1315,17 @@ export function BloodTable({ view }: { view: BloodView }) {
             </div>
             <div className="my-hand">
               {handList.map((c) => (
-                <div key={c.id} className="hand-cell">
+                <div
+                  key={c.id}
+                  className={`hand-cell ${justDrawnIds.includes(c.id) ? 'just-drawn' : ''}`}
+                >
                   <BCard
                     c={c}
                     size="lg"
                     selected={handClickable && handSel.includes(c.id)}
                     onClick={handClickable ? () => toggle(handSel, handSetSel, c.id, handMax) : undefined}
                   />
+                  {justDrawnIds.includes(c.id) && <span className="drawn-tag">先抽</span>}
                   {c.chipIds.length > 0 && (
                     <div className="zone-chips">
                       {c.chipIds.map((id) => (
@@ -1357,31 +1370,38 @@ export function BloodTable({ view }: { view: BloodView }) {
                 )}
                 {view.prompt.k === 'swap' && (
                   <>
-                    {myCharId === 'tarot' && (
+                    {myCharId === 'tarot' && view.me.swapDrawnIds.length === 0 && (
                       <div className="act-row wrap">
-                        <span className="hint">塔罗师 · 先抽牌：</span>
-                        {[0, 1, 2].map((n) => (
+                        <span className="hint">塔罗师 · 先抽（可选）：</span>
+                        {[1, 2].map((n) => (
                           <button
                             key={n}
-                            className={`btn tiny ${tarotDraw === n ? 'primary' : ''}`}
-                            onClick={() => setTarotDraw(n)}
+                            className="btn tiny"
+                            disabled={view.me.swapLeft <= 0}
+                            onClick={() => {
+                              // 抽立即生效：新牌到手后（高亮）再点选要弃置的牌
+                              send({ t: 'bSwapDraw', count: n });
+                              setSelSwap([]);
+                            }}
                           >
-                            抽 {n} 张
+                            🔮 先抽 {n} 张
                           </button>
                         ))}
                       </div>
                     )}
                     <button
                       className="btn primary"
-                      disabled={myCharId !== 'tarot' && selSwap.length === 0}
+                      disabled={!(myCharId === 'tarot' && view.me.swapDrawnIds.length > 0) && selSwap.length === 0}
                       onClick={() => {
-                        send({ t: 'bSwap', cardIds: selSwap, drawCount: tarotDraw });
+                        send({ t: 'bSwap', cardIds: selSwap, drawCount: 0 });
                         playSfx('deal');
                         setSelSwap([]);
                       }}
                     >
-                      {myCharId === 'tarot'
-                        ? `换牌：先抽 ${tarotDraw} 张，弃 ${selSwap.length} 张`
+                      {myCharId === 'tarot' && view.me.swapDrawnIds.length > 0
+                        ? selSwap.length > 0
+                          ? `弃置 ${selSwap.length} 张 · 完成换牌`
+                          : '不弃置 · 完成换牌'
                         : `换掉选中的 ${selSwap.length} 张`}
                     </button>
                     <button className="btn" onClick={() => send({ t: 'bSwapStop' })}>

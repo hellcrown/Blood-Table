@@ -3283,6 +3283,19 @@ body {
   gap: 2px;
 }
 
+/* 塔罗师分步换牌：本步「先抽」到手的牌（金色描边 + 角标），提示刚到手、可点选弃置 */
+.hand-cell.just-drawn .bcard-wrap {
+  outline: 2px solid #e8b84b;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.drawn-tag {
+  font-size: 10px;
+  color: #e8b84b;
+  line-height: 1;
+}
+
 .zone-chips {
   font-size: 10px;
   color: #9fd8b6;
