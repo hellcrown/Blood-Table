@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { playSfx } from '../audio/sound';
 import type { FxEvent } from '../net/socket';
 import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
+import { BLOOD_PHASE_LABELS, BLOOD_PHASES, BLOOD_TURN_MS } from '@shared/bloodConstants';
 import { applyCharEval } from '@shared/bloodChars';
 import { applyImitate, evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
@@ -98,23 +99,10 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { n
   { name: '高牌', desc: '不构成以上任何牌型' },
 ];
 
-const PHASES: { key: BloodView['phase']; label: string }[] = [
-  { key: 'pick', label: '选将' },
-  { key: 'crownBid', label: '竞拍' },
-  // 缺 setup / draw 会让「阶段条」在这两个阶段一个都不高亮（findIndex 返回 -1）——
-  // 与引擎的 BloodPhase 逐一对照补齐
-  { key: 'setup', label: '构筑' },
-  { key: 'draw', label: '抽牌' },
-  { key: 'swap', label: '换牌' },
-  { key: 'swapItem', label: '换牌结束' },
-  { key: 'play', label: '出牌' },
-  { key: 'revealPre', label: '对决前' },
-  { key: 'reveal', label: '对决' },
-  { key: 'settle', label: '结算' },
-  { key: 'buy', label: '购买' },
-  { key: 'remove', label: '删牌' },
-  { key: 'reorg', label: '重整' },
-];
+const PHASES: { key: BloodView['phase']; label: string }[] = BLOOD_PHASES.filter((k) => k !== 'gameover').map((k) => ({
+  key: k,
+  label: BLOOD_PHASE_LABELS[k],
+}));
 
 /** 骰子点数面（对赌协议特效） */
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
@@ -242,7 +230,7 @@ function Countdown({
         // 只在进度变化 ≥0.5% 时写 width：width 不进合成器（触发样式/布局），
         // 而这个 rAF 在整局里从不停止 —— 60fps 的无效写入在手机上纯属耗电。
         // 0.5% 粒度约合 0.3 秒一跳，视觉上依旧平滑。
-        const pct = Math.min(100, (remain / 60000) * 100);
+        const pct = Math.min(100, (remain / BLOOD_TURN_MS) * 100);
         if (barRef.current && Math.abs(pct - lastPctRef.current) >= 0.5) {
           barRef.current.style.width = `${pct}%`;
           lastPctRef.current = pct;

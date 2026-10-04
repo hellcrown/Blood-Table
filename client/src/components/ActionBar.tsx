@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SeatView, TableView } from '@shared/protocol';
+import { TURN_MS } from '@shared/bloodConstants';
 import { net } from '../net/socket';
 
 const BETTING = new Set(['preflop', 'flop', 'turn', 'river']);
@@ -78,7 +79,7 @@ function BetControls({
   ].filter((q) => q.to >= minTo && q.to <= maxTo);
 
   const remainMs = view.deadline != null ? Math.max(0, view.deadline - (Date.now() + offsetRef.current)) : 0;
-  const pct = Math.min(100, (remainMs / 60000) * 100);
+  const pct = Math.min(100, (remainMs / TURN_MS) * 100);
   const callLabel = toCall >= me.chips ? `全下跟注 ${me.chips}` : `跟注 ${toCall}`;
 
   return (

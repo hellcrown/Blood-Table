@@ -1,31 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
+import { BLOOD_PHASE_LABELS, CLASSIC_PHASE_LABELS } from '@shared/bloodConstants';
 
 /** 管理员会话 token 存 sessionStorage（关浏览器即失效） */
 const TOKEN_KEY = 'blood-admin-token';
 
+// 阶段中文名取自 shared 的同一份清单（血色 14 阶段 + 经典 7 阶段），不再手抄：
+// 原先这里漏了 crownBid/swapItem/revealPre，管理端对局列表会直接显示英文相位名。
+// 顺序上血色表在后：两边都有 gameover，统一显示「已结束」。
 const PHASE_CN: Record<string, string> = {
+  ...CLASSIC_PHASE_LABELS,
+  ...BLOOD_PHASE_LABELS, // 血色表在后：两边都有 gameover，管理端沿用「已结束」
+  // 管理端自己的措辞，放在展开之后覆盖共享表（不动共享表，免得改到牌桌顶栏文案）
   waiting: '等待中',
-  pick: '选将',
-  crownBid: '竞拍',
-  setup: '构筑',
-  draw: '抽牌',
-  swap: '换牌',
-  swapItem: '换牌结束',
-  play: '出牌',
-  revealPre: '对决前',
-  reveal: '对决',
-  settle: '结算',
-  buy: '购买',
-  remove: '删牌',
-  reorg: '重整',
-  gameover: '已结束',
-  preflop: '翻牌前',
-  flop: '翻牌',
-  turn: '转牌',
-  river: '河牌',
-  result: '结算',
-  showdown: '摊牌',
+  showdown: '摊牌', // 历史遗留键：不在任一联合类型里，保留以兼容旧记录
 };
 
 interface RoomInfo {

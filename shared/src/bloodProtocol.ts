@@ -1,5 +1,6 @@
 import type { LogLine, Suit } from './protocol';
 import type { BloodEffect, MarketKind } from './bloodCards';
+import type { BloodPhase } from './bloodConstants';
 
 /* ---------------- 服务端 → 客户端：血色视图 ---------------- */
 
@@ -202,21 +203,8 @@ export interface BloodView {
   code: string;
   /** 房间是否设置了密码（不下发密码本体） */
   hasPassword?: boolean;
-  phase:
-    | 'crownBid' // 角色确定后：特权证暗标竞拍（每人密封出价 0~3，0=不参与）
-    | 'pick'
-    | 'setup'
-    | 'draw'
-    | 'swap'
-    | 'swapItem' // 换牌阶段结束：逐一询问换牌结束类道具
-    | 'play'
-    | 'revealPre' // 对决阶段前：逐一询问对决前道具
-    | 'reveal'
-    | 'settle'
-    | 'buy'
-    | 'remove'
-    | 'reorg'
-    | 'gameover';
+  /** 阶段：与引擎共用同一份清单（shared/bloodConstants），不再各处手抄 */
+  phase: BloodPhase;
   round: number;
   target: number;
   seatCount: number;

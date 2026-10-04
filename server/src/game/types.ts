@@ -1,9 +1,7 @@
 import type { Card, GameOverView, HandResultView, LogLine, Phase, RoomSettings } from '@shared/protocol';
 
-/** 单次行动时限 */
-export const TURN_MS = 60_000;
-/** 结算展示后自动进入下一手 */
-export const RESULT_MS = 6_000;
+/** 单次行动时限与结算展示时长：取自 shared，与客户端倒计时条共用同一常量 */
+export { TURN_MS, RESULT_MS } from '@shared/bloodConstants';
 
 export class GameError extends Error {
   code: string;

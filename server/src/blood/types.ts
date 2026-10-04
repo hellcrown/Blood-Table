@@ -135,21 +135,18 @@ export interface MarketSlot {
   uid?: number;
 }
 
-export type BloodPhase =
-  | 'crownBid' // 角色确定后：特权证暗标竞拍（每人密封出价 0~3，0=不参与；最高者得证，开局血筹 = 3 − 出价）
-  | 'pick' // 选将（随机抽2张角色牌选1）
-  | 'setup' // 初始构筑
-  | 'draw'
-  | 'swap'
-  | 'swapItem' // 换牌阶段结束：逐一询问 信号干扰器/皮下密信/魔术橡皮（出牌前）
-  | 'play'
-  | 'revealPre' // 对决阶段前：全员暗扣后逐一询问 荷官证/广播喇叭/赌徒虹膜
-  | 'reveal' // 对决宣告
-  | 'settle' // 结算展示（短暂）
-  | 'buy'
-  | 'remove'
-  | 'reorg'
-  | 'gameover';
+/**
+ * 阶段联合类型与时限都取自 shared（单一事实来源）：
+ * 客户端阶段条、视图协议、管理端列表用的都是同一份清单与标签表，
+ * 缺一个阶段会被 Record 的完整性检查在编译期拦下。
+ *
+ * 必须 `import type` 后再 `export type`，不能写成 `export type { BloodPhase } from ...`：
+ * 后者不把名字绑进本文件作用域，BloodState.phase 会退化成未解析类型，
+ * 进而让 rooms.ts 里 `room.game.phase !== 'waiting'` 丢掉对 GState | BloodState 的可辨识联合收窄，
+ * 在一个完全无关的 startHand 调用处报错。
+ */
+import type { BloodPhase } from '@shared/bloodConstants';
+export type { BloodPhase };
 
 export interface SettleRow {
   seat: number;
@@ -306,9 +303,9 @@ export interface BloodState {
   crownBids: Record<string, number>;
 }
 
-export const BLOOD_TURN_MS = 60_000;
-export const BLOOD_SD_WAIT_MS = 30_000; // 对决展示确认等待上限（演示播完后起算，超时自动确认推进）
-export const BLOOD_SETUP_KEEP = 4; // 每轮初始构筑最多删 4 张
+// 时限与阶段清单统一由 shared/bloodConstants 提供（客户端倒计时条按同一常量换算），
+// 此处重导出以保持既有导入路径不变
+export { BLOOD_TURN_MS, BLOOD_SD_WAIT_MS, BLOOD_SETUP_KEEP } from '@shared/bloodConstants';
 export const BLOOD_HAND_CAP = 6;
 export const BLOOD_PLAY_COUNT = 5;
 /** 特权证暗标出价范围（0~3：0=不参与竞拍，得证则白得；得证者开局血筹 = 3 − 出价，全员出 0 时掷骰定免费持证者） */

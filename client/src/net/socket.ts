@@ -1,5 +1,6 @@
 import type { C2S, LogLine, S2C } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
+import { mergeBloodLog as mergeLogs } from './bloodLog';
 
 export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
 export type AnyView = import('@shared/protocol').TableView | BloodView;
@@ -84,7 +85,6 @@ class Net {
    * 这里合并成一个完整且有界的数组再交给视图消费者，组件因此无需感知协议细节。
    */
   private bloodLog: LogLine[] = [];
-  private static readonly LOG_CAP = 2000; // 与服务端 gs.log 的上限一致
 
   view: AnyView | null = null;
   token: string | null = Net.loadSessionToken();
@@ -374,25 +374,11 @@ class Net {
   }
 
   /**
-   * 合并日志：按 seq 去重排序后截断到上限。
-   * full=true 时用本次下发的内容**重置**本地累积（首帧/重连/落后过多），否则并入。
-   * 服务端保证同一 seq 内容一致，故重复到达只需忽略。
+   * 合并日志：判定规则（去重/排序/上限/换局重置）在 `./bloodLog` 的纯函数里，这里只负责存回。
+   * 抽成纯函数的理由见该文件注释：这段逻辑出错只表现为「日志面板内容不对」，必须能被单测覆盖。
    */
   private mergeBloodLog(incoming: LogLine[], full: boolean): LogLine[] {
-    const inMax = incoming.length > 0 ? incoming[incoming.length - 1].seq : 0;
-    const bufMax = this.bloodLog.length > 0 ? this.bloodLog[this.bloodLog.length - 1].seq : 0;
-    // 序号回退 = 服务端开了新的一局（logSeq 归零重排）：必须重置，
-    // 否则按 seq 去重会把新一局的日志整段当成"已见过"而吞掉，面板停在上一局
-    const reset = full || (inMax > 0 && bufMax > 0 && inMax < bufMax);
-    const merged = reset ? [] : this.bloodLog.slice();
-    const seen = new Set(merged.map((l) => l.seq));
-    for (const line of incoming) {
-      if (seen.has(line.seq)) continue;
-      seen.add(line.seq);
-      merged.push(line);
-    }
-    merged.sort((a, b) => a.seq - b.seq);
-    this.bloodLog = merged.length > Net.LOG_CAP ? merged.slice(-Net.LOG_CAP) : merged;
+    this.bloodLog = mergeLogs(this.bloodLog, incoming, full);
     return this.bloodLog;
   }
 

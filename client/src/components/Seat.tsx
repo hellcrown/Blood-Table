@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from 'react';
 import type { SeatView } from '@shared/protocol';
+import { TURN_MS } from '@shared/bloodConstants';
 import { CardView } from './Card';
 
 export interface Pos {
@@ -41,7 +42,7 @@ export function Seat({
   }, [isToAct]);
 
   const remainMs = isToAct && deadline != null ? Math.max(0, deadline - (Date.now() + offsetRef.current)) : 0;
-  const pct = Math.min(100, (remainMs / 60000) * 100);
+  const pct = Math.min(100, (remainMs / TURN_MS) * 100);
   const roleText = sv.role === 'sb' ? '小盲' : sv.role === 'bb' ? '大盲' : null;
 
   return (
