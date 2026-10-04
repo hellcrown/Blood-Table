@@ -367,6 +367,8 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 鲜花/鸡蛋互动：选中的互动类型（再点对方面板发送） */
   const [reactMode, setReactMode] = useState<'flower' | 'egg' | null>(null);
+  /** 连砸节流：点击间隔 <250ms 的投掷静默丢弃（与服务端 200ms 限频同量级，避免 RATE_LIMITED 报错刷屏） */
+  const lastReactRef = useRef(0);
   const [infoCard, setInfoCard] = useState<string | null>(null); // 牌局记录中点击的牌 def id
   const [oppItems, setOppItems] = useState<{ name: string; defs: string[] } | null>(null);
   const [zoneModal, setZoneModal] = useState<ZoneModal>(null);
@@ -437,6 +439,16 @@ export function BloodTable({ view }: { view: BloodView }) {
       playFlyFx(kind, from, to);
     });
   }, []);
+
+  // 连砸模式：Esc 退出
+  useEffect(() => {
+    if (!reactMode) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setReactMode(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [reactMode]);
 
   useEffect(() => {
     setDecisionBusy(false);
@@ -976,18 +988,23 @@ export function BloodTable({ view }: { view: BloodView }) {
               <>
                 <button
                   className={`btn tiny ${reactMode === 'flower' ? 'primary' : 'ghost'}`}
-                  title="给对局中的玩家送一朵鲜花：点后再点对方面板发送"
+                  title="给对局中的玩家送鲜花：点后可连点对方面板连送，再点一次或按 Esc 退出"
                   onClick={() => setReactMode((m) => (m === 'flower' ? null : 'flower'))}
                 >
                   🌸
                 </button>
                 <button
                   className={`btn tiny ${reactMode === 'egg' ? 'primary' : 'ghost'}`}
-                  title="向对局中的玩家扔一个鸡蛋：点后再点对方面板发送"
+                  title="向对局中的玩家砸鸡蛋：点后可连点对方面板连砸，越点越快，再点一次或按 Esc 退出"
                   onClick={() => setReactMode((m) => (m === 'egg' ? null : 'egg'))}
                 >
                   🥚
                 </button>
+                {reactMode && (
+                  <span className="hint react-hint">
+                    {reactMode === 'egg' ? '🥚 连砸模式：连点玩家面板 · 再点🥚或 Esc 退出' : '🌸 连送模式：连点玩家面板 · 再点🌸或 Esc 退出'}
+                  </span>
+                )}
               </>
             )}
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
@@ -1052,8 +1069,11 @@ export function BloodTable({ view }: { view: BloodView }) {
                   ? (e) => {
                       // 互动模式下点面板内操作按钮（掠夺/指定目标等）只走按钮自身动作，不同时误发互动
                       if ((e.target as HTMLElement).closest('button,.log-card')) return;
+                      // 连砸：模式保持粘性，快速连点同一面板连续投掷；超速点击静默丢弃
+                      const now = Date.now();
+                      if (now - lastReactRef.current < 250) return;
+                      lastReactRef.current = now;
                       send({ t: 'react', seat: opp.seat, kind: reactMode });
-                      setReactMode(null);
                     }
                   : undefined
               }

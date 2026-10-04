@@ -1343,7 +1343,8 @@ export class RoomManager {
     if (!from) throw new blood.BloodError('NO_PLAYER', '你不在当前对局中');
     if (msg.kind !== 'flower' && msg.kind !== 'egg') throw new GameError('BAD_MSG', '未知互动类型');
     const now = Date.now();
-    if (session.lastReact != null && now - session.lastReact < 2000) {
+    // 200ms：支持「连砸」手感（客户端本地 250ms 节流对齐，正常连点不会触到这里）；仍防广播洪水
+    if (session.lastReact != null && now - session.lastReact < 200) {
       throw new GameError('RATE_LIMITED', '互动太频繁，休息一下');
     }
     session.lastReact = now;

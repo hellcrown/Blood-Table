@@ -3996,6 +3996,11 @@ body {
   outline-offset: 2px;
 }
 
+.react-hint {
+  margin-left: 6px;
+  color: var(--gold);
+}
+
 .fx-fly {
   position: fixed;
   z-index: 70;
