@@ -230,6 +230,8 @@ function Countdown({
 }) {
   const numRef = useRef<HTMLSpanElement | null>(null);
   const barRef = useRef<HTMLSpanElement | null>(null);
+  /** 上次写入的进度百分比：整局常驻的 rAF 不该每帧都改布局属性 */
+  const lastPctRef = useRef(-1);
   useEffect(() => {
     let raf = 0;
     const update = () => {
@@ -237,10 +239,20 @@ function Countdown({
         const remain = Math.max(0, deadline - (Date.now() + offsetRef.current));
         const txt = `${Math.ceil(remain / 1000)}s`;
         if (numRef.current && numRef.current.textContent !== txt) numRef.current.textContent = txt;
-        if (barRef.current) barRef.current.style.width = `${Math.min(100, (remain / 60000) * 100)}%`;
+        // 只在进度变化 ≥0.5% 时写 width：width 不进合成器（触发样式/布局），
+        // 而这个 rAF 在整局里从不停止 —— 60fps 的无效写入在手机上纯属耗电。
+        // 0.5% 粒度约合 0.3 秒一跳，视觉上依旧平滑。
+        const pct = Math.min(100, (remain / 60000) * 100);
+        if (barRef.current && Math.abs(pct - lastPctRef.current) >= 0.5) {
+          barRef.current.style.width = `${pct}%`;
+          lastPctRef.current = pct;
+        }
       } else {
         if (numRef.current && numRef.current.textContent !== '') numRef.current.textContent = '';
-        if (barRef.current) barRef.current.style.width = '0%';
+        if (barRef.current && lastPctRef.current !== 0) {
+          barRef.current.style.width = '0%';
+          lastPctRef.current = 0;
+        }
       }
       raf = requestAnimationFrame(update);
     };

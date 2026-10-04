@@ -4,6 +4,37 @@ import { SD_TIMING, coreOrder, showdownReadyMs, sortHandByType } from '@shared/b
 import { BCard } from './BloodCard';
 import { CardView } from './Card';
 
+/**
+ * 对决展示的倒计时文案：自己每秒 tick，把重渲染限制在这一行文本上。
+ * 服务端 deadline 权威，归零由服务端超时托管自动确认推进。
+ */
+function SdStatus({
+  prefix,
+  suffix = '',
+  deadline,
+  timeOffset,
+}: {
+  prefix: string;
+  suffix?: string;
+  deadline?: number | null;
+  timeOffset: number;
+}) {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => forceTick((x) => x + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const remainSec =
+    deadline != null ? Math.max(0, Math.ceil((deadline - (Date.now() + timeOffset)) / 1000)) : 0;
+  return (
+    <span>
+      {prefix}
+      <b>{remainSec}s</b>
+      {suffix}
+    </span>
+  );
+}
+
 export interface ShowdownEffect {
   chipName: string;
   chipText: string;
@@ -159,15 +190,10 @@ export function Showdown({
     };
   }, [timeline]);
 
-  // 倒计时（演示播完后显示，服务端 deadline 权威；归零由服务端超时托管自动确认推进）
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (!ready) return;
-    const t = window.setInterval(() => setTick((x) => x + 1), 1000);
-    return () => window.clearInterval(t);
-  }, [ready]);
-  const remainSec =
-    ready && deadline != null ? Math.max(0, Math.ceil((deadline - (Date.now() + timeOffset)) / 1000)) : 0;
+  // 倒计时由独立的 SdStatus 子组件负责（它自己每秒 tick）：
+  // 原先把 tick 放在本组件里，导致对决演示期间**每秒整棵子树重渲染**
+  //（4 人 × 5 张牌 + 每座位火花特效），手机上纯属白烧电。
+  // 归零仍由服务端超时托管自动确认推进。
 
   const advance = () => {
     if (phase < 3) {
@@ -204,13 +230,18 @@ export function Showdown({
               <span>⚔️ 判定展示中…</span>
             )
           ) : myConfirmed ? (
-            <span>
-              已确认 · 等待其他玩家确认（{wait?.done ?? 0}/{wait?.total ?? 2}）· 剩余 <b>{remainSec}s</b>
-            </span>
+            <SdStatus
+              prefix={`已确认 · 等待其他玩家确认（${wait?.done ?? 0}/${wait?.total ?? 2}）· 剩余 `}
+              deadline={deadline}
+              timeOffset={timeOffset}
+            />
           ) : (
-            <span>
-              判定展示中 · 剩余 <b>{remainSec}s</b>，倒计时结束自动确认关闭
-            </span>
+            <SdStatus
+              prefix="判定展示中 · 剩余 "
+              suffix="，倒计时结束自动确认关闭"
+              deadline={deadline}
+              timeOffset={timeOffset}
+            />
           )}
         </div>
 
