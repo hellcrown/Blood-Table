@@ -13,6 +13,8 @@ import { hasUnseen, initSeenIfFirstVisit, markSeen } from '../net/version';
 
 export function Lobby({ connected, status }: { connected: boolean; status?: ConnStatus }) {
   const [name, setName] = useState(net.loadName());
+  /** 登录态：已登录时对局昵称强制为账号名（服务端口径），昵称输入框隐藏 */
+  const [account, setAccount] = useState(net.account);
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [mode, setMode] = useState<'blood' | 'classic'>('blood');
@@ -36,6 +38,11 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     initSeenIfFirstVisit();
   }, []);
 
+  // 登录/登出/他页同步：登录后隐藏昵称输入（对局昵称即账号名）
+  useEffect(() => {
+    return net.onAccount(setAccount);
+  }, []);
+
   /** 打开更新日志：读到即消角标（点提示条的「查看更新」也走这里） */
   const openChangelog = () => {
     markSeen();
@@ -54,7 +61,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     }
   };
 
-  const nameOk = name.trim().length > 0;
+  // 昵称校验只约束匿名玩家；登录玩家的对局昵称为账号名，发送时也用它（服务端本就强制覆盖）
+  const nameOk = account != null || name.trim().length > 0;
+  const displayName = account?.name ?? name.trim();
 
   /** 粘贴识别：支持直接粘贴邀请文本（网址 — 血色牌局房间码：XXXX），自动提取房间码 */
   const applyCode = (raw: string): void => {
@@ -83,10 +92,10 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   }, [code]);
 
   const create = () => {
-    net.saveName(name.trim());
+    net.saveName(displayName);
     net.send({
       t: 'create',
-      name: name.trim(),
+      name: displayName,
       maxPlayers,
       mode,
       ...(createPw.trim() ? { password: createPw.trim() } : {}),
@@ -95,20 +104,20 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
 
   const joinMsg = (roomCode: string): { t: 'join'; name: string; code: string; password?: string } => ({
     t: 'join',
-    name: name.trim(),
+    name: displayName,
     code: roomCode,
     ...(pwForCode === roomCode && joinPw ? { password: joinPw } : {}),
   });
 
   const join = () => {
-    net.saveName(name.trim());
+    net.saveName(displayName);
     net.send(joinMsg(code.trim().toUpperCase()));
   };
   const spectate = () => {
-    net.saveName(name.trim());
+    net.saveName(displayName);
     net.send({
       t: 'spectate',
-      name: name.trim(),
+      name: displayName,
       code: code.trim().toUpperCase(),
       ...(pwForCode === code.trim().toUpperCase() && joinPw ? { password: joinPw } : {}),
     });
@@ -119,7 +128,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     if (!lastRoom) return;
     setCode(lastRoom.code);
     if (!nameOk || !connected) return;
-    net.saveName(name.trim());
+    net.saveName(displayName);
     net.send(joinMsg(lastRoom.code));
   };
 
@@ -157,15 +166,23 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
           </div>
         )}
 
-        <label className="field">
-          <span>你的昵称</span>
-          <input
-            value={name}
-            maxLength={12}
-            placeholder="给自己起个名字"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
+        {account ? (
+          <div className="field acct-name">
+            <span>对局昵称</span>
+            <b>👤 {account.name}</b>
+            <span className="hint">已登录：对局昵称即账号名（排行榜/战绩按此归属），如需改名可重新注册新账号</span>
+          </div>
+        ) : (
+          <label className="field">
+            <span>你的昵称</span>
+            <input
+              value={name}
+              maxLength={12}
+              placeholder="给自己起个名字"
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        )}
 
         <div className="lobby-actions">
           <div className="create-box">
@@ -313,7 +330,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
       </button>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {feedbackOpen && (
-        <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={name.trim() || undefined} />
+        <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={displayName || undefined} />
       )}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}

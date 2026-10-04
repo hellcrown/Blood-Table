@@ -334,6 +334,11 @@ select:focus {
   margin-bottom: 6px;
 }
 
+/* 大厅：已登录用户的对局昵称展示（替代昵称输入框） */
+.acct-name b {
+  font-size: 15px;
+}
+
 .field input {
   width: 100%;
   font-size: 16px;
