@@ -114,4 +114,41 @@ describe('批次 C · HTTP 接入层', () => {
     }
     expect(fs.readFileSync(p, 'utf8')).toBe(original); // 不得污染仓库
   });
+
+  it('/api/* 有通用限流：单 IP 以远超 30 条/秒的速率打会被 429 挡下', async () => {
+    // 此前只有注册/登录/反馈/管理登录各自限流，其余接口（含每次全量聚合的统计接口）完全不限。
+    // 这里连打 45 次（> 30/s 窗口上限），必须出现 429；正常情况下偶尔 429 也不影响后续用例
+    //（滑动窗口 1 秒自动回补），末尾等 1.1s 让窗口恢复。
+    let got429 = 0;
+    for (let i = 0; i < 45; i++) {
+      const r = await fetchWithTimeout('/api/version', {}, 3_000).catch(() => null);
+      if (r?.status === 429) got429 += 1;
+    }
+    expect(got429).toBeGreaterThan(0);
+    await new Promise((r) => setTimeout(r, 1_100));
+  });
+
+  it('/api/auth/me 仍正常返回（缓存路径的形状与直算一致）', async () => {
+    const reg = await fetchWithTimeout('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `测试${Date.now() % 100000}`, password: 'pw123456' }),
+    });
+    expect(reg.status).toBe(200);
+    const { token } = (await reg.json()) as { token: string };
+    expect(typeof token).toBe('string');
+    const auth = { Authorization: `Bearer ${token}` };
+    const first = await fetchWithTimeout('/api/auth/me', { headers: auth });
+    expect(first.status).toBe(200);
+    const j1 = (await first.json()) as { ok?: boolean; account?: unknown; ladder?: unknown; stats?: unknown };
+    expect(j1.ok).toBe(true);
+    expect(j1.account).toBeTruthy();
+    // 新账号还没有任何对局记录，stats 为 null 属既有行为：这里只断言字段存在（形状稳定）
+    expect(j1).toHaveProperty('stats');
+    expect(j1).toHaveProperty('ladder');
+    // 第二次命中 60s 缓存：响应体必须与第一次完全一致
+    const second = await fetchWithTimeout('/api/auth/me', { headers: auth });
+    expect(second.status).toBe(200);
+    expect(await second.text()).toBe(JSON.stringify(j1));
+  });
 });

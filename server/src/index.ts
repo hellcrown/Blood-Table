@@ -287,6 +287,25 @@ function authAccount(req: http.IncomingMessage) {
 
 const manager = new RoomManager();
 
+/**
+ * 通用 API 限流：/api/* 每 IP 30 条/秒。
+ * 此前只有注册/登录/反馈/管理登录各有自己的限流，**其余接口完全没有**：
+ * 单个连接就能以任意速率打它们，而其中有每次都要全量聚合的统计接口
+ * （role 胜率榜 / 天梯榜 / 个人战绩），它们与 500ms 的对局 tick 共用唯一事件循环。
+ * 30/s 对正常客户端极其宽松（页面只在用户操作时请求，版本提示每 5 分钟一次），
+ * 但对脚本刷接口是硬上限。静态资源不限流：页面加载本就会并发拉若干资源。
+ */
+const apiLimit = new IpTable(
+  () => new SlidingWindow(1000, 30),
+  (w, now) => w.idle(now),
+);
+
+/**
+ * /api/auth/me 的每账号 60s 缓存：matchPlayerStats 每次都要扫最多 2 万条对局做聚合，
+ * 而一个令牌就能反复打（把一次登录放大成任意次全量扫描）。个人战绩不需要秒级实时。
+ */
+const meCache = new Map<string, { at: number; body: string }>();
+
 const server = http.createServer((req, res) => {
   // 基础安全头（对全部响应生效，含静态与 API）。
   // CSP：构建产物全部为外链 self 资源、无内联脚本；style 因框架运行时写样式保留 unsafe-inline
@@ -298,6 +317,12 @@ const server = http.createServer((req, res) => {
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
   );
   const url = new URL(req.url ?? '/', 'http://localhost');
+  // 通用 API 限流（静态资源不限）：超限直接 429，别让刷接口的流量挤占对局 tick
+  if (url.pathname.startsWith('/api/') && !apiLimit.get(clientIp(req)).allow()) {
+    res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, msg: '请求过于频繁，请稍后再试' }));
+    return;
+  }
   if (url.pathname === '/api/stats/chars' && req.method === 'GET') {
     if (publicStatsCache && Date.now() - publicStatsCache.at < 60_000) {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -437,13 +462,27 @@ const server = http.createServer((req, res) => {
       send(401, { ok: false, msg: '未登录或登录已过期' });
       return;
     }
+    // 60s 缓存：个人战绩不必秒级实时，但每次请求都要全量扫描对局记录（放大风险见 meCache 注释）
+    const hit = meCache.get(acc.accountId);
+    if (hit && Date.now() - hit.at < 60_000) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(hit.body);
+      return;
+    }
     const ladder = accountLadder(acc.accountId);
-    send(200, {
+    const body = JSON.stringify({
       ok: true,
       account: { id: acc.accountId, name: acc.name },
       ladder: ladder ?? { points: 0, wins: 0 },
       stats: matchPlayerStats(acc.accountId),
     });
+    meCache.set(acc.accountId, { at: Date.now(), body });
+    if (meCache.size > 1000) {
+      const now = Date.now();
+      for (const [k, v] of meCache) if (now - v.at > 120_000) meCache.delete(k);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(body);
     return;
   }
   if (url.pathname === '/api/info') {
@@ -643,6 +682,7 @@ setInterval(() => {
   }
   regLimit.prune();
   authTryLimit.prune();
+  apiLimit.prune(); // 通用 API 限流表：同样是按 IP 命中即建条目，须清理防慢性膨胀
   pruneRevocations();
 }, 5 * 60_000).unref();
 
