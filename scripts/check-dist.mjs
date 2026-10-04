@@ -26,8 +26,8 @@ if (committed.length === 0) {
   process.exit(1);
 }
 
-execSync(`npx vite build --outDir ${tmpOut} --emptyOutDir`, { cwd: clientDir, stdio: 'pipe' });
 try {
+  execSync(`npx vite build --outDir ${tmpOut} --emptyOutDir`, { cwd: clientDir, stdio: 'pipe' });
   const fresh = refs(fs.readFileSync(path.join(tmpPath, 'index.html'), 'utf-8'));
   if (fresh.join() !== committed.join()) {
     console.error('✗ client/dist 与当前源码不一致（改了 src 忘记构建就提交？）');
@@ -38,5 +38,7 @@ try {
   }
   console.log(`✓ client/dist 与当前源码一致（${committed.join(', ')}）`);
 } finally {
+  // 构建失败/中断也必须清理：本仓库用 git add -A 提交，残留的 dist-verify-tmp
+  // 会被整套连带提交进仓库
   fs.rmSync(tmpPath, { recursive: true, force: true });
 }

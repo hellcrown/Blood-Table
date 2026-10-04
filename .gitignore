@@ -12,3 +12,8 @@ server/data/
 promo/
 # 本机会话的计划/草稿（只对本机有意义）
 .zcode/
+
+# check-dist.mjs 的临时构建产物：构建失败/中断时 execSync 外层清理可能不执行，
+# 留在工作区会被 git add -A 整套连带提交
+dist-verify-tmp/
+client/dist-verify-tmp/

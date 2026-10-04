@@ -214,6 +214,8 @@ export interface BloodState {
     max?: number;
     chipId?: string;
     defId?: string;
+    /** insertChip：拍卖得牌的芯片——插入/跳过后不轮转回合，得牌者继续正常购买 */
+    thenBuy?: boolean;
     /** itemAsk：被询问的道具实例 id */
     itemId?: string;
     /** preciseDel: 抽到的 3 张牌；hackerSetup: 自己抽牌堆；detectivePick: 弃牌区 */

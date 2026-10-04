@@ -2132,6 +2132,27 @@ function settle(gs: BloodState, now: number): void {
   }
   pushLog(gs, 'win', `${pname(winner)} 夺魁，获得【临时特权证】`);
 
+  // 特工：结算结束时归还交换的出牌区。必须先于「出牌区置入弃牌区」：
+  // 归还后各玩家的出牌区才恢复为自己的牌，枪手/自毁芯片/炸弹客按「本回合打出的牌」删除
+  // 才不会错删换入的对方的牌；若放在删除之后，已被删进 removed 的牌将无从归还，
+  // 原属主会永久失去这些牌（54 张牌不变量被破坏）
+  if (gs.agentSwap) {
+    const a = gs.players.find((x) => x.id === gs.agentSwap!.a)!;
+    const b = gs.players.find((x) => x.id === gs.agentSwap!.b)!;
+    const tmp = a.play;
+    a.play = b.play;
+    b.play = tmp;
+    // 芯片随宿主牌归回原属主（与 bAgentDecide 的迁移互为逆操作）
+    const aSet = new Set(gs.agentSwap.aCards);
+    const bSet = new Set(gs.agentSwap.bCards);
+    const backToA = b.chips.filter((ch) => aSet.has(ch.on));
+    const backToB = a.chips.filter((ch) => bSet.has(ch.on));
+    a.chips = a.chips.filter((ch) => !bSet.has(ch.on)).concat(backToA);
+    b.chips = b.chips.filter((ch) => !aSet.has(ch.on)).concat(backToB);
+    pushLog(gs, 'action', `🤝 ${pname(a)} 与 ${pname(b)}【特工】归还交换的出牌区`);
+    gs.agentSwap = null;
+  }
+
   // 出牌区置入弃牌区（枪手先记下本回合打出的4；自毁芯片记下是否发动）
   const gunnerFours = new Map<string, string[]>();
   const playedIdsByP = new Map<string, string[]>();
@@ -2209,27 +2230,6 @@ function settle(gs: BloodState, now: number): void {
     if (returned.length > 0) {
       pushLog(gs, 'action', `${pname(p)}【无业游民】归还牌库中对手的牌：${returned.map(bloodCardText).join(' ')}`);
     }
-  }
-
-  // 特工：结算结束时归还交换的出牌区
-  if (gs.agentSwap) {
-    const a = gs.players.find((x) => x.id === gs.agentSwap!.a)!;
-    const b = gs.players.find((x) => x.id === gs.agentSwap!.b)!;
-    const backA = b.discard.filter((c) => gs.agentSwap!.aCards.includes(c.id));
-    const backB = a.discard.filter((c) => gs.agentSwap!.bCards.includes(c.id));
-    b.discard = b.discard.filter((c) => !gs.agentSwap!.aCards.includes(c.id));
-    a.discard = a.discard.filter((c) => !gs.agentSwap!.bCards.includes(c.id));
-    a.discard.push(...backA);
-    b.discard.push(...backB);
-    // 芯片随宿主牌换回原属主：a 的芯片（挂在 aCards 上，交换时随牌到了 b 处）收回，b 同理
-    const aSet = new Set(gs.agentSwap.aCards);
-    const bSet = new Set(gs.agentSwap.bCards);
-    const backToA = b.chips.filter((ch) => aSet.has(ch.on));
-    const backToB = a.chips.filter((ch) => bSet.has(ch.on));
-    a.chips = a.chips.filter((ch) => !bSet.has(ch.on)).concat(backToA);
-    b.chips = b.chips.filter((ch) => !aSet.has(ch.on)).concat(backToB);
-    pushLog(gs, 'action', `🤝 ${pname(a)} 与 ${pname(b)}【特工】归还交换的出牌区`);
-    gs.agentSwap = null;
   }
 
   // 结算期角色互动入队：魅魔抢夺 / 票贩子强购 / 炸鸡店老板结算删牌
@@ -2562,13 +2562,15 @@ export function bBuy(
   processMarketDef(gs, p, def, false, insertInto);
 }
 
-/** 处理一张已支付/免费获得的黑市牌 */
+/** 处理一张已支付/免费获得的黑市牌
+ * noAdvance：结算完毕不轮转到下一位（拍卖得牌的发放场景——得牌者仍可正常购买） */
 function processMarketDef(
   gs: BloodState,
   p: BPlayer,
   def: NonNullable<ReturnType<typeof BLOOD_MARKET_BY_ID.get>>,
   free: boolean,
   insertInto?: string,
+  noAdvance = false,
 ): void {
   void free;
   // 强化芯片（含触发类）：立即插入自己弃牌区的一张牌
@@ -2577,15 +2579,21 @@ function processMarketDef(
     if (effChar(p) === 'wei' && p.chips.length >= 3) {
       gs.recycle.push(def.id);
       pushLog(gs, 'action', `${pname(p)}【魏王】已有 3 张强化芯片：新获得的【${def.name}】直接弃置`);
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     const chipId = `ch-${Math.random().toString(36).slice(2, 10)}`;
     if (insertInto) {
       insertChip(gs, p, chipId, def.id, insertInto);
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
     } else {
-      gs.secretPending = { seat: p.id, kind: 'insertChip', chipId, defId: def.id };
+      gs.secretPending = {
+        seat: p.id,
+        kind: 'insertChip',
+        chipId,
+        defId: def.id,
+        ...(noAdvance ? { thenBuy: true } : {}),
+      };
     }
     return;
   }
@@ -2593,7 +2601,7 @@ function processMarketDef(
   if (def.kind === 'item') {
     p.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
     pushLog(gs, 'action', `${pname(p)} 将【${def.name}】正面朝上放入道具区`);
-    afterMarketResolved(gs, p, false);
+    afterMarketResolved(gs, p, noAdvance);
     return;
   }
   switch (def.effect.k) {
@@ -2606,7 +2614,7 @@ function processMarketDef(
         gs.announce.at = Date.now(); // 结果已出，宣告刷新多展示一会
       }
       gs.recycle.push(def.id);
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     case 'deleteUpTo': {
@@ -2624,14 +2632,14 @@ function processMarketDef(
       const topId = gs.supply.pop();
       if (!topId) {
         pushLog(gs, 'action', `【${def.name}】发动：黑市牌堆已空，无事发生`);
-        afterMarketResolved(gs, p, false);
+        afterMarketResolved(gs, p, noAdvance);
         return;
       }
       const topDef = BLOOD_MARKET_BY_ID.get(topId)!;
       pushLog(gs, 'action', `【${def.name}】发动：${pname(p)} 免费获得牌堆顶的【${topDef.name}】`);
       gs.announce = { defId: topId, buyerSeat: p.seat, at: Date.now() };
       // 不透传本次购买的 insertInto：免费牌是另一张牌，插入合法性未校验，失败会吞掉已支付的费用与芯片
-      processMarketDef(gs, p, topDef, true);
+      processMarketDef(gs, p, topDef, true, undefined, noAdvance);
       return;
     }
     case 'privilegeBonus': {
@@ -2642,7 +2650,7 @@ function processMarketDef(
         pushLog(gs, 'action', `【${def.name}】发动：${pname(p)} 未持有特权证，无事发生`);
       }
       gs.recycle.push(def.id);
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     case 'refreshMarket': {
@@ -2651,7 +2659,8 @@ function processMarketDef(
       return;
     }
     case 'closingGift': {
-      // 闭店礼：获得N血筹，本回合不可再购买（购买轮转到下一位）
+      // 闭店礼：获得N血筹，本回合不可再购买（购买轮转到下一位）。
+      // 「跳过本回合购买」是卡面设计：即便作为拍卖得牌发放也照常顺延回合
       p.blood += def.effect.blood;
       p.skipBuy = true;
       p.buyPassed = true;
@@ -2673,7 +2682,7 @@ function processMarketDef(
         'action',
         `【${def.name}】发动：${pname(p)} 获得 ${def.effect.blood} 血筹，其他玩家各获得 ${def.effect.oppBlood} 血筹`,
       );
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     case 'stealPrivilege': {
@@ -2689,14 +2698,14 @@ function processMarketDef(
         gs.recycle.push(def.id);
         pushLog(gs, 'action', `【${def.name}】发动：${pname(p)} 夺得【临时特权证】`);
       }
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     case 'todo': {
       // 拓展牌占位：强交互效果暂未自动结算，按公示弃置处理
       gs.recycle.push(def.id);
       pushLog(gs, 'action', `【${def.name}】暂未自动结算，请按卡面与同桌执行后弃置`);
-      afterMarketResolved(gs, p, false);
+      afterMarketResolved(gs, p, noAdvance);
       return;
     }
     case 'poisonMalus': {
@@ -2728,7 +2737,7 @@ function processMarketDef(
       gs.recycle.push(def.id);
       if (p.draw.length < 3) {
         pushLog(gs, 'action', `【${def.name}】抽牌堆不足 3 张：弃置（费用不退）`);
-        afterMarketResolved(gs, p, false);
+        afterMarketResolved(gs, p, noAdvance);
         return;
       }
       const drawn = drawN(gs, p, 3);
@@ -2740,7 +2749,7 @@ function processMarketDef(
       gs.recycle.push(def.id);
       if (!p.discard.some((c) => p.chips.some((ch) => ch.on === c.id))) {
         pushLog(gs, 'action', `【${def.name}】弃牌区没有带强化芯片的牌：弃置（费用不退）`);
-        afterMarketResolved(gs, p, false);
+        afterMarketResolved(gs, p, noAdvance);
         return;
       }
       gs.secretPending = { seat: p.id, kind: 'pullChip' };
@@ -2791,7 +2800,8 @@ export function bInsertChip(gs: BloodState, playerId: string, cardId: string, no
   const def = BLOOD_MARKET_BY_ID.get(pend.defId!);
   if (!def) throw new BloodError('BAD_DEF', '芯片数据异常');
   insertChip(gs, p, pend.chipId!, def.id, cardId);
-  afterMarketResolved(gs, p, false);
+  // 拍卖得牌（thenBuy）：插入完成后不轮转，得牌者继续正常购买
+  afterMarketResolved(gs, p, pend.thenBuy === true);
 }
 
 export function bInsertSkip(gs: BloodState, playerId: string, now: number): void {
@@ -2804,7 +2814,8 @@ export function bInsertSkip(gs: BloodState, playerId: string, now: number): void
   const def = BLOOD_MARKET_BY_ID.get(pend.defId!);
   gs.recycle.push(pend.defId!);
   pushLog(gs, 'action', `${pname(p)} 的【${def?.name ?? '强化芯片'}】无合法目标，弃置入黑市回收站`);
-  afterMarketResolved(gs, p, false);
+  // 拍卖得牌（thenBuy）：跳过插入同样不轮转，得牌者继续正常购买
+  afterMarketResolved(gs, p, pend.thenBuy === true);
 }
 
 function insertChip(gs: BloodState, p: BPlayer, chipId: string, defId: string, cardId: string): void {
@@ -2984,17 +2995,16 @@ function advanceBuyTurn(gs: BloodState, fromSeat: number, now: number): void {
     if (p && !p.buyPassed) {
       gs.turnSeat = p.seat;
       gs.deadline = now + BLOOD_TURN_MS;
-      // 瞎掰帝拍卖得牌者轮到其购买回合时发放暗置的芯片（道具牌已在叫价结算时发放）
+      // 瞎掰帝拍卖得牌者轮到其购买回合时发放暗置的牌（道具牌已在叫价结算时发放）。
+      // 发放本身不得顺延回合：得牌者已付血筹，仍享有正常购买机会（与道具牌立即发放的修复口径一致）。
+      // 故芯片走交互插牌（thenBuy 标记令插入完成后不推进）、内联结算的秘密牌以 noAdvance 结算；
+      // 交互型秘密牌的结算即其本回合行动（与正常购买一张交互牌同口径）。
       if (gs.auction && gs.auction.highestBy === p.id) {
         const def = BLOOD_MARKET_BY_ID.get(gs.auction.defId);
         gs.auction = null;
         if (def) {
-          pushLog(gs, 'action', `🔨 ${pname(p)} 获得拍卖得牌【${def.name}】`);
-          // 统一走 processMarketDef：它按 kind 分派（chip 插牌 / item 入道具区 / secret 立即结算）。
-          // 原先只对 chip 调用、其余一律塞道具区，导致拍卖到的秘密交易变成永远用不出去的死牌
-          // （bUseItem / bItemAsk 都不接受它）。
-          processMarketDef(gs, p, def, true);
-          return;
+          pushLog(gs, 'action', `🔨 ${pname(p)} 获得拍卖得牌【${def.name}】，仍可正常购买`);
+          processMarketDef(gs, p, def, true, undefined, true);
         }
       }
       return;
@@ -4864,6 +4874,8 @@ export function bDogTarget(gs: BloodState, playerId: string, seat: number, now: 
     'action',
     `🐕 ${pname(p)}【赌狗】指定 ${pname(t)} 掷出 ${roll} 点：删除其抽牌堆顶 ${take.length} 张（${take.map(bloodCardText).join(' ') || '无牌可删'}）`,
   );
+  // 赌狗的删牌同样可能删掉皇叔的第 54 张（卡面写的是「任何时候」），与 bViolent/bFryerDel 同口径
+  checkLiuWin(gs, t, now);
 }
 
 /** 走私客：购买阶段前标记黑市 1 张（自己买-2；他人买须先交2血筹） */
@@ -5172,6 +5184,9 @@ export function bCleanerDel(gs: BloodState, playerId: string, seat: number, card
   }
   gs.secretPending = null;
   pushLog(gs, 'action', `🧹 ${pname(p)}【清洁工】删除 ${pname(t)} ${fromDraw ? '抽牌堆' : '弃牌区'}中的 ${bloodCardText(card)}${fromDraw ? '（并重洗其抽牌堆）' : ''}`);
+  // 清洁工的删牌同样可能删掉皇叔的第 54 张（卡面写的是「任何时候」）
+  checkLiuWin(gs, t, now);
+  if (gs.phase === 'gameover') return; // 已达成宿命胜利，不再推进清洁工队列
   const next = pend.oppQueue?.shift();
   if (next) {
     gs.secretPending = { seat: next, kind: 'cleanerDel', oppQueue: pend.oppQueue };

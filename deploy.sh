@@ -35,10 +35,13 @@ if ! git diff --quiet -- package-lock.json 2>/dev/null; then
 fi
 
 # 3. 管理密码（网站「管理员」入口用）：保存在 .admin-secret，可自行修改
+# 用 umask 077 创建：默认 umask 下会得到 0644（全局可读）——该 key 可读取全部玩家反馈（含 IP）
+# 并一键清空全服房间；对已存在的旧文件同样 chmod 收权
 SECRET_FILE=".admin-secret"
 if [ ! -f "$SECRET_FILE" ] || [ ! -s "$SECRET_FILE" ]; then
-  openssl rand -hex 12 > "$SECRET_FILE" 2>/dev/null || node -e "console.log(require('crypto').randomBytes(12).toString('hex'))" > "$SECRET_FILE"
+  ( umask 077 && { openssl rand -hex 12 > "$SECRET_FILE" 2>/dev/null || node -e "console.log(require('crypto').randomBytes(12).toString('hex'))" > "$SECRET_FILE"; } )
 fi
+chmod 600 "$SECRET_FILE" 2>/dev/null || true
 ADMIN_KEY_VALUE=$(cat "$SECRET_FILE")
 
 # 4. 启动 / 重启（进程名 blood-table）
@@ -79,8 +82,12 @@ pm2 save
 
 # 5. 日志轮转（防止 pm2 日志无限膨胀）
 # 固定版本而非 @latest：部署行为不该随上游发布漂移；且放在 pm2 start **之前**，
-# 否则首次部署到轮转装好之间的日志是裸奔的（此前顺序相反）
-npx --yes pm2-logrotate@3 2>/dev/null || true
+# 否则首次部署到轮转装好之间的日志是裸奔的（此前顺序相反）。
+# 失败不阻断部署但必须留痕：该服务器出网不稳，npx 拉不到模块时若无输出，
+# 轮转会静默缺失、pm2 日志回到无限膨胀——恰是本步要防的后果
+if ! npx --yes pm2-logrotate@3 >/tmp/pm2-logrotate-install.log 2>&1; then
+  echo "⚠️ pm2-logrotate 安装失败（日志轮转未生效，详见 /tmp/pm2-logrotate-install.log），不阻断部署"
+fi
 
 echo ""
 echo "✅ 部署完成：http://<服务器IP>:$PORT"

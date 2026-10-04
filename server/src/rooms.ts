@@ -854,6 +854,12 @@ export class RoomManager {
   }
 
   private addSession(room: Room, nameRaw: unknown, spectator = false, accountId?: string): Session {
+    // 同一账号同房仅允许一个落座会话：双开可同时看两手自己的底牌做联合决策（血色双座协同更甚）。
+    // 重连不经过这里（handleRejoin 按 token/账号接管既有会话），不受影响
+    if (!spectator && accountId) {
+      const dupe = [...room.sessions.values()].find((s) => s.accountId === accountId && !s.spectator);
+      if (dupe) throw new GameError('ALREADY_IN_ROOM', '该账号已在本房间落座，不能重复加入');
+    }
     // 登录态强制使用账号昵称（防冒名，天梯榜展示一致）；匿名不得占用已注册昵称
     let name = accountId ? (accountName(accountId) ?? cleanName(nameRaw, room.sessions.size + 1)) : cleanName(nameRaw, room.sessions.size + 1);
     const names = new Set([...room.sessions.values()].map((s) => s.name));
@@ -1141,6 +1147,8 @@ export class RoomManager {
   /** 房主请离真人玩家：按离开流程清理并强制断开（对局中断线由超时托管兜底） */
   private handleKickPlayer(room: Room, session: Session, msg: Extract<C2S, { t: 'kickPlayer' }>): void {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以请离玩家');
+    // 座位号必须为非负整数：观战者会话恒为 seat=-1，放行会命中插入序第一个观战者并走完整踢出流程
+    if (!Number.isInteger(msg.seat) || msg.seat < 0) throw new GameError('BAD_SEAT', '座位号不合法');
     const seat = Math.floor(msg.seat);
     const target = [...room.sessions.values()].find((s) => s.seat === seat && s.id !== session.id);
     if (!target) throw new GameError('BAD_SEAT', '该座位没有可请离的玩家');
@@ -1179,16 +1187,23 @@ export class RoomManager {
       this.bindings.delete(target.ws);
       target.ws = null;
     }
-    // 引擎侧按离场处理：标 connected=false 进入超时托管，并自动完成竞拍/选将/构筑
+    // 引擎侧按离开流程处理：标 connected=false 进入超时托管，并自动完成竞拍/选将/构筑；
+    // classic 手牌进行中会走 pendingRemove 延迟移除（与主动离开同口径，见 handleLeave）
     this.handleLeave(room, target);
-    // 再移除会话 —— 座位必须释放。此前只做 handleLeave 而把会话留在 room.sessions 里，
-    // 于是幽灵座位永久占着满员名额（加入判定按会话数），而其令牌已清空、无人可接管，
-    // 替补永远进不来（德扑模式同场景是能释放的）。引擎侧不受影响：对局中的玩家由 bs.players
-    // 持有，removeSession 的阶段守卫保证不会删掉它，超时托管照常接手。
-    this.removeSession(room, target);
-    target.token = ''; // 令牌字段一并清空：bRematch 重建对局时以「断线且无令牌」识别被踢幽灵并排除
-    // 账号令牌同步除名：否则被踢者可凭 30 天登录令牌经账号重连找回鬼位会话，踢人对登录玩家形同虚设
+    // 请离必须断根：会话令牌立即失效并清空（bRematch 以「断线且无令牌」识别被踢幽灵并排除）；
+    // 账号令牌同步除名——否则被踢者可凭 30 天登录令牌经账号重连找回会话，踢人对登录玩家形同虚设
+    this.tokenIndex.delete(target.token);
+    target.token = '';
     delete target.accountId;
+    // 血色对局中段：handleLeave 只标记断线，会话仍占满员名额（加入判定按会话数）而令牌已失效、
+    // 无人可接管，替补永远进不来 —— 直接移除会话。引擎侧不受影响：对局中的玩家由 bs.players 持有，
+    // removeSession 的血色阶段守卫保证不会删掉它，超时托管照常接手。
+    // classic 手牌进行中则保持 pendingRemove 延迟移除：removeSession 的 classic 分支没有阶段守卫，
+    // 立即删除会把手牌进行中的玩家从 cg.players 删掉——其已投入的筹码随玩家从底池凭空消失，
+    // 若恰为行动中人，legalActionsFor 返回 null 令 tick 空转，每 500ms 广播直到全员离场 GC。
+    if (room.mode === 'blood' && room.sessions.has(target.id)) {
+      this.removeSession(room, target);
+    }
   }
 
   /** 等待界面：已入座玩家进入观战席（释放座位；开局后不可） */

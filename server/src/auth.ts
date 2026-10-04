@@ -191,15 +191,19 @@ export function initAuthStore(usersPath: string, pointsPath: string, secretPath:
     } else {
       fs.writeFileSync(usersPath, '');
     }
-    // points.jsonl：积分事件聚合
+    // points.jsonl：积分事件聚合（事件行逐条累加；快照行——轮转压缩产物——按合计直接落表）
     if (fs.existsSync(pointsPath)) {
       for (const line of fs.readFileSync(pointsPath, 'utf-8').split('\n')) {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          const ev = JSON.parse(trimmed) as LadderEvent;
+          const ev = JSON.parse(trimmed) as LadderEvent & { wins?: number };
           if (typeof ev?.accountId === 'string' && typeof ev?.points === 'number') {
-            addLadder(ev.accountId, ev.points);
+            if (typeof ev.wins === 'number') {
+              ladder.set(ev.accountId, { points: ev.points, wins: ev.wins });
+            } else {
+              addLadder(ev.accountId, ev.points);
+            }
           }
         } catch {
           /* 坏行跳过 */
@@ -375,10 +379,26 @@ export function computeLadderPoints(
   return Math.min(5, d + o + g);
 }
 
+/** 积分文件轮转阈值：只追加无轮转会随对局数无限膨胀（启动还要全量重放），超限压缩为快照 */
+const POINTS_MAX_FILE_BYTES = 8 * 1024 * 1024;
+
 /** 终局积分事件落库（资格由调用方校验；points=0 的胜局也记录，累计胜场） */
 export function recordLadderEvent(ev: LadderEvent): void {
   addLadder(ev.accountId, ev.points);
-  appendLine(pointsFile, ev);
+  if (!pointsFile) return;
+  try {
+    fs.appendFileSync(pointsFile, JSON.stringify(ev) + '\n');
+    if (fs.statSync(pointsFile).size > POINTS_MAX_FILE_BYTES) {
+      // 压缩为各账号合计快照（loader 识别带 wins 的行为快照、直接落表）。
+      // 先写临时文件再原子改名：覆盖式重写期间崩溃会把正式文件截断成半截
+      const snap = [...ladder.entries()].map(([accountId, a]) => ({ accountId, points: a.points, wins: a.wins }));
+      const tmp = pointsFile + '.tmp';
+      fs.writeFileSync(tmp, snap.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      fs.renameSync(tmp, pointsFile);
+    }
+  } catch (e) {
+    console.error('[auth] 积分落盘失败（已保留内存）:', e);
+  }
 }
 
 export interface LadderRow {

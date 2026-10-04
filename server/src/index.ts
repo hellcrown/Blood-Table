@@ -129,6 +129,7 @@ function clientIp(req: http.IncomingMessage): string {
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
+    let bytes = 0;
     // 悬挂请求兜底：只声明 Content-Length 却不发体，会把连接一直吊着（占一条上游连接）。
     // 正常提交远快于 15s，故这里主动断开。
     const timer = setTimeout(() => {
@@ -139,9 +140,14 @@ function readBody(req: http.IncomingMessage): Promise<string> {
       clearTimeout(timer);
       fn();
     };
-    req.on('data', (chunk) => {
+    // setEncoding 让 Node 用 StringDecoder 处理 chunk 边界：多字节字符（反馈正文以中文为主，
+    // 3 字节/字）被 TCP 劈在两个 chunk 之间时不会解码成 U+FFFD 乱码
+    req.setEncoding('utf8');
+    req.on('data', (chunk: string) => {
       data += chunk;
-      if (data.length > 64 * 1024) {
+      // 上限按字节数计：字符串 length 是 UTF-16 码元数，全 CJK 内容下实际字节可达其 3 倍
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > 64 * 1024) {
         req.destroy();
         settle(() => reject(new Error('body too large')));
       }
@@ -308,13 +314,15 @@ const meCache = new Map<string, { at: number; body: string }>();
 
 const server = http.createServer((req, res) => {
   // 基础安全头（对全部响应生效，含静态与 API）。
-  // CSP：构建产物全部为外链 self 资源、无内联脚本；style 因框架运行时写样式保留 unsafe-inline
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // CSP：构建产物全部为外链 self 资源、无内联脚本；style 因框架运行时写样式保留 unsafe-inline。
+  // connect-src 只留 'self'：现代浏览器下同源 WS/WSS 升级已被覆盖，显式放行 ws:/wss: scheme
+  // 等于允许 XSS 后向任意外部 WebSocket 主机外传数据
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
   );
   const url = new URL(req.url ?? '/', 'http://localhost');
   // 通用 API 限流（静态资源不限）：超限直接 429，别让刷接口的流量挤占对局 tick
