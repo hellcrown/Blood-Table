@@ -36,9 +36,15 @@ export function Room({ view }: { view: TableView }) {
   const pwDirtyRef = useRef(false); // 本轮 focus 后是否实际编辑过（防 blur 误清已设密码/Enter 后二次提交）
   const [pwMsg, setPwMsg] = useState<string | null>(null);
 
+  // 服务端设置的三个数值：只在**数值真的变化**时同步草稿。
+  // 依赖整个 view.settings（每条广播都是新对象）会在别人入座/改设置时，把房主正在输入、
+  // 尚未失焦的值覆盖回旧值 —— 失焦后提交的就是被覆盖的值，等于白改。
+  const srvSb = view.settings.sb;
+  const srvBb = view.settings.bb;
+  const srvChips = view.settings.startChips;
   useEffect(() => {
-    setSettings(view.settings);
-  }, [view.settings]);
+    setSettings((prev) => ({ ...prev, sb: srvSb, bb: srvBb, startChips: srvChips }));
+  }, [srvSb, srvBb, srvChips]);
 
   // 邀请链接 = 当前访问地址 + 房间码参数（朋友打开后自动预填房间码）
   const inviteUrl = `${location.origin}/?room=${view.code}`;

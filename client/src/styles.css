@@ -117,7 +117,8 @@ select:focus {
 }
 
 .btn.tiny {
-  padding: 5px 10px;
+  /* 手机上这是可点区域的下限：原 5px/10px 只有约 26px 高，手指容易点空 */
+  padding: 8px 12px;
   font-size: 12px;
 }
 
@@ -164,6 +165,43 @@ select:focus {
 
 .spacer {
   flex: 1;
+}
+
+/* ---------- 断线遮罩 ---------- */
+
+/* 连接断开/重连超 1.5 秒后出现：屏蔽操作，避免玩家以为操作生效
+   （此前只有顶部横幅提示，牌桌与操作栏照常可点）。
+   层级：50 是断线横幅、60 是 toast 与弹层 —— 遮罩取 55，挡住页面内容与操作栏，
+   但保留提示与弹层可用（玩家仍看得到提示、关得掉弹窗）。 */
+.offline-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 4, 6, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.offline-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+  max-width: 320px;
+  padding: 18px 22px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.offline-card b {
+  color: var(--gold);
+  font-size: 15px;
 }
 
 /* ---------- 顶栏 / 横幅 / 提示 ---------- */
@@ -1425,7 +1463,7 @@ select:focus {
   left: var(--sal);
   top: 45%;
   z-index: 56;
-  width: 22px;
+  width: 30px; /* 手机端抽屉把手：原 22px 太窄，点不中（它是打开牌局记录的唯一入口） */
   height: 64px;
   border: 1px solid var(--line);
   border-left: none;
@@ -2141,6 +2179,24 @@ body {
 }
 
 /* ---------- 对决芯片特效（震动 / 爆炸 / 脉冲） ---------- */
+
+/* 窄屏（iPhone SE 375 / 主流安卓 360-390）：对决浮层原按 340px 最小宽排版，
+   而面板内容盒在 375px 屏上只有约 295px —— 座位卡被挤出边框、夺冠横幅被裁。 */
+@media (max-width: 720px) {
+  .sd-seat {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .sd-verdict-banner {
+    white-space: normal;
+    text-align: center;
+    padding: 8px 14px;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+}
 
 .sd-seat {
   position: relative;
@@ -3060,7 +3116,8 @@ body {
   color: hsla(40, 80%, 75%, 0.95);
   background: rgba(60, 42, 20, 0.35);
   border-radius: 99px;
-  padding: 1px 9px;
+  /* 它是"查看对手技能"的按钮：原 1px/9px 只有约 19px 高，手机上几乎点不中 */
+  padding: 6px 10px;
   font-size: 12px;
 }
 
@@ -3101,7 +3158,7 @@ body {
   color: rgba(255, 255, 255, 0.35);
   font-size: 12px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 9px 12px; /* 大厅左下角的常驻入口（管理员/音量）：原 4px/8px 在手机上太小 */
 }
 
 .admin-link:hover {

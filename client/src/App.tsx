@@ -13,6 +13,21 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   // toast 定时器互覆问题：两条错误相隔较短时，第一条的定时器会把第二条提前清掉
   const toastTimer = useRef<number | null>(null);
+  /**
+   * 断线遮罩：连接断开或重连中时屏蔽操作。
+   * 此前只有顶部一条 28px 的横幅提示，牌桌/操作栏照常可点 —— 玩家点了「确认出牌」以为生效，
+   * 实际 send 在未连接时发不出去（现已在 socket 层给提示，但更需要一开始就点不动）。
+   * 延迟 1.5 秒再出现，避免网络抖动时闪一下；被顶号（replaced）不遮：那时玩家需要点「重新连接」。
+   */
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    if (status === 'open' || status === 'replaced') {
+      setOffline(false);
+      return;
+    }
+    const t = window.setTimeout(() => setOffline(true), 1500);
+    return () => window.clearTimeout(t);
+  }, [status]);
 
   useEffect(() => {
     const offV = net.onView(setView);
@@ -50,6 +65,14 @@ export default function App() {
         </div>
       )}
       {page}
+      {offline && (
+        <div className="offline-veil">
+          <div className="offline-card">
+            <b>{status === 'connecting' ? '正在连接服务器…' : '连接已断开，正在重连…'}</b>
+            <span className="hint">连接恢复后会自动回到你的座位与手牌</span>
+          </div>
+        </div>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
