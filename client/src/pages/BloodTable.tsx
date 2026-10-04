@@ -631,8 +631,8 @@ export function BloodTable({ view }: { view: BloodView }) {
         if (myCharId === 'tarot') {
           const drawn = view.me.swapDrawnIds.length;
           return drawn > 0
-            ? `已先抽 ${drawn} 张（高亮）：点选手牌选择弃置（0-2 张），完成本次换牌`
-            : `换牌：可先抽 1-2 张，再点选手牌弃置（剩 ${view.me.swapLeft} 次，未用次数按 1次=1血筹 返还）`;
+            ? `已先抽 ${drawn} 张（高亮）：须弃置恰好 ${drawn} 张完成换牌（可与原手牌混合选择）`
+            : `换牌：可先抽 1-2 张再弃等量的牌，或直接选牌弃置（剩 ${view.me.swapLeft} 次，未用次数按 1次=1血筹 返还）`;
         }
         return `换牌：选至多 3 张弃置并抽满（剩 ${view.me.swapLeft} 次，未用次数按 1次=1血筹 返还）`;
       }
@@ -1389,24 +1389,41 @@ export function BloodTable({ view }: { view: BloodView }) {
                         ))}
                       </div>
                     )}
-                    <button
-                      className="btn primary"
-                      disabled={!(myCharId === 'tarot' && view.me.swapDrawnIds.length > 0) && selSwap.length === 0}
-                      onClick={() => {
-                        send({ t: 'bSwap', cardIds: selSwap, drawCount: 0 });
-                        playSfx('deal');
-                        setSelSwap([]);
-                      }}
-                    >
-                      {myCharId === 'tarot' && view.me.swapDrawnIds.length > 0
-                        ? selSwap.length > 0
-                          ? `弃置 ${selSwap.length} 张 · 完成换牌`
-                          : '不弃置 · 完成换牌'
-                        : `换掉选中的 ${selSwap.length} 张`}
-                    </button>
-                    <button className="btn" onClick={() => send({ t: 'bSwapStop' })}>
-                      停止换牌（剩余 {view.me.swapLeft} 次兑 {view.me.swapLeft}🩸）
-                    </button>
+                    {(() => {
+                      // 塔罗师等量置换：先抽 N 张就必须弃 N 张（可与手牌混合选择），完成时手牌数不变
+                      const stagedTarot = myCharId === 'tarot' && view.me.swapDrawnIds.length > 0;
+                      const need = view.me.swapDrawnIds.length;
+                      return (
+                        <>
+                          <button
+                            className="btn primary"
+                            disabled={stagedTarot ? selSwap.length !== need : selSwap.length === 0}
+                            title={
+                              stagedTarot && selSwap.length !== need
+                                ? `须弃置与先抽数量相同的牌（${need} 张）`
+                                : undefined
+                            }
+                            onClick={() => {
+                              send({ t: 'bSwap', cardIds: selSwap, drawCount: 0 });
+                              playSfx('deal');
+                              setSelSwap([]);
+                            }}
+                          >
+                            {stagedTarot
+                              ? `弃置 ${selSwap.length}/${need} 张 · 完成换牌`
+                              : `换掉选中的 ${selSwap.length} 张`}
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={stagedTarot}
+                            title={stagedTarot ? `先完成本次换牌：弃置 ${need} 张` : undefined}
+                            onClick={() => send({ t: 'bSwapStop' })}
+                          >
+                            停止换牌（剩余 {view.me.swapLeft} 次兑 {view.me.swapLeft}🩸）
+                          </button>
+                        </>
+                      );
+                    })()}
                     {myCharId === 'fryer' && (
                       <button
                         className="btn"

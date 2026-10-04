@@ -707,15 +707,23 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
   if (p.swapLeft <= 0) throw new BloodError('NO_SWAP', '没有剩余换牌次数');
   const tarot = effChar(p) === 'tarot';
-  // 塔罗师：每次换牌可先抽牌（≤2）再弃牌（≤2）；drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）。
-  // 分步流程（bSwapDraw 已先抽）进入弃置步：不允许再抽，弃置完成时消耗本次换牌
+  // 塔罗师：每次换牌「可先抽牌（≤2）再弃牌」——等量置换（抽几弃几），换牌结束时手牌数不变；
+  // drawCount 为客户端可控值，非有限数字按 0 处理（防 NaN 绕过上限）。
+  // 分步流程（bSwapDraw 已先抽）进入弃置步：不允许再抽，弃置数量须与先抽一致。
   const dc = Number(drawCount ?? 0);
   let draw = tarot && Number.isFinite(dc) ? Math.max(0, Math.min(2, Math.floor(dc))) : 0;
   const staged = tarot && p.swapDrawnIds.length > 0;
   if (staged && draw > 0) {
-    throw new BloodError('BAD_MSG', '已先抽牌：点选手牌弃置（0-2 张）完成本次换牌');
+    throw new BloodError('BAD_MSG', '已先抽牌：点选手牌弃置完成本次换牌');
   }
   if (staged) draw = 0;
+  // 等量置换：先抽 N 张就必须弃 N 张（否则可凭空多牌/少牌，违背「换牌」语义）
+  if (tarot && draw > 0 && cardIds.length !== draw) {
+    throw new BloodError('BAD_COUNT', `塔罗师先抽 ${draw} 张，须弃置 ${draw} 张`);
+  }
+  if (staged && cardIds.length !== p.swapDrawnIds.length) {
+    throw new BloodError('BAD_COUNT', `须弃置与先抽数量相同的牌（${p.swapDrawnIds.length} 张）`);
+  }
   const maxN = Math.min(tarot ? 2 : charSwapMax(effChar(p)), p.hand.length + draw);
   if (cardIds.length > maxN) {
     throw new BloodError('TOO_MANY', tarot ? '塔罗师每次换牌最多弃置2张' : effChar(p) === 'idol' ? '弃置张数不能超过手牌数' : '每次换牌最多弃置3张');
@@ -900,12 +908,9 @@ export function bSwapStop(gs: BloodState, playerId: string, now: number): void {
     throw new BloodError('PENDING', '先完成当前角色技能抉择');
   }
   if (p.swapDone) return;
-  // 塔罗师已先抽未弃：停止换牌则抽到的牌保留、该次换牌照常计次（否则可白嫖多看 2 张不付费）
+  // 塔罗师已先抽未弃：等量置换语义下必须先完成本次换牌（弃置等量牌），不得借停止白拿抽到的牌
   if (p.swapDrawnIds.length > 0) {
-    p.swapDrawnIds = [];
-    drawToCap(gs, p);
-    p.swapLeft = Math.max(0, p.swapLeft - 1);
-    pushLog(gs, 'action', `${pname(p)} 保留先抽的牌，计入一次换牌`);
+    throw new BloodError('PENDING', `先完成本次换牌：弃置 ${p.swapDrawnIds.length} 张`);
   }
   p.swapDone = true;
   p.lastAction = '停止换牌';
@@ -3388,6 +3393,17 @@ export function bloodTick(gs: BloodState, now: number): boolean {
         if (gs.phase !== 'swap') break; // swapItem 阶段全员已停止换牌，无需强制收尾
         if (!p.swapDone && !(gs.secretPending && gs.secretPending.seat === p.id)) {
           p.wasAuto = true;
+          // 塔罗师先抽未弃的托管：自动弃置刚抽的等量牌完成本次换牌（等量置换不吃白嫖，也不断卡死）
+          if (p.swapDrawnIds.length > 0) {
+            const drawnSet = new Set(p.swapDrawnIds);
+            const autoDiscard = p.hand.filter((c) => drawnSet.has(c.id));
+            p.hand = p.hand.filter((c) => !drawnSet.has(c.id));
+            p.discard.push(...autoDiscard);
+            drawToCap(gs, p);
+            p.swapLeft = Math.max(0, p.swapLeft - 1);
+            p.swapDrawnIds = [];
+            pushLog(gs, 'action', `${pname(p)} 超时托管：弃置先抽的 ${autoDiscard.length} 张，计入一次换牌`);
+          }
           act(() => bSwapStop(gs, p.id, now));
         }
       }

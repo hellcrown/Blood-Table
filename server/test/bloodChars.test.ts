@@ -517,13 +517,16 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(p0.blood).toBe(blood - 1);
   });
 
-  it('塔罗师：换牌可先抽2张再弃1张（手牌可超上限）', () => {
+  it('塔罗师：换牌先抽与弃置等量配对（抽2弃1拒绝，抽2弃2手牌数不变）', () => {
     const gs = makeGame('tarot', 'clerk');
     driveTo(gs, 'swap');
     const p0 = gs.players[0];
     const hand = p0.hand.length;
-    bSwap(gs, p0.id, [p0.hand[0].id], 2, NOW);
-    expect(p0.hand.length).toBe(hand + 1);
+    // 等量置换（用户定版）：先抽几就必须弃几——不配对会让手牌凭空多/少
+    expect(() => bSwap(gs, p0.id, [p0.hand[0].id], 2, NOW)).toThrow(/须弃置 2 张/);
+    const two = p0.hand.slice(0, 2).map((c) => c.id);
+    bSwap(gs, p0.id, two, 2, NOW);
+    expect(p0.hand.length).toBe(hand);
     expect(hasLog(gs, '塔罗师')).toBe(true);
   });
 
