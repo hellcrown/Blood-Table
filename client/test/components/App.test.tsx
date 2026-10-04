@@ -32,9 +32,15 @@ describe('App · 连接横幅与错误 toast', () => {
   beforeEach(() => {
     FakeWS.instances = [];
     vi.stubGlobal('WebSocket', FakeWS);
+    // 完整 JSON 响应桩：headers.get 必须可用，否则 fetchServerVersion 读 content-type 抛 TypeError
+    // 被 catch 吞掉——版本检查会走「异常兜底」分支而非正常 JSON 分支（测的不是想测的路径）
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({}) })),
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ ok: true, latest: null, build: null }),
+      })),
     );
   });
   afterEach(() => {

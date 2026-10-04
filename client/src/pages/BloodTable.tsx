@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { playSfx } from '../audio/sound';
 import type { FxEvent } from '../net/socket';
 import { BLOOD_MARKET_BY_ID, BLOOD_MARKET_BY_NAME } from '@shared/bloodCards';
-import { BLOOD_PHASE_LABELS, BLOOD_PHASES, BLOOD_TURN_MS } from '@shared/bloodConstants';
+import { BLOOD_TURN_MS } from '@shared/bloodConstants';
 import { applyCharEval } from '@shared/bloodChars';
 import { applyImitate, evalBloodHand, toEvalCard, type EvalCard } from '@shared/bloodEval';
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
@@ -15,6 +15,7 @@ import { CharDetail, CharPortrait } from '../components/CharCard';
 import { CardView } from '../components/Card';
 import { BCard, cardEffRank, cardLabel, effLabel, effRankOf, sortHandByType } from '../components/BloodCard';
 import { Showdown, type ShowdownRow } from '../components/Showdown';
+import { PhaseBar } from '../components/PhaseBar';
 
 /** 鲜花/鸡蛋飞行动画：从 from 座位面板中心飞向 to 座位面板中心；鸡蛋落地震动+糊脸 */
 function playFlyFx(kind: 'flower' | 'egg', fromSeat: number, toSeat: number): void {
@@ -98,11 +99,6 @@ const HAND_LADDER: { name: string; desc: string; chipOnly?: boolean }[] = [  { n
   { name: '一对', desc: '2 张点数相同的牌' },
   { name: '高牌', desc: '不构成以上任何牌型' },
 ];
-
-const PHASES: { key: BloodView['phase']; label: string }[] = BLOOD_PHASES.filter((k) => k !== 'gameover').map((k) => ({
-  key: k,
-  label: BLOOD_PHASE_LABELS[k],
-}));
 
 /** 骰子点数面（对赌协议特效） */
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
@@ -624,8 +620,6 @@ export function BloodTable({ view }: { view: BloodView }) {
     });
   };
 
-  const phaseIdx = PHASES.findIndex((p) => p.key === view.phase);
-
   const myTurnText = (): string => {
     switch (view.prompt.k) {
       case 'crownBid':
@@ -1012,15 +1006,9 @@ export function BloodTable({ view }: { view: BloodView }) {
           </button>
         </header>
 
-        <div className="phase-bar">
-          {PHASES.map((p, i) => (
-            <span key={p.key} className={`ph-step ${i === phaseIdx ? 'cur' : i < phaseIdx ? 'done' : ''}`}>
-              {p.label}
-            </span>
-          ))}
-          <span className="spacer" />
+        <PhaseBar phase={view.phase}>
           <Countdown deadline={view.deadline} offsetRef={offsetRef} />
-        </div>
+        </PhaseBar>
 
         {/* 对决展示确认等待条：全员确认后服务端统一进入购买，倒计时同步 */}
         {view.showdownWait && (

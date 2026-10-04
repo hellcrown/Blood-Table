@@ -114,9 +114,13 @@ describe('批次 D · 客户端不得重新抄一份', () => {
   });
 
   it('血色阶段条由 BLOOD_PHASES 派生（漏阶段不再是"静默不高亮"）', () => {
-    const src = readFileSync(path.join(CLIENT_SRC, 'pages', 'BloodTable.tsx'), 'utf8');
-    expect(src).toContain('BLOOD_PHASES');
-    expect(src).toContain('BLOOD_PHASE_LABELS');
+    // 派生已抽到独立组件 PhaseBar（BloodTable 引用之），守卫随之指向真实数据源
+    const bar = readFileSync(path.join(CLIENT_SRC, 'components', 'PhaseBar.tsx'), 'utf8');
+    expect(bar).toContain('BLOOD_PHASES');
+    expect(bar).toContain('BLOOD_PHASE_LABELS');
+    expect(bar).toContain("k !== 'gameover'"); // 终态不进阶段条
+    const table = readFileSync(path.join(CLIENT_SRC, 'pages', 'BloodTable.tsx'), 'utf8');
+    expect(table).toContain('PhaseBar'); // 页面仍渲染阶段条，而非重新抄一份
   });
 });
 

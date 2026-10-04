@@ -18,6 +18,9 @@ import {
  */
 describe('客户端 · 版本提示薄壳', () => {
   it('存储不可用时读取一律返回空串而不抛异常', () => {
+    // 环境守卫：本文件的前提是 node（无 window）。若未来配置漂移把本文件划进 jsdom
+    // （存储可用），测试照样会绿但测的不再是「存储不可用」——这里让它当场红而不是静默失效
+    expect(typeof window).toBe('undefined');
     expect(loadSeenKey()).toBe('');
     expect(loadDismissedKey()).toBe('');
   });
