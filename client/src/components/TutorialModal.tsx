@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEscClose } from './useOverlayClose';
 
 interface TutorialPage {
   title: string;
@@ -154,6 +155,7 @@ export function TutorialModal({ onClose }: { onClose: () => void }) {
   const total = PAGES.length;
   const cur = PAGES[page];
   const last = page === total - 1;
+  useEscClose(onClose);
 
   return (
     <div className="overlay codex-overlay" onClick={onClose}>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { net } from '../net/socket';
+import { useEscClose } from './useOverlayClose';
 
 interface CharsRow {
   charId: string;
@@ -40,6 +41,7 @@ const RANK_MARK = ['🥇', '🥈', '🥉'];
 export function MyStatsModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<MeResponse | null>(null);
   const [error, setError] = useState('');
+  useEscClose(onClose);
 
   useEffect(() => {
     let alive = true;

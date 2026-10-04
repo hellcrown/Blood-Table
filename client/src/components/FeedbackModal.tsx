@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { guardDirtyClose, useEscClose } from './useOverlayClose';
 
 /** 玩家反馈弹窗：匿名提交问题（可选附联系方式）；对局内会自动附带房间码与昵称 */
 export function FeedbackModal({
@@ -14,6 +15,10 @@ export function FeedbackModal({
   const [contact, setContact] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  /** 已有草稿时关闭要先确认（正文或联系方式任一非空），避免误触面板外空白丢掉已写内容 */
+  const hasDraft = text.trim().length > 0 || contact.trim().length > 0;
+  const close = (): void => guardDirtyClose(hasDraft && !status?.ok, onClose);
+  useEscClose(close);
 
   const submit = (): void => {
     if (busy) return;
@@ -47,7 +52,7 @@ export function FeedbackModal({
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={close}>
       <div className="panel feedback-modal" onClick={(e) => e.stopPropagation()}>
         <h3>📨 反馈游戏问题</h3>
         <div className="hint feedback-meta">

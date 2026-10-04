@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { getBgmVol, getSfxVol, setBgmVol, setSfxVol, playSfx } from '../audio/sound';
+import { useEscClose } from './useOverlayClose';
 
 /**
  * 音量设置面板：音效 / BGM 双滑杆（localStorage 持久化，无需过服务器）。
@@ -8,6 +9,7 @@ import { getBgmVol, getSfxVol, setBgmVol, setSfxVol, playSfx } from '../audio/so
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [sfx, setSfx] = useState(getSfxVol());
   const [bgm, setBgm] = useState(getBgmVol());
+  useEscClose(onClose);
 
   const row = (label: string, value: number, onChange: (v: number) => void, hint: string, onTest?: () => void) => (
     <div className="vol-row">

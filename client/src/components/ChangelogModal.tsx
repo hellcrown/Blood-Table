@@ -1,7 +1,9 @@
 import { CHANGELOG } from '@shared/changelog';
+import { useEscClose } from './useOverlayClose';
 
 /** 更新日志弹窗（大厅「📜 更新日志」入口）：展示版本演进，让玩家感知游戏在持续生长 */
 export function ChangelogModal({ onClose }: { onClose: () => void }) {
+  useEscClose(onClose);
   return (
     <div className="overlay codex-overlay" onClick={onClose}>
       <div className="panel codex-panel lb-panel" onClick={(e) => e.stopPropagation()}>

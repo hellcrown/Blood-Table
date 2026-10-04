@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BLOOD_CHARS } from '@shared/bloodChars';
 import { BLOOD_MARKET_DEFS, BLOOD_MARKET_EXPANSION_DEFS, type BloodMarketDef, type MarketKind } from '@shared/bloodCards';
 import { CharDetail, CharPortrait } from './CharCard';
+import { useEscClose } from './useOverlayClose';
 
 const KIND_CN: Record<MarketKind, string> = { chip: '芯片', item: '道具', secret: '交易' };
 
@@ -34,6 +35,7 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<'all' | MarketKind>('all');
   const [withExp, setWithExp] = useState(true);
   const [detail, setDetail] = useState<string | null>(null);
+  useEscClose(onClose);
 
   const chars = BLOOD_CHARS.filter(
     (c) =>

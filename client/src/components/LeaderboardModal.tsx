@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { net } from '../net/socket';
 import { MyStatsModal } from './MyStatsModal';
+import { useEscClose } from './useOverlayClose';
 
 interface LeaderRow {
   charId: string;
@@ -29,6 +30,8 @@ export function LeaderboardModal({ onClose }: { onClose: () => void }) {
   const [ladder, setLadder] = useState<LadderRow[] | null>(null);
   const [error, setError] = useState('');
   const [statsOpen, setStatsOpen] = useState(false);
+  // Esc 关闭：若正在看个人战绩子弹窗，先关它（与视觉层级一致）
+  useEscClose(() => (statsOpen ? setStatsOpen(false) : onClose()), true);
 
   useEffect(() => {
     let alive = true;
