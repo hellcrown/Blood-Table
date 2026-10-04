@@ -119,3 +119,30 @@ describe('批次 D · 客户端不得重新抄一份', () => {
     expect(src).toContain('BLOOD_PHASE_LABELS');
   });
 });
+
+/**
+ * 部署卫生：线上仓库是 `receive.denyCurrentBranch=updateInstead` 的部署目标 ——
+ * 部署脚本一旦改动**被跟踪的文件**，工作区就脏了，此后所有改到该文件的推送都会被拒，
+ * 而报错只有 "Entry 'xxx' not uptodate. Cannot merge."（不指向根因；若再被 skip-worktree
+ * 位掩盖，服务器上连 git status 都显示干净）。本轮就是这么卡住的：deploy.sh 用 npm install
+ * 重写了 package-lock.json。故把「不许在部署路径上重写 lock」钉成测试。
+ */
+describe('批次 D · 部署脚本不得改脏部署工作区', () => {
+  const deploy = readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+  const bloodtable = readFileSync(path.join(ROOT, 'bin', 'bloodtable'), 'utf8');
+
+  it('deploy.sh 用 npm ci 安装依赖，而不是 npm install（后者会重写 package-lock.json）', () => {
+    expect(deploy).toContain('npm ci');
+    expect(deploy).not.toMatch(/^\s*npm install\b/m);
+  });
+
+  it('deploy.sh 在安装后断言 lock 未被改动（有工具绕过 npm ci 时的兜底告警）', () => {
+    expect(deploy).toContain('git diff --quiet -- package-lock.json');
+  });
+
+  it('bloodtable 提供 doctor 自检（脏工作区 / skip-worktree 标记 / 进程状态）', () => {
+    expect(bloodtable).toContain('doctor)');
+    expect(bloodtable).toContain('no-skip-worktree');
+    expect(bloodtable).toMatch(/ls-files -t \| grep '\^S'/);
+  });
+});

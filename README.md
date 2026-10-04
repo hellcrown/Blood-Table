@@ -211,3 +211,16 @@ bloodtable help                                              # 查看全部子�
 > **为什么要有 `deploy`**：线上机器出网到 GitHub 并不稳定（实测多次连接超时 / TLS 中断），
 > 而 `update` 的第一步就是 `git pull` —— 网络一抖，明明代码已由推送到达服务器却上不了线。
 > `update` 现在会在拉取失败时**明确告警后继续部署当前工作区代码**，只想上线当前代码可直接用 `deploy`。
+
+> **推送被拒怎么查**（`Entry 'xxx' not uptodate. Cannot merge.` / `Could not update working tree to new HEAD`）：
+> `updateInstead` 要求线上工作区**干净**才能更新，报错既不说谁改的、也不说怎么修；若该文件还带
+> `skip-worktree` 位，连服务器上 `git status` 都显示干净。直接在服务器跑 `bloodtable doctor` 自检，
+> 或手工修复：
+>
+> ```bash
+> git update-index --no-skip-worktree <文件> && git checkout -- <文件>
+> ```
+>
+> 这个坑的源头是「在服务器上跑 `npm install`」——它会重写被跟踪的 `package-lock.json`。
+> `deploy.sh` 现已改用 `npm ci`（只按 lock 安装、从不写 lock），并在部署后断言 lock 未被改动。
+>

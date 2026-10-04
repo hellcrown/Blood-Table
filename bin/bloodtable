@@ -34,6 +34,35 @@ fi
 
 PORT="${PORT:-3000}"
 
+# 上线前自检：线上仓库是 updateInstead 的部署目标 —— 工作区一旦不干净，
+# 此后所有**改到那些文件的推送**都会被拒，而报错只说 "not uptodate"，不指向根因；
+# 若还带 skip-worktree 位，连 `git status` 都显示干净。这套排查因此固化成命令。
+deploy_tree_check() {
+  local verbose="${1:-}"
+  cd "$REPO"
+  local dirty skip assume problem=0
+  dirty="$(git status --porcelain)"
+  if [ -n "$dirty" ]; then
+    problem=1
+    echo "❌ 工作区有未提交改动（推送会被拒：updateInstead 无法更新工作区）"
+    [ "$verbose" = "-v" ] && echo "$dirty"
+  fi
+  # S = skip-worktree，小写 = assume-unchanged：两者都会让 git status 隐藏改动，并阻止推送更新该文件
+  skip="$(git ls-files -t | grep '^S' || true)"
+  assume="$(git ls-files -v | grep '^[a-z]' || true)"
+  if [ -n "$skip$assume" ]; then
+    problem=1
+    echo "❌ 存在 skip-worktree / assume-unchanged 标记（git status 会隐藏这些文件，且推送无法更新它们）："
+    [ -n "$skip" ] && echo "$skip"
+    [ -n "$assume" ] && echo "$assume"
+    echo "   修复：git update-index --no-skip-worktree <文件> && git checkout -- <文件>"
+    echo "         git update-index --no-assume-unchanged <文件>"
+  fi
+  [ "$verbose" = "-v" ] && echo "HEAD：$(git log --oneline -1)"
+  [ "$problem" = "0" ] && echo "✅ 部署工作区健康（无未提交改动、无被隐藏的文件）"
+  return "$problem"
+}
+
 case "${1:-status}" in
   update)
     cd "$REPO"
@@ -49,7 +78,21 @@ case "${1:-status}" in
   deploy)
     # 明确不联网的部署：适用于「本机 push 直达服务器仓库」的上线方式
     cd "$REPO"
+    # 脏工作区不影响本次部署，但会让**后续推送**被拒，故在此先提示（不阻断部署）
+    deploy_tree_check || true
     bash deploy.sh
+    ;;
+  doctor)
+    # 排查「push 被拒 / 代码明明推了却没上线」：多为部署工作区不干净或被 skip-worktree 隐藏
+    cd "$REPO"
+    if deploy_tree_check -v; then :; else echo "   ↑ 以上即为推送被 updateInstead 拒绝的原因"; fi
+    echo ""
+    echo "远端：$(git remote -v | grep -E '^(origin|server)' | tr '\n' ' ' || true)"
+    if pm2 pid blood-table >/dev/null 2>&1; then
+      echo "pm2：blood-table 进程在跑"
+    else
+      echo "pm2：blood-table 进程不存在（用 bloodtable start 启动）"
+    fi
     ;;
   restart | reboot)
     pm2 restart blood-table
@@ -76,9 +119,10 @@ case "${1:-status}" in
     echo "✅ 已安装：/usr/local/bin/bloodtable → $SELF"
     ;;
   help | -h | --help)
-    echo "用法: bloodtable {update|deploy|restart|reboot|stop|start|logs|clear|status|install}"
+    echo "用法: bloodtable {update|deploy|doctor|restart|reboot|stop|start|logs|clear|status|install}"
     echo "  update    拉最新代码并重启（git pull --ff-only && bash deploy.sh，含排水等待）"
     echo "  deploy    只部署当前工作区代码并重启（不联网，适用于「本机 push 直达本仓库」）"
+    echo "  doctor    自检部署工作区（推送被拒的排查：脏文件 / skip-worktree 标记 / 进程状态）"
     echo "  restart   重启游戏服务（reboot 同义）"
     echo "  stop/start  停止 / 启动游戏服务"
     echo "  logs      查看最近 50 行日志（Ctrl+C 退出）"
@@ -89,7 +133,7 @@ case "${1:-status}" in
     echo "仓库目录：$REPO"
     ;;
   *)
-    echo "用法: bloodtable {update|deploy|restart|reboot|stop|start|logs|clear|status|install}" >&2
+    echo "用法: bloodtable {update|deploy|doctor|restart|reboot|stop|start|logs|clear|status|install}" >&2
     exit 1
     ;;
 esac

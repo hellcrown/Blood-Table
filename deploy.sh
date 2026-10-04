@@ -16,8 +16,23 @@ if ! command -v pm2 >/dev/null 2>&1; then
 fi
 
 # 2. 安装依赖（服务端仅需 tsx + ws，dist 前端产物已随仓库提交，无需在服务器构建）
+# 必须用 npm ci 而不是 npm install：npm install 会**重写被跟踪的 package-lock.json**，
+# 把线上部署目录变成「工作区有本地修改」。而线上仓库用的是 receive.denyCurrentBranch=updateInstead，
+# 工作区一脏，此后所有**改到 lock 文件的推送**都会被拒，报错只有
+#   Entry 'package-lock.json' not uptodate. Cannot merge. / Could not update working tree to new HEAD
+# ——既不说谁改的，也不说怎么修（若再被 skip-worktree 位掩盖，连 git status 都显示干净）。
+# npm ci 只按 lock 安装、从不写 lock，也更快、可复现。
 echo "安装依赖..."
-npm install --no-audit --no-fund
+if ! npm ci --no-audit --no-fund; then
+  echo "❌ npm ci 失败：通常是 package-lock.json 与 package.json 不同步。"
+  echo "   请在**本地**执行 npm install 并把更新后的 package-lock.json 提交推送，再重新部署。"
+  echo "   （不要在服务器上跑 npm install：那会改脏工作区，导致后续推送被 updateInstead 拒绝）"
+  exit 1
+fi
+# 兜底断言：本次部署不应改动被跟踪的 lock 文件
+if ! git diff --quiet -- package-lock.json 2>/dev/null; then
+  echo "⚠️ package-lock.json 在部署后发生了变化：请勿在服务器上执行 npm install，否则后续推送会被拒"
+fi
 
 # 3. 管理密码（网站「管理员」入口用）：保存在 .admin-secret，可自行修改
 SECRET_FILE=".admin-secret"
