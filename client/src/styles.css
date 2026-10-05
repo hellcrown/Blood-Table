@@ -302,6 +302,26 @@ select:focus {
   white-space: nowrap;
 }
 
+/* 聊天入口未读角标 */
+.chat-entry {
+  position: relative;
+}
+
+.chat-dot {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #d4483f;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+}
+
 /* ---------- 全服聊天弹层 ---------- */
 .chat-panel {
   width: min(480px, 92vw);

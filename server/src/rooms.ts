@@ -248,13 +248,22 @@ export class RoomManager {
       session.ws = null;
       session.connected = false;
       if (session.spectator) {
-        // 观战会话断开即移除：无座位/手牌状态（重连恢复价值仅日志序号），
-        // 否则断线观战者永久占 MAX_SPECTATORS 坑位，10 个断开连接即可定向占满观战席
-        try {
-          this.handleLeave(room, session);
-        } catch (e) {
-          console.error('[room] 观战断开清理异常:', e);
-        }
+        // 观战会话断开：宽限 30s 再移除。立刻移除会让网络抖动（客户端 ~1s 后自动重连）
+        // 直接把观战者踢回大厅（会话令牌已随移除失效，重连收到「会话已失效」）；
+        // 宽限期内重连经 tokenIndex 接管原会话，超时未归才移除释放观战坑位
+        session.connected = false;
+        const t = setTimeout(() => {
+          try {
+            if (!session.connected && room.sessions.get(session.id) === session) {
+              this.removeSession(room, session);
+              if (room.sessions.size === 0) this.rooms.delete(room.code);
+              this.broadcast(room);
+            }
+          } catch (e) {
+            console.error('[room] 观战宽限清理异常:', e);
+          }
+        }, 30_000);
+        t.unref?.();
         return;
       }
       // 房主暂时掉线不转移（重连自动恢复身份）；仅真正退出房间时才转移。

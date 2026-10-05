@@ -1065,12 +1065,10 @@ export function BloodTable({ view }: { view: BloodView }) {
           </div>
         )}
 
+        {spectating && (
+          <div className="spectate-banner">🔭 观战中 —— 对局结束后点击空座位可随时加入</div>
+        )}
         <div className="blood-area table-ring">
-          {spectating && (
-            <div className="spectate-banner" style={{ gridArea: 'top' }}>
-              🔭 观战中 —— 对局结束后点击空座位可随时加入
-            </div>
-          )}
           {opponents.map((opp) => (
             <div
               key={opp.seat}

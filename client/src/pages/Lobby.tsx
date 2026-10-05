@@ -33,6 +33,8 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  /** 聊天未读数：弹层关闭期间收到消息即累计，打开即清零（入口按钮红点） */
+  const [chatUnread, setChatUnread] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
   /** 有未读的更新日志内容：大厅入口显示角标 */
@@ -47,6 +49,15 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   useEffect(() => {
     return net.onAccount(setAccount);
   }, []);
+
+  // 聊天未读：弹层关闭期间收到的消息计数；打开弹层清零
+  useEffect(() => {
+    if (chatOpen) {
+      setChatUnread(0);
+      return;
+    }
+    return net.onChatMsg(() => setChatUnread((n) => n + 1));
+  }, [chatOpen]);
 
   // 公开房间列表：连接后立即拉一次 + 每 10s 轮询（onRoomList 收快照）；断开/卸载清理
   useEffect(() => {
@@ -372,8 +383,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
         />
 
         <div className="lobby-links">
-          <button className="btn small ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+          <button className="btn small ghost chat-entry" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
             💬 聊天
+            {chatUnread > 0 && <span className="chat-dot">{chatUnread > 9 ? '9+' : chatUnread}</span>}
           </button>
           <button className="btn small primary" onClick={() => setTutorialOpen(true)}>
             📚 教程
