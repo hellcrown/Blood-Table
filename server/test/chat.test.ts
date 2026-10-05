@@ -67,6 +67,35 @@ describe('ChatHub · 发言与历史', () => {
   });
 });
 
+describe('ChatHub · 历史落盘（重启不丢）', () => {
+  it('initChatStore 加载既有历史；新发言追加落盘；新实例恢复', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-'));
+    const file = path.join(dir, 'chat.jsonl');
+    const storePath = file;
+    const deps = (): ChatDeps => ({
+      send: () => {},
+      broadcast: () => {},
+      resolveIdentity: (_ws, name) => ({ name: String(name ?? '路人'), account: false }),
+    });
+    // 实例1：发言两条（同一 IP 会限流，换 IP）
+    const h1 = new ChatHub(deps());
+    h1.initChatStore(storePath);
+    h1.onRaw({ ip: '10.1.0.1' }, '{"t":"chat","text":"第一条","name":"甲"}');
+    h1.onRaw({ ip: '10.1.0.2' }, '{"t":"chat","text":"第二条","name":"乙"}');
+    // 实例2（模拟重启）：从文件恢复
+    const h2 = new ChatHub(deps());
+    h2.initChatStore(storePath);
+    const ws = { ip: '10.9.9.9' };
+    h2.onRaw(ws, '{"t":"chatHistory"}');
+    expect(h2.history.map((m) => m.text)).toEqual(['第一条', '第二条']);
+    void ws;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('ChatHub · 防护', () => {
   it('限流 10 秒 5 条：第 6 条静默丢弃（不广播不入历史），换 IP 不受影响', () => {
     const { hub, broadcasts } = makeHub();

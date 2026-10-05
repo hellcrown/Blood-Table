@@ -7,6 +7,8 @@
  * - 接入：index.ts 在 manager.handleConnection 之前挂消息前置拦截，按 raw 前缀 `{"t":"chat`
  *   识别聊天消息（C2S 只有 chat/chatHistory 以此开头），消费后跳过房间分发层
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { IpTable, SlidingWindow } from './net/limits';
 import type { ChatMsg } from '@shared/protocol';
 
@@ -39,6 +41,7 @@ function cleanChatText(raw: unknown): string {
 
 export class ChatHub {
   private history: ChatMsg[] = [];
+  private storePath: string | null = null;
   /** 每 IP 10 秒 5 条；IpTable 闲置自清理由调用方周期 prune 或依赖其 lastHit 判定（此处消息稀疏，无需主动清理） */
   private limits = new IpTable(
     () => new SlidingWindow(10_000, 5),
@@ -56,6 +59,51 @@ export class ChatHub {
   prune(): void {
     this.limits.prune();
     this.historyLimits.prune();
+  }
+
+  /**
+   * 启动时调用：历史落盘到 JSONL（重启不丢；坏行跳过；超 200KB 重写为最近 80 条）。
+   * 未调用（测试）则纯内存。
+   */
+  initChatStore(filePath: string): void {
+    this.storePath = filePath;
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      if (fs.existsSync(filePath)) {
+        const msgs: ChatMsg[] = [];
+        for (const line of fs.readFileSync(filePath, 'utf-8').split('\n')) {
+          const t = line.trim();
+          if (!t) continue;
+          try {
+            const m = JSON.parse(t) as ChatMsg;
+            if (typeof m?.name === 'string' && typeof m?.text === 'string' && typeof m?.ts === 'number') {
+              msgs.push(m);
+            }
+          } catch {
+            /* 坏行跳过 */
+          }
+        }
+        this.history = msgs.slice(-HISTORY_MAX);
+      }
+    } catch (e) {
+      console.error('[chat] 初始化聊天历史落盘失败（仅内存）:', e);
+    }
+  }
+
+  private persist(m: ChatMsg): void {
+    if (!this.storePath) return;
+    try {
+      fs.appendFileSync(this.storePath, JSON.stringify(m) + '\n');
+      // 防无限膨胀：超过 200KB 重写为最近 80 条
+      if (fs.statSync(this.storePath).size > 200 * 1024) {
+        fs.writeFileSync(
+          this.storePath,
+          this.history.map((x) => JSON.stringify(x)).join('\n') + '\n',
+        );
+      }
+    } catch (e) {
+      console.error('[chat] 聊天历史落盘失败（已保留内存）:', e);
+    }
   }
 
   /** 处理一条原始消息；返回 true 表示属于聊天（已消费），调用方应跳过房间分发层 */
@@ -83,6 +131,7 @@ export class ChatHub {
     const m: ChatMsg = { name: id.name, text, ts: Date.now(), ...(id.account ? { account: true } : {}) };
     this.history.push(m);
     if (this.history.length > HISTORY_MAX) this.history.splice(0, this.history.length - HISTORY_MAX);
+    this.persist(m);
     this.deps.broadcast({ t: 'chatMsg', name: m.name, text: m.text, ts: m.ts, ...(m.account ? { account: true } : {}) });
     return true;
   }

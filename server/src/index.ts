@@ -698,7 +698,8 @@ setInterval(() => {
   chatHub.prune(); // 聊天限流表：按 IP 命中即建条目，同样须周期清理
 }, 5 * 60_000).unref();
 
-// 全服聊天：广播给所有连接；身份=登录账号名/匿名昵称（清洗+注册名保护+路人兜底）；历史仅内存 80 条
+// 全服聊天：广播给所有连接；身份=登录账号名/匿名昵称（清洗+注册名保护+路人兜底）；
+// 历史落盘 data/chat.jsonl（重启不丢，内存仍封顶 80 条）
 const chatHub = new ChatHub({
   send: (ws, msg) => {
     try {
@@ -752,6 +753,8 @@ const chatHub = new ChatHub({
     return w.chatIdentity;
   },
 });
+
+chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
 
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
