@@ -695,6 +695,7 @@ setInterval(() => {
   authTryLimit.prune();
   apiLimit.prune(); // 通用 API 限流表：同样是按 IP 命中即建条目，须清理防慢性膨胀
   pruneRevocations();
+  chatHub.prune(); // 聊天限流表：按 IP 命中即建条目，同样须周期清理
 }, 5 * 60_000).unref();
 
 // 全服聊天：广播给所有连接；身份=登录账号名/匿名昵称（清洗+注册名保护+路人兜底）；历史仅内存 80 条
@@ -718,13 +719,27 @@ const chatHub = new ChatHub({
       }
     }
   },
-  resolveIdentity: (_ws, name, auth) => {
+  resolveIdentity: (ws, name, auth) => {
     const acc = verifyToken(auth);
     if (acc) return { name: acc.name, account: true };
+    // 匿名身份按连接固化：首条消息解析后挂在 ws 上，后续忽略客户端带来的 name
+    //（否则同一条连接可逐条换名，伪装成多个不同的人）
+    const w = ws as { chatIdentity?: { name: string; account: boolean }; chatFallbackName?: string };
+    if (w.chatIdentity) return w.chatIdentity;
     let n = cleanAccountName(name);
-    if (!n) n = `路人${Math.floor(Math.random() * 90 + 10)}`;
-    // 注册名保护：匿名不得冒用已注册昵称（与 addSession 同口径）
-    if (isNameRegistered(n)) {
+    if (!n) {
+      // 每连接稳定的路人名（懒生成挂在 ws 上）
+      w.chatFallbackName ??= `路人${Math.floor(Math.random() * 90 + 10)}`;
+      n = w.chatFallbackName;
+    }
+    // 注册名保护（与 addSession 同口径并扩展到衍生形态）：
+    // 匿名不得采用已注册昵称，也不得直接占用「已注册昵称#N」的衍生形态
+    const baseOf = (x: string): string | null => {
+      const m = /^(.+)#\d+$/.exec(x);
+      return m ? m[1]! : null;
+    };
+    const taken = (x: string): boolean => isNameRegistered(x) || (baseOf(x) != null && isNameRegistered(baseOf(x)!));
+    if (taken(n)) {
       let i = 2;
       let cand = `${n.slice(0, 10)}#${i}`;
       while (isNameRegistered(cand)) {
@@ -733,7 +748,8 @@ const chatHub = new ChatHub({
       }
       n = cand;
     }
-    return { name: n, account: false };
+    w.chatIdentity = { name: n, account: false };
+    return w.chatIdentity;
   },
 });
 

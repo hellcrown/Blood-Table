@@ -44,8 +44,19 @@ export class ChatHub {
     () => new SlidingWindow(10_000, 5),
     (w, now) => w.idle(now),
   );
+  /** 历史快照限流：80 条约 35KB/次，须独立限频防循环拉取出站洪水 */
+  private historyLimits = new IpTable(
+    () => new SlidingWindow(60_000, 6),
+    (w, now) => w.idle(now),
+  );
 
   constructor(private deps: ChatDeps) {}
+
+  /** 清理限流表闲置条目（每 IP 一条，长期运行需周期清理防 Map 膨胀） */
+  prune(): void {
+    this.limits.prune();
+    this.historyLimits.prune();
+  }
 
   /** 处理一条原始消息；返回 true 表示属于聊天（已消费），调用方应跳过房间分发层 */
   onRaw(ws: unknown, raw: string): boolean {
@@ -57,7 +68,10 @@ export class ChatHub {
       return true; // 聊天前缀但解析失败：消费掉，不进房间层
     }
     if (msg.t === 'chatHistory') {
-      this.deps.send(ws, { t: 'chatLog', msgs: this.history.slice() });
+      const hip = (ws as { ip?: string }).ip ?? '';
+      if (this.historyLimits.get(hip).allow()) {
+        this.deps.send(ws, { t: 'chatLog', msgs: this.history.slice() });
+      }
       return true;
     }
     if (msg.t !== 'chat') return true;

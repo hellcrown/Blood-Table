@@ -2,7 +2,8 @@
  * 全服聊天 ChatHub 回归测试：消息消费边界、广播与历史、身份解析、清洗/限流/封顶。
  */
 import { describe, expect, it } from 'vitest';
-import { ChatHub, type ChatDeps, type ChatMsg } from '../src/chat';
+import { ChatHub, type ChatDeps } from '../src/chat';
+import type { ChatMsg } from '@shared/protocol';
 
 function makeHub(overrides: Partial<ChatDeps> = {}): {
   hub: ChatHub;

@@ -275,6 +275,11 @@ class Net {
     ) {
       (msg as { auth?: string }).auth = this.authToken;
     }
+    // 聊天身份：匿名玩家的昵称来自大厅保存名（登录用户由服务端按 auth 强制账号名，忽略此字段）
+    if (msg.t === 'chat' && !('name' in msg)) {
+      const saved = this.loadName();
+      if (saved) (msg as { name?: string }).name = saved;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
       return true;

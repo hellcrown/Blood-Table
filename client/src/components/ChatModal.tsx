@@ -15,12 +15,24 @@ export function ChatModal({ onClose }: { onClose: () => void }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
   const [cooldown, setCooldown] = useState(false);
+  const [rateLimited, setRateLimited] = useState(false);
+  /** 与服务端 10 秒/5 条限频同窗口的本地计数：提前拦住第 6-9 条，避免静默丢失 */
+  const sendTimesRef = useRef<number[]>([]);
   const logRef = useRef<HTMLDivElement | null>(null);
   useEscClose(onClose);
 
   useEffect(() => {
     net.send({ t: 'chatHistory' });
-    const offLog = net.onChatLog((list) => setMsgs(list.slice(-LOCAL_MAX)));
+    const offLog = net.onChatLog((list) =>
+      setMsgs((prev) => {
+        // 快照与实时广播存在竞态窗口：按 (ts,name,text) 去重合并而非整体替换，
+        // 防止快照生成前已收到的实时消息被抹掉
+        const seen = new Set(prev.map((m) => `${m.ts}|${m.name}|${m.text}`));
+        const merged = [...prev, ...list.filter((m) => !seen.has(`${m.ts}|${m.name}|${m.text}`))];
+        merged.sort((a, b) => a.ts - b.ts);
+        return merged.slice(-LOCAL_MAX);
+      }),
+    );
     const offMsg = net.onChatMsg((m) =>
       setMsgs((prev) => {
         const next = [...prev, m];
@@ -42,9 +54,24 @@ export function ChatModal({ onClose }: { onClose: () => void }) {
   const send = (): void => {
     const text = draft.trim();
     if (!text || cooldown) return;
+    const now = Date.now();
+    sendTimesRef.current = sendTimesRef.current.filter((t) => now - t < 10_000);
+    if (sendTimesRef.current.length >= 5) {
+      // 已达服务端窗口上限：按最早一条过期时间冷却，明示而非静默丢失
+      const wait = 10_000 - (now - sendTimesRef.current[0]!) + 100;
+      setCooldown(true);
+      setRateLimited(true);
+      window.setTimeout(() => {
+        setCooldown(false);
+        setRateLimited(false);
+      }, wait);
+      return;
+    }
+    sendTimesRef.current.push(now);
     net.send({ t: 'chat', text });
     setDraft('');
     setCooldown(true);
+    setRateLimited(false);
     window.setTimeout(() => setCooldown(false), 1200);
   };
 
@@ -69,10 +96,13 @@ export function ChatModal({ onClose }: { onClose: () => void }) {
           <input
             value={draft}
             maxLength={120}
-            placeholder={cooldown ? '稍等片刻…' : '说点什么（最多 120 字）'}
+            placeholder={
+              rateLimited ? '发言太频繁，请稍候…' : cooldown ? '稍等片刻…' : '说点什么（最多 120 字）'
+            }
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') send();
+              // 输入法组合中的 Enter 是「确认候选词」，不能当发送
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) send();
             }}
           />
           <button className="btn small primary" disabled={cooldown || !draft.trim()} onClick={send}>

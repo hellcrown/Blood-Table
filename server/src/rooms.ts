@@ -325,8 +325,9 @@ export class RoomManager {
         return;
       case 'chat':
       case 'chatHistory':
-        // 全服聊天由 index.ts 的 ChatHub 前置拦截并消费；正常不会到达这里，
-        // 此 no-op 仅防旧服务器/异常路径把聊天消息误报成 NOT_IN_ROOM/UNKNOWN_MSG
+        // 全服聊天由 index.ts 的 ChatHub 前置拦截处理；两个 message 监听器并存，
+        // 每条聊天消息仍会进入本分发层——此 no-op 必须存在，否则每条聊天都会
+        // 额外收到 NOT_IN_ROOM（未入房）/UNKNOWN_MSG（已入房）错误
         return;
     }
     const binding = this.bindings.get(ws);
