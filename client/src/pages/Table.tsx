@@ -1,6 +1,7 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { TableView } from '@shared/protocol';
 import { net } from '../net/socket';
+import { ChatModal } from '../components/ChatModal';
 import { CardView } from '../components/Card';
 import { Seat, seatPos } from '../components/Seat';
 import { ActionBar } from '../components/ActionBar';
@@ -10,6 +11,7 @@ import { LogPanel } from '../components/LogPanel';
 const COMMUNITY_SLOTS = 5;
 
 export function Table({ view }: { view: TableView }) {
+  const [chatOpen, setChatOpen] = useState(false);
   const me = view.players.find((p) => p.id === net.playerId) ?? null;
 
   // 服务器时间偏移，用于行动倒计时
@@ -32,6 +34,9 @@ export function Table({ view }: { view: TableView }) {
         <span>
           房间 <b>{view.code}</b> · 第 {view.handNumber || '-'} 手 · {phaseText(view.phase)}
         </span>
+        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+          💬
+        </button>
         <span className="spacer" />
         <button
           className="btn small ghost"
@@ -82,6 +87,7 @@ export function Table({ view }: { view: TableView }) {
       <ActionBar view={view} offsetRef={offsetRef} />
       {view.phase === 'result' && <ResultOverlay view={view} />}
       {view.phase === 'gameover' && <GameOverOverlay view={view} />}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }

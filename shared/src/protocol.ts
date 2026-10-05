@@ -63,6 +63,14 @@ export interface SeatView {
   won: number;
 }
 
+/** 全服聊天消息（实时广播与历史快照共用；account=true 表示昵称经登录验证） */
+export interface ChatMsg {
+  name: string;
+  text: string;
+  ts: number;
+  account?: boolean;
+}
+
 /** 公开房间列表项（大厅展示；仅无密码房进入此列表） */
 export interface PublicRoomInfo {
   code: string;
@@ -176,6 +184,8 @@ export type C2S =
   | { t: 'react'; seat: number; kind: 'flower' | 'egg' }
   | { t: 'ping'; n: number }
   | { t: 'listRooms' }
+  | { t: 'chat'; text: string; name?: string; auth?: string }
+  | { t: 'chatHistory' }
   | import('./bloodProtocol').BloodAction;
 
 /* ---------------- 服务端 → 客户端 ---------------- */
@@ -187,4 +197,6 @@ export type S2C =
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }
   | { t: 'pong'; n: number }
-  | { t: 'roomList'; rooms: PublicRoomInfo[] };
+  | { t: 'roomList'; rooms: PublicRoomInfo[] }
+  | { t: 'chatMsg'; name: string; text: string; ts: number; account?: boolean }
+  | { t: 'chatLog'; msgs: ChatMsg[] };

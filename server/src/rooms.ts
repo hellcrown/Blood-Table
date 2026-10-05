@@ -323,6 +323,11 @@ export class RoomManager {
       case 'listRooms':
         this.handleListRooms(ws);
         return;
+      case 'chat':
+      case 'chatHistory':
+        // 全服聊天由 index.ts 的 ChatHub 前置拦截并消费；正常不会到达这里，
+        // 此 no-op 仅防旧服务器/异常路径把聊天消息误报成 NOT_IN_ROOM/UNKNOWN_MSG
+        return;
     }
     const binding = this.bindings.get(ws);
     if (!binding) {

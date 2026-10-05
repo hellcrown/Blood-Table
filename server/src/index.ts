@@ -13,11 +13,14 @@ import {
   pruneRevocations,
   register as authRegister,
   revokeToken,
+  cleanAccountName,
+  isNameRegistered,
   verifyToken,
 } from './auth';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
+import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
 
@@ -694,6 +697,46 @@ setInterval(() => {
   pruneRevocations();
 }, 5 * 60_000).unref();
 
+// 全服聊天：广播给所有连接；身份=登录账号名/匿名昵称（清洗+注册名保护+路人兜底）；历史仅内存 80 条
+const chatHub = new ChatHub({
+  send: (ws, msg) => {
+    try {
+      (ws as { readyState?: number; OPEN?: number; send?: (d: string) => void }).send?.(JSON.stringify(msg));
+    } catch {
+      /* 连接已失效，忽略 */
+    }
+  },
+  broadcast: (msg) => {
+    const data = JSON.stringify(msg);
+    for (const c of wss.clients) {
+      if (c.readyState === c.OPEN) {
+        try {
+          c.send(data);
+        } catch {
+          /* 忽略 */
+        }
+      }
+    }
+  },
+  resolveIdentity: (_ws, name, auth) => {
+    const acc = verifyToken(auth);
+    if (acc) return { name: acc.name, account: true };
+    let n = cleanAccountName(name);
+    if (!n) n = `路人${Math.floor(Math.random() * 90 + 10)}`;
+    // 注册名保护：匿名不得冒用已注册昵称（与 addSession 同口径）
+    if (isNameRegistered(n)) {
+      let i = 2;
+      let cand = `${n.slice(0, 10)}#${i}`;
+      while (isNameRegistered(cand)) {
+        i += 1;
+        cand = `${n.slice(0, 10)}#${i}`;
+      }
+      n = cand;
+    }
+    return { name: n, account: false };
+  },
+});
+
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
   (ws as unknown as { ip?: string }).ip = ip;
@@ -712,6 +755,10 @@ wss.on('connection', (ws, req) => {
     const left = (ipConns.get(ip) ?? 1) - 1;
     if (left <= 0) ipConns.delete(ip);
     else ipConns.set(ip, left);
+  });
+  // 全服聊天前置拦截：按 raw 前缀识别并消费（含 chatHistory），其余进房间分发层
+  ws.on('message', (raw) => {
+    if (chatHub.onRaw(ws, String(raw))) return;
   });
   manager.handleConnection(ws);
 });

@@ -8,6 +8,7 @@ import { applyImitate, evalBloodHand, toEvalCard, type EvalCard } from '@shared/
 import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
 import { net } from '../net/socket';
 import { FeedbackModal } from '../components/FeedbackModal';
+import { ChatModal } from '../components/ChatModal';
 import { CodexModal } from '../components/CodexModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
@@ -363,6 +364,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   // 插入芯片二次确认：点选目标牌后弹出（防误触），确认才真正发送插入
   const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 鲜花/鸡蛋互动：选中的互动类型（再点对方面板发送） */
@@ -442,10 +444,10 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   // 连砸模式被打断即重置：打开任意弹层视为退出（要继续砸需再点 🥚/🌸），防关弹层后面板仍在热区误砸
   useEffect(() => {
-    if (reactMode && (feedbackOpen || codexOpen || settingsOpen || infoCard || zoneModal || charDetail || detail)) {
+    if (reactMode && (feedbackOpen || codexOpen || settingsOpen || infoCard || zoneModal || charDetail || detail || chatOpen)) {
       setReactMode(null);
     }
-  }, [reactMode, feedbackOpen, codexOpen, settingsOpen, infoCard, zoneModal, charDetail, detail]);
+  }, [reactMode, feedbackOpen, codexOpen, settingsOpen, infoCard, zoneModal, charDetail, detail, chatOpen]);
 
   // 连砸模式：Esc 退出（弹层打开时把 Esc 让给弹层，避免一次按键叠加关闭两处）
   useEffect(() => {
@@ -1018,6 +1020,9 @@ export function BloodTable({ view }: { view: BloodView }) {
             )}
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
+            </button>
+            <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+              💬
             </button>
           </span>
           <span className="spacer" />
@@ -3102,6 +3107,7 @@ export function BloodTable({ view }: { view: BloodView }) {
     )}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }

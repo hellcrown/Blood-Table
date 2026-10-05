@@ -8,6 +8,7 @@ import { FeedbackModal } from '../components/FeedbackModal';
 import { LeaderboardModal } from '../components/LeaderboardModal';
 import { TutorialModal } from '../components/TutorialModal';
 import { ChangelogModal } from '../components/ChangelogModal';
+import { ChatModal } from '../components/ChatModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { UpdateNotice } from '../components/UpdateNotice';
 import { hasUnseen, initSeenIfFirstVisit, markSeen } from '../net/version';
@@ -31,6 +32,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   const [boardOpen, setBoardOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [qqCopied, setQqCopied] = useState(false);
   /** 有未读的更新日志内容：大厅入口显示角标 */
@@ -370,6 +372,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
         />
 
         <div className="lobby-links">
+          <button className="btn small ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+            💬 聊天
+          </button>
           <button className="btn small primary" onClick={() => setTutorialOpen(true)}>
             📚 教程
           </button>
@@ -422,6 +427,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} playerName={displayName || undefined} />
       )}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
       {tutorialOpen && <TutorialModal onClose={() => setTutorialOpen(false)} />}

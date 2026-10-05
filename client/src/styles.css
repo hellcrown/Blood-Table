@@ -302,6 +302,59 @@ select:focus {
   white-space: nowrap;
 }
 
+/* ---------- 全服聊天弹层 ---------- */
+.chat-panel {
+  width: min(480px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-log {
+  height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--gold-dim);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.chat-msg {
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.chat-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+.chat-name {
+  margin-right: 6px;
+}
+
+.chat-name.acct {
+  color: var(--gold);
+}
+
+.chat-text {
+  color: inherit;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-input-row input {
+  flex: 1;
+}
+
 .rejoin-banner {
   display: flex;
   align-items: center;

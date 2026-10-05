@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomSettings, SeatView, TableView } from '@shared/protocol';
 import { net } from '../net/socket';
+import { ChatModal } from '../components/ChatModal';
 
 /** 兜底复制：textarea + execCommand，http 局域网（非安全上下文）下也能用 */
 function fallbackCopy(text: string): boolean {
@@ -35,6 +36,7 @@ export function Room({ view }: { view: TableView }) {
   const [pwDraft, setPwDraft] = useState('');
   const pwDirtyRef = useRef(false); // 本轮 focus 后是否实际编辑过（防 blur 误清已设密码/Enter 后二次提交）
   const [pwMsg, setPwMsg] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // 服务端设置的三个数值：只在**数值真的变化**时同步草稿。
   // 依赖整个 view.settings（每条广播都是新对象）会在别人入座/改设置时，把房主正在输入、
@@ -165,6 +167,9 @@ export function Room({ view }: { view: TableView }) {
             <button className="btn small" onClick={() => copyInvite()}>
               {copyMsg ?? '复制邀请'}
             </button>
+        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+          💬
+        </button>
         <span className="spacer" />
         <button className="btn small ghost" onClick={() => net.leaveRoom()}>
           退出房间
@@ -441,6 +446,7 @@ export function Room({ view }: { view: TableView }) {
         </div>
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
       </div>
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }

@@ -23,6 +23,14 @@ export interface ChangelogEntry extends ChangelogRef {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     date: '2026-10-05',
+    title: '全服聊天',
+    items: [
+      '全服聊天上线：大厅/等待房/对局页都有 💬 入口，发一句全服在线玩家都能看到（每 10 秒最多 5 条防刷屏）',
+      '聊天昵称：登录用户显示账号名（金色），匿名显示你的昵称；聊天记录保留最近 80 条',
+    ],
+  },
+  {
+    date: '2026-10-05',
     title: '公开房间列表',
     items: [
       '大厅新增「公开房间」列表：所有不带密码的房间一目了然，等待中的排前面，点一下就能加入（对局中的进入观战）',

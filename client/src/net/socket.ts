@@ -15,6 +15,8 @@ export interface FxEvent {
 }
 type FxListener = (fx: FxEvent) => void;
 type RoomListListener = (rooms: import('@shared/protocol').PublicRoomInfo[]) => void;
+type ChatMsgListener = (m: import('@shared/protocol').ChatMsg) => void;
+type ChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
 
 export interface AccountInfo {
   id: string;
@@ -75,6 +77,8 @@ class Net {
   private statusListeners = new Set<StatusListener>();
   private fxListeners = new Set<FxListener>();
   private roomListListeners = new Set<RoomListListener>();
+  private chatMsgListeners = new Set<ChatMsgListener>();
+  private chatLogListeners = new Set<ChatLogListener>();
   private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
@@ -189,6 +193,10 @@ class Net {
         this.fxListeners.forEach((l) => l(msg));
       } else if (msg.t === 'roomList') {
         this.roomListListeners.forEach((l) => l(msg.rooms));
+      } else if (msg.t === 'chatMsg') {
+        this.chatMsgListeners.forEach((l) => l(msg));
+      } else if (msg.t === 'chatLog') {
+        this.chatLogListeners.forEach((l) => l(msg.msgs));
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -263,7 +271,7 @@ class Net {
     if (
       this.authToken &&
       !('auth' in msg) &&
-      (msg.t === 'create' || msg.t === 'join' || msg.t === 'spectate' || msg.t === 'rejoin')
+      (msg.t === 'create' || msg.t === 'join' || msg.t === 'spectate' || msg.t === 'rejoin' || msg.t === 'chat')
     ) {
       (msg as { auth?: string }).auth = this.authToken;
     }
@@ -406,6 +414,18 @@ class Net {
   onRoomList(l: RoomListListener): () => void {
     this.roomListListeners.add(l);
     return () => this.roomListListeners.delete(l);
+  }
+
+  /** 全服聊天：实时消息广播 */
+  onChatMsg(l: ChatMsgListener): () => void {
+    this.chatMsgListeners.add(l);
+    return () => this.chatMsgListeners.delete(l);
+  }
+
+  /** 全服聊天：历史快照（打开聊天窗时拉取） */
+  onChatLog(l: ChatLogListener): () => void {
+    this.chatLogListeners.add(l);
+    return () => this.chatLogListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {
