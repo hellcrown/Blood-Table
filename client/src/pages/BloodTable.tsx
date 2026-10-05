@@ -1465,21 +1465,23 @@ export function BloodTable({ view }: { view: BloodView }) {
                         🍗 支付 1 血筹抽 1 张牌
                       </button>
                     )}
-                    {myCharId === 'curse' &&
+                    {view.phase === 'swap' && myCharId === 'curse' &&
                       view.me.hand
                         .filter((c) => c.r === 5 && c.s != null)
                         .map((c) => (
                           <button
                             key={c.id}
                             className="btn"
+                            title="咒术师：换牌阶段内随时可藏（换牌次数用尽也不影响）"
                             onClick={() => {
-                            send({ t: 'bCurseHide', cardId: c.id });
-                            setSelSwap((l) => l.filter((x) => x !== c.id)); // 牌已离手：从换牌选择中剔除
-                          }}
+                              send({ t: 'bCurseHide', cardId: c.id });
+                              setSelSwap((l) => l.filter((x) => x !== c.id)); // 牌已离手：从换牌选择中剔除
+                            }}
                           >
                             ✨ 藏入{cardLabel(c)}（抽1张+1🩸）
                           </button>
                         ))}
+
                     {myCharId === 'undertaker' && (
                       <button
                         className="btn"

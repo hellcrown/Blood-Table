@@ -78,8 +78,8 @@ describe('深查修复 · 血色引擎', () => {
 });
 
 describe('深查修复 · 评估器', () => {
-  const wild = (id: string): EvalCard => ({ id, ranks: Array.from({ length: 13 }, (_, i) => i + 2), suits: ['s', 'h', 'd', 'c'], count: 1 });
-  const fixed = (id: string, r: number, s: 's' | 'h' | 'd' | 'c'): EvalCard => ({ id, ranks: [r], suits: [s], count: 1 });
+  const wild = (id: string): EvalCard => ({ id, baseR: 0, ranks: Array.from({ length: 13 }, (_, i) => i + 2), suits: ['s', 'h', 'd', 'c'], count: 1 });
+  const fixed = (id: string, r: number, s: 's' | 'h' | 'd' | 'c'): EvalCard => ({ id, baseR: r, ranks: [r], suits: [s], count: 1 });
 
   it('全灵活手牌贪心回退取高解释（5 张全 wild → 5×A♠ 同花五条，pips 70）', () => {
     const r = evalBloodHand([wild('a'), wild('b'), wild('c'), wild('d'), wild('e')]);

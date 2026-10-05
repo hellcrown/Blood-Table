@@ -552,6 +552,21 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     }
   });
 
+  it('咒术师：换牌次数用尽（swapDone）后仍可藏 5（卡面「阶段内可随时」）', () => {
+    const gs = makeGame('curse', 'clerk');
+    driveTo(gs, 'swap');
+    const p0 = gs.players[0];
+    p0.swapLeft = 0;
+    p0.swapDone = true; // 用尽/被投毒归零：此前直接 ALREADY_DONE 拒绝藏牌
+    const five = p0.hand.find((c) => c.r === 5 && c.s != null);
+    if (five) {
+      const blood = p0.blood;
+      bCurseHide(gs, p0.id, five.id, NOW);
+      expect(p0.curseStash.length).toBe(1);
+      expect(p0.blood).toBe(blood + 1);
+    }
+  });
+
   it('入殓师：特殊换牌置角色牌上，结束时置入弃牌区', () => {
     const gs = makeGame('undertaker', 'clerk');
     driveTo(gs, 'swap');

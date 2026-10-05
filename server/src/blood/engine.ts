@@ -2176,7 +2176,13 @@ function settle(gs: BloodState, now: number): void {
   const playedIdsByP = new Map<string, string[]>();
   const selfDestructPids = new Set<string>();
   for (const p of gs.players) {
-    if (effChar(p) === 'gunner') gunnerFours.set(p.id, p.play.filter((c) => finalRank(p, c) === 4).map((c) => c.id));
+    // 卡面「视为joker的4」：枪手的任意基础 4 都可视为 joker（含带点数芯片者），结算后全部删除
+    if (effChar(p) === 'gunner') {
+      gunnerFours.set(
+        p.id,
+        p.play.filter((c) => c.r === 4 && c.s != null).map((c) => c.id),
+      );
+    }
     if (
       p.chips
         .filter((ch) => p.play.some((card) => card.id === ch.on) && !ch.off)
@@ -4733,7 +4739,7 @@ export function bCurseHide(gs: BloodState, playerId: string, cardId: string, now
   if (gs.phase !== 'swap') throw new BloodError('BAD_PHASE', '不在换牌阶段');
   const p = gs.players.find((x) => x.id === playerId)!;
   if (effChar(p) !== 'curse') throw new BloodError('BAD_PHASE', '你不是咒术师');
-  if (p.swapDone) throw new BloodError('ALREADY_DONE', '你已停止换牌');
+  // 卡面「【换牌阶段】可随时」：换牌次数用尽/被投毒归零（swapDone 自动置位）后仍在本阶段内，可继续藏
   const card = p.hand.find((c) => c.id === cardId);
   if (!card) throw new BloodError('BAD_CARD', '手牌不存在');
   if (card.r !== 5 || card.s == null) throw new BloodError('BAD_CARD', '只能藏入【5】');

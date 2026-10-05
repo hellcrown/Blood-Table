@@ -132,7 +132,7 @@ describe('特工交换超时托管', () => {
 });
 
 describe('仿制印章「可视为」（含不发动选项）', () => {
-  const fixed = (id: string, r: number, s: 's' | 'h' | 'd' | 'c'): EvalCard => ({ id, ranks: [r], suits: [s], count: 1 });
+  const fixed = (id: string, r: number, s: 's' | 'h' | 'd' | 'c'): EvalCard => ({ id, baseR: r, ranks: [r], suits: [s], count: 1 });
 
   it('宿主自身面保留在候选中（不发动选项）；印章配对收益照常取最优', () => {
     const cards = [fixed('a', 14, 'd'), fixed('b', 13, 's'), fixed('c', 3, 'h')];

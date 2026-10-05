@@ -44,7 +44,7 @@ export const BLOOD_CHARS: BloodCharDef[] = [
   { id: 'idol', name: '偶像', emoji: '🌟', hue: 50, tags: ['换牌'], difficulty: 1, impl: 'full', text: '【换牌阶段】每次换牌，可选择任意数量的牌（而非至多3张），若一次弃了4张或者更多的牌，获得1血筹。' },
   { id: 'chef', name: '特级大厨', emoji: '👨‍🍳', hue: 10, tags: ['换牌', '对决', '常驻'], difficulty: 3, impl: 'full', text: '【换牌阶段】每当你弃置1张【3】时，可展示之并获得1血筹。\n【对决阶段】你每打出1张【3】，获得1血筹。\n任意时候，每当你或你的队伍删除1张【3】，获得4血筹。', implNote: '换牌弃3/对决打3/自己删除3（含初始构筑）均已实装，按最终点数判定。' },
   { id: 'student', name: '高中生', emoji: '🎒', hue: 320, tags: ['对决'], difficulty: 2, impl: 'full', implNote: '对决前弃光出牌区（高牌0点）+2血筹并执行一次标准删牌（付2）。', text: '【对决阶段】前，你可将出牌区的牌全部弃置（牌型视为高牌，总点数为0），获得2血筹，并可执行一次删牌。' },
-  { id: 'gunner', name: '枪手', emoji: '🔫', hue: 0, tags: ['对决', '结算'], difficulty: 2, impl: 'full', text: '【对决阶段】你可将【4】视为joker。【结算阶段】结束时，将本回合视为joker的【4】删除。', implNote: '评估自动取“4视为joker”的最优解释；结算后删除本回合打出的所有4。' },
+  { id: 'gunner', name: '枪手', emoji: '🔫', hue: 0, tags: ['对决', '结算'], difficulty: 2, impl: 'full', text: '【对决阶段】你可将【4】视为joker。【结算阶段】结束时，将本回合视为joker的【4】删除。', implNote: '评估自动取“4视为joker”的最优解释（点数芯片不影响识别：角色技能优先于黑市牌）；结算后删除本回合打出的所有4。' },
   { id: 'cleaner', name: '清洁工', emoji: '🧹', hue: 180, tags: ['重整'], difficulty: 3, impl: 'full', text: '【重整阶段】结束时，可从全牌库删除1张牌。若删除的是抽牌堆的牌，则重洗抽牌堆。', implNote: '重整结束从全牌库（所有玩家抽牌堆/弃牌区）自选1张删除；删自抽牌堆则重洗该堆。' },
   { id: 'gambler', name: '职业赌徒', emoji: '🎲', hue: 240, tags: ['对决', '结算'], difficulty: 2, impl: 'full', implNote: '出牌前竞猜夺魁者（可猜自己），猜中+（人数+2）血筹。', text: '【对决阶段】前，你可以猜测本回合【夺魁】的玩家（可以猜自己）\n【结算阶段】若猜对，获得【人数+2】血筹' },
   { id: 'samurai', name: '武士', emoji: '⚔️', hue: 350, tags: ['结算'], difficulty: 1, impl: 'full', text: '【结算阶段】你额外获得【本回合获得的车票数量】的血筹' },
@@ -119,8 +119,10 @@ export function applyCharEval(cards: EvalCard[], charId: string | null | undefin
         c.ranks.length === 1 && c.ranks[0] === 2 ? { ...c, ranks: [...ALL_RANKS], suits: [...ALL_SUITS] } : c,
       );
     case 'gunner':
+      // 按「基础点数=4」判定而非当前候选：校准器/限流阀芯片改写候选后，4 仍可视为 joker
+      //（规则书 §7.14：角色技能 > 黑市牌；此前带点数芯片的 4 会被识别成普通牌）
       return cards.map((c) =>
-        c.ranks.length === 1 && c.ranks[0] === 4 ? { ...c, ranks: [...ALL_RANKS], suits: [...ALL_SUITS] } : c,
+        c.baseR === 4 ? { ...c, ranks: [...ALL_RANKS], suits: [...ALL_SUITS] } : c,
       );
     case 'acrobat':
       return cards.map((c) => {

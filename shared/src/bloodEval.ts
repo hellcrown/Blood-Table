@@ -15,6 +15,8 @@ import type { BloodEffect } from './bloodCards';
 
 export interface EvalCard {
   id: string;
+  /** 基础点数（芯片/仿制改写候选后仍保留，供「角色技能 > 黑市牌」优先级判定——如枪手的【4】） */
+  baseR: number;
   /** 候选点数（固定牌长度为 1） */
   ranks: number[];
   /** 候选花色（固定牌长度为 1） */
@@ -236,7 +238,7 @@ export function toEvalCard(
         break; // 触发类/仿制类效果不影响单牌候选
     }
   }
-  return { id, ranks, suits, count };
+  return { id, baseR: r, ranks, suits, count };
 }
 
 /**
