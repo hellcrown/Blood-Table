@@ -90,7 +90,7 @@ describe('ChatHub · 历史落盘（重启不丢）', () => {
     h2.initChatStore(storePath);
     const ws = { ip: '10.9.9.9' };
     h2.onRaw(ws, '{"t":"chatHistory"}');
-    expect(h2.history.map((m) => m.text)).toEqual(['第一条', '第二条']);
+    expect((h2 as unknown as { history: ChatMsg[] }).history.map((m) => m.text)).toEqual(['第一条', '第二条']);
     void ws;
     fs.rmSync(dir, { recursive: true, force: true });
   });

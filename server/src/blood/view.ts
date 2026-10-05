@@ -167,6 +167,17 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
       return { k: 'wait' };
     }
     case 'settle':
+      // 结算队列互动（魅魔/票贩子/炸鸡店老板）挂在我身上时，先看演示再互动：
+      // 未确认演示时返回 sdConfirm——否则互动按钮被演示浮层（z-40 全屏）盖住点不到，
+      // 60s 窗口从演示前就开始倒计时，超时被随机托管，玩家感觉「技能没发动」
+      if (
+        gs.secretPending &&
+        gs.secretPending.seat === p.id &&
+        ['succubusSteal', 'scalperDeal', 'fryerDel'].includes(gs.secretPending.kind) &&
+        !p.sdSeen
+      ) {
+        return { k: 'sdConfirm' };
+      }
       // 对决展示：未确认者需点击确认（关闭演示浮层即发送）
       return p.sdSeen ? { k: 'wait' } : { k: 'sdConfirm' };
     case 'buy': {

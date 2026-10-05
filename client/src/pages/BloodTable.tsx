@@ -449,6 +449,7 @@ export function BloodTable({ view }: { view: BloodView }) {
     }
   }, [reactMode, feedbackOpen, codexOpen, settingsOpen, infoCard, zoneModal, charDetail, detail, chatOpen]);
 
+
   // 连砸模式：Esc 退出（弹层打开时把 Esc 让给弹层，避免一次按键叠加关闭两处）
   useEffect(() => {
     if (!reactMode) return;
@@ -522,6 +523,18 @@ export function BloodTable({ view }: { view: BloodView }) {
   useEffect(() => {
     if (showdown && !view.showdownWait && view.phase !== 'gameover') setShowdown(null);
   }, [view.showdownWait, view.phase, showdown]);
+
+  // 我的结算互动（魅魔/票贩子/炸鸡店老板）就绪时自动收起演示浮层：
+  // 互动按钮在 blood-actions 里，被 z-40 全屏演示浮层盖住点不到（此前魅魔技能看起来「无法发动」）
+  useEffect(() => {
+    if (
+      showdown &&
+      view.phase === 'settle' &&
+      (view.prompt.k === 'succubusSteal' || view.prompt.k === 'scalperDeal' || view.prompt.k === 'fryerDel')
+    ) {
+      setShowdown(null);
+    }
+  }, [showdown, view.phase, view.prompt.k]);
 
   // 日志滚动：仅当停留在底部附近时自动滚到最新，向上翻阅历史不被顶走
   const logPinned = useRef(true);

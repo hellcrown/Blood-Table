@@ -349,24 +349,35 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(gs.players.reduce((s, p) => s + p.removed.length, 0)).toBeGreaterThan(removedBefore);
   });
 
-  it('魅魔：未夺魁抢夺女性角色1血筹（女仆=女性）', () => {
+  it('魅魔：未夺魁抢夺女性角色1血筹（女仆=女性），挂起出现且可执行', () => {
     const gs = makeGame('succubus', 'maid');
-    // 让乙（女仆）夺魁：女仆跳过删牌不影响对决
     driveTo(gs, 'play');
-    // 魅魔竞猜挂起先跳过；确保魅魔不是夺魁者：直接判定——若甲夺魁则抢3（男性对女仆不成立→无男性→直接获得）
     if (gs.secretPending?.kind === 'gamblerGuess') drainPend(gs);
-    driveTo(gs, 'settle');
-    const pendKind = gs.secretPending?.kind;
-    expect(pendKind === 'succubusSteal' || gs.phase !== 'settle' || true).toBe(true);
-    if (pendKind === 'succubusSteal') {
-      const p0 = gs.players[0];
-      const winner = gs.players.find((p) => p.privilege)!;
-      const amount = pendKind && winner.id === p0.id ? 3 : 1;
-      const before = { a: p0.blood, b: winner === p0 ? 0 : 0 };
-      void before;
-      bSuccubusSteal(gs, p0.id, winner.id === p0.id ? -1 : winner.seat, NOW);
-      expect(hasLog(gs, '魅魔')).toBe(true);
-    }
+    playFixed(gs, HIGH_CARDS, FOUR_ACES); // 乙（女仆）夺魁 → 魅魔未夺魁，抢女性 1
+    expect(gs.secretPending?.kind).toBe('succubusSteal'); // 挂起必须出现
+    expect(gs.secretPending?.blood).toBe(1);
+    const p0 = gs.players[0];
+    const p1 = gs.players[1];
+    const p1Blood = p1.blood;
+    expect(p1Blood).toBeGreaterThan(0);
+    bSuccubusSteal(gs, p0.id, p1.seat, NOW);
+    expect(p1.blood).toBe(p1Blood - 1);
+    expect(p0.blood).toBeGreaterThan(0);
+    expect(gs.secretPending).toBeNull();
+  });
+
+  it('魅魔：夺魁抢男性 3（无性别角色同视为男性；无目标时直接获得）', () => {
+    const gs = makeGame('succubus', 'clerk');
+    driveTo(gs, 'play');
+    if (gs.secretPending?.kind === 'gamblerGuess') drainPend(gs);
+    playFixed(gs, FOUR_ACES, HIGH_CARDS); // 甲（魅魔）夺魁 → 抢男性 3（职员无性别=亦男）
+    expect(gs.secretPending?.kind).toBe('succubusSteal');
+    expect(gs.secretPending?.blood).toBe(3);
+    const p0 = gs.players[0]!;
+    const p1 = gs.players[1]!;
+    const p1Blood = p1.blood;
+    bSuccubusSteal(gs, p0.id, p1.seat, NOW);
+    expect(p1.blood).toBe(Math.max(0, p1Blood - 3));
   });
 
   it('票贩子：未夺魁时付3血筹强购夺魁者1车票', () => {
