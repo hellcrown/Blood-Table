@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { loadLastRoom, net, type ConnStatus } from '../net/socket';
+import type { PublicRoomInfo } from '@shared/protocol';
 import { AdminPanel } from '../components/AdminPanel';
 import { AuthPanel } from '../components/AuthPanel';
 import { CodexModal } from '../components/CodexModal';
@@ -15,6 +16,8 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   const [name, setName] = useState(net.loadName());
   /** 登录态：已登录时对局昵称强制为账号名（服务端口径），昵称输入框隐藏 */
   const [account, setAccount] = useState(net.account);
+  /** 公开房间列表快照（null = 尚未收到过） */
+  const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[] | null>(null);
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [mode, setMode] = useState<'blood' | 'classic'>('blood');
@@ -42,6 +45,20 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   useEffect(() => {
     return net.onAccount(setAccount);
   }, []);
+
+  // 公开房间列表：连接后立即拉一次 + 每 10s 轮询（onRoomList 收快照）；断开/卸载清理
+  useEffect(() => {
+    const fetchList = (): void => {
+      if (net.status === 'open') net.send({ t: 'listRooms' });
+    };
+    const off = net.onRoomList(setPublicRooms);
+    if (connected) fetchList();
+    const timer = connected ? window.setInterval(fetchList, 10_000) : null;
+    return () => {
+      off();
+      if (timer != null) window.clearInterval(timer);
+    };
+  }, [connected]);
 
   /** 打开更新日志：读到即消角标（点提示条的「查看更新」也走这里） */
   const openChangelog = () => {
@@ -121,6 +138,25 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
       code: code.trim().toUpperCase(),
       ...(pwForCode === code.trim().toUpperCase() && joinPw ? { password: joinPw } : {}),
     });
+  };
+
+  /** 公开房间列表点击：预填房间码并直接加入（对局中转观战、已结束仅预填）。
+   *  匿名未填昵称/未连接时只预填（与加入按钮 disabled 口径一致）。 */
+  const openPublicRoom = (r: PublicRoomInfo): void => {
+    setCode(r.code);
+    setPwForCode(null);
+    if (!nameOk || !connected) return;
+    if (r.phase === 'gameover') return;
+    net.saveName(displayName);
+    if (r.phase === 'waiting') {
+      net.send(joinMsg(r.code));
+    } else {
+      net.send({
+        t: 'spectate',
+        name: displayName,
+        code: r.code,
+      });
+    }
   };
 
   /** ⚡ 回到上次房间：填码并直接加入（昵称为空时仅填码） */
@@ -254,6 +290,60 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
               </div>
             )}
           </div>
+        </div>
+
+        <div className="lobby-rooms">
+          <div className="box-title room-list-head">
+            <span>公开房间</span>
+            <span className="spacer" />
+            <button
+              className="btn tiny ghost"
+              disabled={!connected}
+              title="刷新列表（每 10 秒也会自动刷新）"
+              onClick={() => net.send({ t: 'listRooms' })}
+            >
+              🔄
+            </button>
+          </div>
+          {publicRooms == null ? (
+            <p className="hint">{connected ? '正在获取房间列表…' : '连接服务器后显示公开房间'}</p>
+          ) : publicRooms.length === 0 ? (
+            <p className="hint">暂无公开房间 —— 创建一个，把房间码发给朋友吧</p>
+          ) : (
+            <div className="room-rows">
+              {publicRooms.map((r) => {
+                const status =
+                  r.phase === 'waiting'
+                    ? { label: '等待中', cls: 'st-wait' }
+                    : r.phase === 'gameover'
+                      ? { label: '已结束', cls: 'st-over' }
+                      : { label: '对局中', cls: 'st-live' };
+                return (
+                  <button
+                    key={r.code}
+                    className="room-row"
+                    onClick={() => openPublicRoom(r)}
+                    title={
+                      r.phase === 'waiting'
+                        ? '加入该房间'
+                        : r.phase === 'gameover'
+                          ? '对局已结束（房主可重开）'
+                          : '对局进行中：以观战身份进入，点击空座位可随时加入'
+                    }
+                  >
+                    <b className="room-code">{r.code}</b>
+                    <span className="room-mode">{r.mode === 'blood' ? '血色牌局' : '经典德扑'}</span>
+                    <span className={`tag room-st ${status.cls}`}>{status.label}</span>
+                    <span className="room-players">
+                      {r.players}/{r.maxPlayers} 人
+                    </span>
+                    <span className="spacer" />
+                    <span className="room-host">{r.host ? `房主 ${r.host}` : ''}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {!connected &&

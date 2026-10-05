@@ -63,6 +63,18 @@ export interface SeatView {
   won: number;
 }
 
+/** 公开房间列表项（大厅展示；仅无密码房进入此列表） */
+export interface PublicRoomInfo {
+  code: string;
+  mode: GameMode;
+  /** 原始阶段值：waiting / 各对局阶段 / gameover */
+  phase: string;
+  /** 坐席数（非观战会话，含 bot 与断线座位——与满员判定同口径） */
+  players: number;
+  maxPlayers: number;
+  host: string;
+}
+
 export interface HandResultRow {
   seat: number;
   name: string;
@@ -163,6 +175,7 @@ export type C2S =
   | { t: 'rematch' }
   | { t: 'react'; seat: number; kind: 'flower' | 'egg' }
   | { t: 'ping'; n: number }
+  | { t: 'listRooms' }
   | import('./bloodProtocol').BloodAction;
 
 /* ---------------- 服务端 → 客户端 ---------------- */
@@ -173,4 +186,5 @@ export type S2C =
   | { t: 'event'; line: LogLine }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }
-  | { t: 'pong'; n: number };
+  | { t: 'pong'; n: number }
+  | { t: 'roomList'; rooms: PublicRoomInfo[] };

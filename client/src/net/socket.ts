@@ -14,6 +14,7 @@ export interface FxEvent {
   to: number;
 }
 type FxListener = (fx: FxEvent) => void;
+type RoomListListener = (rooms: import('@shared/protocol').PublicRoomInfo[]) => void;
 
 export interface AccountInfo {
   id: string;
@@ -73,6 +74,7 @@ class Net {
   private errorListeners = new Set<ErrorListener>();
   private statusListeners = new Set<StatusListener>();
   private fxListeners = new Set<FxListener>();
+  private roomListListeners = new Set<RoomListListener>();
   private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
@@ -185,6 +187,8 @@ class Net {
         this.mergeBloodLog([msg.line], false);
       } else if (msg.t === 'fx') {
         this.fxListeners.forEach((l) => l(msg));
+      } else if (msg.t === 'roomList') {
+        this.roomListListeners.forEach((l) => l(msg.rooms));
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -396,6 +400,12 @@ class Net {
   onFx(l: FxListener): () => void {
     this.fxListeners.add(l);
     return () => this.fxListeners.delete(l);
+  }
+
+  /** 公开房间列表快照（大厅轮询用） */
+  onRoomList(l: RoomListListener): () => void {
+    this.roomListListeners.add(l);
+    return () => this.roomListListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {

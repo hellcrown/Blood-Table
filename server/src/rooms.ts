@@ -1,6 +1,6 @@
 import { randomBytes, randomInt, createHash, timingSafeEqual } from 'node:crypto';
 import type { RawData, WebSocket } from 'ws';
-import type { C2S, GameMode, S2C, Suit } from '@shared/protocol';
+import type { C2S, GameMode, PublicRoomInfo, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
@@ -190,6 +190,11 @@ export class RoomManager {
   );
   /** 单房间密码错误全局限速（防多 IP 分布式爆破同一房间）：错误达 20 次/分即整体冷却 */
   private pwFailsByRoom = new Map<string, SlidingWindow>();
+  /** 公开房间列表请求限流：12 次/分/IP（客户端 10s 轮询 + 手动刷新，正常使用远达不到） */
+  private roomListLimit = new IpTable(
+    () => new SlidingWindow(60_000, 12),
+    (w, now) => w.idle(now),
+  );
 
   private roomPwFailWindow(code: string): SlidingWindow {
     let w = this.pwFailsByRoom.get(code);
@@ -213,6 +218,7 @@ export class RoomManager {
     // 限流表闲置清理：防止海量 IP 源缓慢撑大内存
     setInterval(() => {
       this.joinAttempts.prune();
+      this.roomListLimit.prune();
       // pwJoins 是唯一漏在清理之外的限流表：任何访问过密码房的 IP 都会永久留一条
       // （与 net/limits.ts 的「带闲置自动清理，防 Map 无限膨胀」注释相矛盾）
       this.pwJoins.prune();
@@ -313,6 +319,9 @@ export class RoomManager {
         return;
       case 'ping':
         send(ws, { t: 'pong', n: msg.n });
+        return;
+      case 'listRooms':
+        this.handleListRooms(ws);
         return;
     }
     const binding = this.bindings.get(ws);
@@ -1634,6 +1643,41 @@ export class RoomManager {
   }
 
   /** 管理接口：列出所有房间概要 */
+  /**
+   * 公开房间列表（大厅展示）：仅无密码房。players = 非观战会话数（含 bot 与断线座位），
+   * 与满员判定同口径；等待中优先、同状态人数多在前；封顶 100 条防极端膨胀。
+   */
+  listPublicRooms(): PublicRoomInfo[] {
+    const out: PublicRoomInfo[] = [];
+    for (const room of this.rooms.values()) {
+      if (room.password) continue;
+      const g = room.game;
+      const phase = g && 'phase' in g ? String(g.phase) : 'waiting';
+      out.push({
+        code: room.code,
+        mode: room.mode,
+        phase,
+        players: [...room.sessions.values()].filter((x) => !x.spectator).length,
+        maxPlayers: room.maxPlayers,
+        host: [...room.sessions.values()].find((x) => x.id === room.hostId)?.name ?? '',
+      });
+    }
+    out.sort((a, b) => {
+      const aw = a.phase === 'waiting' ? 0 : a.phase === 'gameover' ? 2 : 1;
+      const bw = b.phase === 'waiting' ? 0 : b.phase === 'gameover' ? 2 : 1;
+      return aw - bw || b.players - a.players;
+    });
+    return out.slice(0, 100);
+  }
+
+  /** 公开房间列表请求：限流后下发快照（未入房即可请求，与 ping 同层） */
+  private handleListRooms(ws: WebSocket): void {
+    if (!this.roomListLimit.get(ws.ip ?? '').allow()) {
+      throw new GameError('RATE_LIMITED', '刷新太频繁，请稍候');
+    }
+    send(ws, { t: 'roomList', rooms: this.listPublicRooms() });
+  }
+
   listRooms(): { code: string; mode: GameMode; phase: string; players: number; host: string }[] {
     return [...this.rooms.values()].map((room) => {
       const g = room.game;

@@ -22,6 +22,14 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-05',
+    title: '公开房间列表',
+    items: [
+      '大厅新增「公开房间」列表：所有不带密码的房间一目了然，等待中的排前面，点一下就能加入（对局中的进入观战）',
+      '列表每 10 秒自动刷新，也可以手动点 🔄',
+    ],
+  },
+  {
     date: '2026-10-04',
     title: '塔罗师手感优化',
     items: [
