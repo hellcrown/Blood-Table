@@ -440,6 +440,13 @@ export function BloodTable({ view }: { view: BloodView }) {
     });
   }, []);
 
+  // 连砸模式被打断即重置：打开任意弹层视为退出（要继续砸需再点 🥚/🌸），防关弹层后面板仍在热区误砸
+  useEffect(() => {
+    if (reactMode && (feedbackOpen || codexOpen || settingsOpen || infoCard || zoneModal || charDetail || detail)) {
+      setReactMode(null);
+    }
+  }, [reactMode, feedbackOpen, codexOpen, settingsOpen, infoCard, zoneModal, charDetail, detail]);
+
   // 连砸模式：Esc 退出（弹层打开时把 Esc 让给弹层，避免一次按键叠加关闭两处）
   useEffect(() => {
     if (!reactMode) return;

@@ -877,9 +877,12 @@ function afterSwapEnded(gs: BloodState, p: BPlayer, now: number): void {
     pushLog(gs, 'action', `${pname(p)} 未使用的换牌次数兑换 ${p.swapLeft} 血筹`);
     p.swapLeft = 0;
   }
-  // 捣蛋鬼：其他玩家换牌结束时，捣蛋鬼开始抽牌与换牌
+  // 捣蛋鬼：其他玩家换牌阶段结束时开始抽换小回合——每名玩家每回合只计一次。
+  // 额外换牌（将军/赌神）= 换牌次数 +1，不是多一整个换牌阶段：再次结束不给小回合
+  //（与下方结束队列的 swapEndPrompted 去重同口径；两角色的队列项均无条件入队，首末必置位）
+  const firstSwapEnd = !p.swapEndPrompted;
   const imp = gs.players.find((x) => x.charId === 'imp');
-  if (imp && p.id !== imp.id) gs.impTurns += 1;
+  if (firstSwapEnd && imp && p.id !== imp.id) gs.impTurns += 1;
   // 换牌结束的互动技能入队（每回合一次，额外换牌后的再次结束不重复触发）
   const ch = effChar(p);
   if (!p.swapEndPrompted) {

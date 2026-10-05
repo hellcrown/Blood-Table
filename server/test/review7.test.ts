@@ -5,7 +5,16 @@
  * - endBuy 拍卖兜底补发秘密牌 noAdvance：右两格血筹等收尾结算不得重入双发
  */
 import { describe, expect, it } from 'vitest';
-import { bCrownBid, bPassBuy, bPickChar, createBloodGame } from '../src/blood/engine';
+import {
+  bCrownBid,
+  bGeneralChoice,
+  bSetup,
+  bPassBuy,
+  bPickChar,
+  bSwapStop,
+  bloodTick,
+  createBloodGame,
+} from '../src/blood/engine';
 import type { BloodState } from '../src/blood/types';
 import { RoomManager } from '../src/rooms';
 
@@ -139,5 +148,38 @@ describe('endBuy · 拍卖兜底补发秘密牌不重入', () => {
     // 补发的对赌协议立即结算（rollDice → 血筹入账），不落道具区
     expect(p0.items).toHaveLength(0);
     expect(p0.blood).toBeGreaterThan(10);
+  });
+});
+
+describe('捣蛋鬼小回合 · 额外换牌不计新小回合', () => {
+  /** 2 人局：p0=将军、p1=捣蛋鬼，推进到换牌阶段 */
+  function generalImpGame(): BloodState {
+    const gs = createBloodGame(2, [
+      { id: 'p0', name: '甲', seat: 0 },
+      { id: 'p1', name: '乙', seat: 1 },
+    ], 1000);
+    gs.players[0]!.charOptions = ['general', 'dealer'];
+    gs.players[1]!.charOptions = ['imp', 'dealer'];
+    bPickChar(gs, 'p0', 'general', 1000);
+    bPickChar(gs, 'p1', 'imp', 1000);
+    for (const p of gs.players) bCrownBid(gs, p.id, 0, 1000);
+    // 捣蛋鬼跳过构筑；将军两轮构筑后推进到换牌
+    for (let r = 0; r < 2; r++) bSetup(gs, 'p0', [], 1000);
+    for (let i = 0; i < 10 && gs.phase !== 'swap'; i++) bloodTick(gs, 1001 + i);
+    expect(gs.phase).toBe('swap');
+    return gs;
+  }
+
+  it('将军额外换牌=次数+1：再次结束不给捣蛋鬼新小回合（与结束队列去重同口径）', () => {
+    const gs = generalImpGame();
+    bSwapStop(gs, 'p0', 1100); // 首次结束：捣蛋鬼 +1 小回合，将军选择入队
+    expect(gs.impTurns).toBe(1);
+    expect(gs.secretPending?.kind).toBe('generalChoice'); // 队列优先于小回合
+    bGeneralChoice(gs, 'p0', 'extra', undefined, 1101); // 额外换牌：swapLeft+1、swapDone=false
+    expect(gs.players[0]!.swapDone).toBe(false);
+    bSwapStop(gs, 'p0', 1102); // 额外换牌后的再次结束
+    // 修复前：impTurns 再 +1 → beginImpTurn 消耗后仍余 1；修复后恰为 0（唯一一次小回合被消耗）
+    expect(gs.impTurns).toBe(0);
+    expect(gs.players[1]!.swapDone).toBe(false); // 捣蛋鬼小回合已开始
   });
 });
