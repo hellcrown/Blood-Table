@@ -717,6 +717,8 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
     throw new BloodError('BAD_MSG', '已先抽牌：点选手牌弃置完成本次换牌');
   }
   if (staged) draw = 0;
+  // 暂存自愈：暂存牌若已被外部效果移出手牌（理论不可达，防御对账），从暂存剔除后再校验等量
+  p.swapDrawnIds = p.swapDrawnIds.filter((id) => p.hand.some((c) => c.id === id));
   // 等量置换：先抽 N 张就必须弃 N 张（否则可凭空多牌/少牌，违背「换牌」语义）
   if (tarot && draw > 0 && cardIds.length !== draw) {
     throw new BloodError('BAD_COUNT', `塔罗师先抽 ${draw} 张，须弃置 ${draw} 张`);
@@ -784,7 +786,8 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
 /**
  * 塔罗师分步换牌·第一步「先抽」：立即抽 1-2 张入手（不弃牌、不消耗换牌次数、不补至上限）。
  * 抽完进入弃置步——客户端点选手牌（0-2 张）后发 bSwap{drawCount:0} 完成本次换牌；
- * 或 bSwapStop 保留抽到的牌并计一次换牌。抽到的牌 id 存 swapDrawnIds 供视图高亮。
+ * 抽完进入弃置步——客户端点选手牌（须与先抽数量相同）后发 bSwap{drawCount:0} 完成本次换牌；
+ * 先抽未弃时 bSwapStop 被拒绝（等量置换不得借停止白拿）。抽到的牌 id 存 swapDrawnIds 供视图高亮。
  */
 export function bSwapDraw(gs: BloodState, playerId: string, count: number, now: number): void {
   void now;
@@ -798,6 +801,10 @@ export function bSwapDraw(gs: BloodState, playerId: string, count: number, now: 
   const n = Math.floor(Number(count));
   if (!Number.isFinite(n) || n < 1 || n > 2) throw new BloodError('BAD_MSG', '先抽数量须为 1-2');
   const drawn = drawN(gs, p, n);
+  if (drawn.length === 0) {
+    // 抽牌堆与弃牌堆全空（残局）：静默空转会让「先抽」看起来毫无反应，明确报错
+    throw new BloodError('NO_CARD', '无牌可抽（抽牌堆与弃牌堆已空）');
+  }
   p.hand.push(...drawn);
   p.swapDrawnIds = drawn.map((c) => c.id);
   // 手牌私有：只记张数（牌面进日志等于公示给全桌）
@@ -1014,7 +1021,15 @@ function beginImpTurn(gs: BloodState, now: number): void {
   }
   gs.impTurns -= 1;
   imp.swapDone = false;
-  imp.swapLeft = imp.privilege ? 4 : 3;
+  // 餐车投毒对小回合同样生效（「技能无法被无效」指捣蛋鬼自己的技能，不是对投毒免疫）；
+  // 此前 swapMalus 在 imp 身上永不消费，被投毒=白花 3 费
+  const baseSwap = imp.privilege ? 4 : 3;
+  const malus = imp.swapMalus;
+  imp.swapMalus = 0;
+  imp.swapLeft = Math.max(0, baseSwap - malus);
+  if (malus > 0) {
+    pushLog(gs, 'action', `${pname(imp)} 因【餐车投毒】换牌次数 -${malus}（剩 ${imp.swapLeft} 次）`);
+  }
   imp.lastAction = null;
   pushLog(gs, 'action', `🃏 ${pname(imp)}【捣蛋鬼】开始抽牌与换牌（剩余小回合 ${gs.impTurns}）`);
   tryImpDraw(gs, imp, now);
@@ -3037,17 +3052,33 @@ function endBuy(gs: BloodState, now: number): void {
         w.items.push({ id: `it-${Math.random().toString(36).slice(2, 10)}`, def: def.id });
         pushLog(gs, 'action', `${pname(w)} 将【${def.name}】正面朝上放入道具区`);
       } else if (def.kind === 'secret') {
-        // 秘密交易必须立即结算：塞进道具区会成为死牌，而被当成强化芯片插到牌上
-        // 更糟——该效果将永远不会被消费（isChipInsertable 对秘密交易返回 true）
-        processMarketDef(gs, w, def, true);
-      } else {
-        const target = w.discard.find((c) => isChipInsertable(w, c, def));
-        if (target) {
-          insertChip(gs, w, `ch-${Math.random().toString(36).slice(2, 10)}`, def.id, target.id);
+        // 秘密交易必须立即结算：塞进道具区会成为死牌，而被当成强化芯片插到牌上更糟。
+        // 仅白名单「无抉择内联结算」的效果可在此补发（noAdvance 防重入 endBuy 双发收尾结算）；
+        // 交互型（要挂起抉择）/topOfMarket（递归发放、可能再遇交互牌）无法跨阶段补发：退款弃置，
+        // 否则挂起泄漏进删牌阶段被清理网吞掉——得牌者付了血筹、效果蒸发
+        const INLINE_OK = new Set(['rollDice', 'privilegeBonus', 'bloodShare', 'stealPrivilege', 'closingGift', 'todo']);
+        if (INLINE_OK.has(def.effect.k)) {
+          processMarketDef(gs, w, def, true, undefined, true);
         } else {
-          w.blood += undelivered.highest; // 无合法宿主：退还已付血筹，牌弃置
+          w.blood += undelivered.highest;
           gs.recycle.push(def.id);
-          pushLog(gs, 'action', `🔨 ${pname(w)} 无合法芯片宿主：退还 ${undelivered.highest} 血筹，牌弃置入回收站`);
+          pushLog(gs, 'action', `🔨 ${pname(w)} 的拍卖得牌【${def.name}】需回合内抉择，无法补发：退还 ${undelivered.highest} 血筹，牌弃置`);
+        }
+      } else {
+        // 芯片：与 processMarketDef 同口径先查魏王 3 芯片上限（兜底直插曾绕过）
+        if (effChar(w) === 'wei' && w.chips.length >= 3) {
+          w.blood += undelivered.highest;
+          gs.recycle.push(def.id);
+          pushLog(gs, 'action', `🔨 ${pname(w)}【魏王】已有 3 张芯片：拍卖得牌退还 ${undelivered.highest} 血筹，牌弃置`);
+        } else {
+          const target = w.discard.find((c) => isChipInsertable(w, c, def));
+          if (target) {
+            insertChip(gs, w, `ch-${Math.random().toString(36).slice(2, 10)}`, def.id, target.id);
+          } else {
+            w.blood += undelivered.highest; // 无合法宿主：退还已付血筹，牌弃置
+            gs.recycle.push(def.id);
+            pushLog(gs, 'action', `🔨 ${pname(w)} 无合法芯片宿主：退还 ${undelivered.highest} 血筹，牌弃置入回收站`);
+          }
         }
       }
     }
@@ -3633,7 +3664,15 @@ export function bloodTick(gs: BloodState, now: number): boolean {
           purgeChipsOn(gs, p, new Set([c.id]));
           p.draw = shuffle(p.draw); // 删自抽牌堆：按卡面规则同样重洗（并触发洗衣房店主）
           grantLaundryOnReshuffle(gs);
+          // 与玩家路径 bCleanerDel 同口径：大厨删 3 +1 血筹；删到皇叔第 54 张须判宿命胜利
+          if (effChar(p) === 'chef' && finalRank(p, c) === 3) {
+            p.blood += 4;
+            pushLog(gs, 'action', `${pname(p)}【特级大厨】删除 1 张3：获得 4 血筹`);
+          }
           pushLog(gs, 'action', `${pname(p)}【清洁工】托管：删除自己抽牌堆顶的 ${bloodCardText(c)}（并重洗抽牌堆）`);
+          checkLiuWin(gs, p, now);
+          if ((gs.phase as string) === 'gameover') return true; // 宿命胜利达成，不再推进清洁工队列
+          //（switch 判别把 phase 收窄成 'reorg'，但 checkLiuWin 会改写它——以运行时值为准）
         } else {
           pushLog(gs, 'action', `${pname(p)}【清洁工】托管：抽牌堆为空，无事发生`);
         }
@@ -4011,6 +4050,9 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
   switch (pend.kind) {
     case 'insertChip':
       bInsertSkip(gs, p.id, now);
+      // 拍卖兜底注入的 thenBuy 插牌挂起：跳过后得牌者的购买窗口不被没收
+      //（挂起是发放时注入的，非其主动消耗；deadline 需重置，否则下一拍立即被托管跳过）
+      if (pend.thenBuy) gs.deadline = now + BLOOD_TURN_MS;
       return;
     case 'deleteUpTo':
       bSecretDelete(gs, p.id, [], now);

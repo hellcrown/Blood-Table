@@ -440,11 +440,13 @@ export function BloodTable({ view }: { view: BloodView }) {
     });
   }, []);
 
-  // 连砸模式：Esc 退出
+  // 连砸模式：Esc 退出（弹层打开时把 Esc 让给弹层，避免一次按键叠加关闭两处）
   useEffect(() => {
     if (!reactMode) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setReactMode(null);
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('.overlay')) return;
+      setReactMode(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

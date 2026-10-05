@@ -224,7 +224,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                 placeholder="房间码（可粘贴邀请文本）"
                 onChange={(e) => applyCode(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && nameOk && code.length === 4) join();
+                  if (e.key === 'Enter' && nameOk && code.length === 4 && connected) join();
                 }}
               />
               <button className="btn" disabled={!nameOk || code.length !== 4 || !connected} onClick={join}>
@@ -248,7 +248,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                   type="password"
                   onChange={(e) => setJoinPw(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && nameOk && joinPw) join();
+                    if (e.key === 'Enter' && nameOk && joinPw && connected) join();
                   }}
                 />
               </div>

@@ -855,10 +855,20 @@ export class RoomManager {
 
   private addSession(room: Room, nameRaw: unknown, spectator = false, accountId?: string): Session {
     // 同一账号同房仅允许一个落座会话：双开可同时看两手自己的底牌做联合决策（血色双座协同更甚）。
-    // 重连不经过这里（handleRejoin 按 token/账号接管既有会话），不受影响
+    // 例外——同账号的**断线**落座会话由新连接接管（等价于按账号重连）：新标签页/新设备没有
+    // session token 只会发 join，若直接拒绝，掉线玩家在血色对局中（座位保留到终局）就再也无法回来
     if (!spectator && accountId) {
       const dupe = [...room.sessions.values()].find((s) => s.accountId === accountId && !s.spectator);
-      if (dupe) throw new GameError('ALREADY_IN_ROOM', '该账号已在本房间落座，不能重复加入');
+      if (dupe) {
+        if (dupe.connected) throw new GameError('ALREADY_IN_ROOM', '该账号已在本房间落座，不能重复加入');
+        dupe.connected = true;
+        room.pendingRemove.delete(dupe.id);
+        if (room.mode === 'blood' && room.game && 'market' in room.game) {
+          const bp = (room.game as BloodState).players.find((x) => x.id === dupe.id);
+          if (bp) bp.connected = true; // 与 handleRejoin 同口径：复位引擎侧断线标记
+        }
+        return dupe; // 调用方随后 bind(ws) 并 sendHello（hello 会下发 dupe.token 供后续重连）
+      }
     }
     // 登录态强制使用账号昵称（防冒名，天梯榜展示一致）；匿名不得占用已注册昵称
     let name = accountId ? (accountName(accountId) ?? cleanName(nameRaw, room.sessions.size + 1)) : cleanName(nameRaw, room.sessions.size + 1);
@@ -1225,6 +1235,14 @@ export class RoomManager {
     const bs = room.game as BloodState;
     if (bs.phase === 'gameover') throw new GameError('IN_GAME', '对局已结束，请等待房主返回房间');
     if (!session.spectator) throw new GameError('NOT_SPECTATOR', '你不是观战者');
+    // 与 addSession 的同账号查重同口径：账号已在本房落座时不得再接替机器人，
+    // 否则「先落座再观战」可绕过查重形成同一账号双座（看两手自己的牌协同作弊）
+    if (
+      session.accountId &&
+      [...room.sessions.values()].some((s) => s.accountId === session.accountId && !s.spectator && s.id !== session.id)
+    ) {
+      throw new GameError('ALREADY_IN_ROOM', '该账号已在本房间落座，不能再接替机器人');
+    }
     const seat = Math.floor(msg.seat);
     const bot = [...room.sessions.values()].find((s) => s.bot && s.seat === seat);
     if (!bot) throw new GameError('BAD_SEAT', '该座位没有机器人');
