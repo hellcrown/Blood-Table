@@ -322,6 +322,12 @@ select:focus {
   font-weight: 700;
 }
 
+/* 管理端房间表操作列 */
+.admin-room-ops {
+  display: flex;
+  gap: 4px;
+}
+
 /* ---------- 全服聊天弹层 ---------- */
 .chat-panel {
   width: min(480px, 92vw);

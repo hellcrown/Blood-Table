@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { BLOOD_PHASE_LABELS, CLASSIC_PHASE_LABELS } from '@shared/bloodConstants';
+import { net } from '../net/socket';
 
 /** 管理员会话 token 存 sessionStorage（关浏览器即失效） */
 const TOKEN_KEY = 'blood-admin-token';
@@ -22,6 +23,7 @@ interface RoomInfo {
   phase: string;
   players: number;
   host: string;
+  maxPlayers: number;
 }
 
 interface FeedbackInfo {
@@ -256,6 +258,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                       <th>阶段</th>
                       <th>人数</th>
                       <th>房主</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -268,6 +271,44 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                         <td>{PHASE_CN[r.phase] ?? r.phase}</td>
                         <td>{r.players}</td>
                         <td>{r.host || '—'}</td>
+                        <td className="admin-room-ops">
+                          {r.phase === 'gameover' ? (
+                            <span className="hint">已结束</span>
+                          ) : (
+                            <>
+                              {r.players < r.maxPlayers && (
+                                <button
+                                  className="btn tiny"
+                                  title="管理员免密码加入该房间"
+                                  onClick={() =>
+                                    net.send({
+                                      t: r.mode === 'blood' || r.phase === 'waiting' ? 'join' : 'spectate',
+                                      name: net.loadName() || '管理员',
+                                      code: r.code,
+                                      adminToken: token ?? undefined,
+                                    })
+                                  }
+                                >
+                                  {r.phase === 'waiting' ? '加入' : '旁观'}
+                                </button>
+                              )}
+                              <button
+                                className="btn tiny ghost"
+                                title="管理员免密码以观战身份进入"
+                                onClick={() =>
+                                  net.send({
+                                    t: 'spectate',
+                                    name: net.loadName() || '管理员',
+                                    code: r.code,
+                                    adminToken: token ?? undefined,
+                                  })
+                                }
+                              >
+                                观战
+                                </button>
+                            </>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

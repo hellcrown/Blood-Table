@@ -195,6 +195,8 @@ export class RoomManager {
     () => new SlidingWindow(60_000, 12),
     (w, now) => w.idle(now),
   );
+  /** 管理员会话令牌校验器（index.ts 注入，指向 adminTokens 表）：持有有效令牌的 join/spectate 免密码 */
+  private adminTokenValidator: ((t: string) => boolean) | null = null;
 
   private roomPwFailWindow(code: string): SlidingWindow {
     let w = this.pwFailsByRoom.get(code);
@@ -709,7 +711,7 @@ export class RoomManager {
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
-    if (room.password) {
+    if (room.password && !this.isAdminMessage(msg)) {
       if (this.roomPasswordLocked(code)) {
         throw new GameError('RATE_LIMITED', '该房间密码错误次数过多，请 1 分钟后再试');
       }
@@ -723,7 +725,9 @@ export class RoomManager {
       }
     }
     const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
-    if (spectatorCount >= MAX_SPECTATORS) throw new GameError('ROOM_LIMIT', '观战人数已达上限');
+    if (spectatorCount >= MAX_SPECTATORS && !this.isAdminMessage(msg)) {
+      throw new GameError('ROOM_LIMIT', '观战人数已达上限');
+    }
     this.detachBinding(ws);
     const session = this.addSession(room, msg.name, true, this.resolveAccount(msg.auth));
     this.bind(ws, room, session);
@@ -774,7 +778,7 @@ export class RoomManager {
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
     const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
     if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
-    if (room.password) {
+    if (room.password && !this.isAdminMessage(msg)) {
       // 带密码房间：先查房间级锁定（防多 IP 分布式爆破），再按 IP 限速，最后校验密码
       if (this.roomPasswordLocked(code)) {
         throw new GameError('RATE_LIMITED', '该房间密码错误次数过多，请 1 分钟后再试');
@@ -1693,12 +1697,22 @@ export class RoomManager {
     send(ws, { t: 'roomList', rooms: this.listPublicRooms() });
   }
 
-  listRooms(): { code: string; mode: GameMode; phase: string; players: number; host: string }[] {
+  /** 注入管理员会话令牌校验（index.ts 持有 adminTokens 表） */
+  setAdminTokenValidator(fn: (t: string) => boolean): void {
+    this.adminTokenValidator = fn;
+  }
+
+  /** join/spectate 消息附带的管理员令牌是否有效 */
+  private isAdminMessage(msg: { adminToken?: unknown }): boolean {
+    return typeof msg.adminToken === 'string' && msg.adminToken !== '' && (this.adminTokenValidator?.(msg.adminToken) ?? false);
+  }
+
+  listRooms(): { code: string; mode: GameMode; phase: string; players: number; host: string; maxPlayers: number }[] {
     return [...this.rooms.values()].map((room) => {
       const g = room.game;
       const phase = g && 'phase' in g ? String(g.phase) : 'waiting';
       const host = [...room.sessions.values()].find((s) => s.id === room.hostId)?.name ?? '';
-      return { code: room.code, mode: room.mode, phase, players: room.sessions.size, host };
+      return { code: room.code, mode: room.mode, phase, players: room.sessions.size, host, maxPlayers: room.maxPlayers };
     });
   }
 

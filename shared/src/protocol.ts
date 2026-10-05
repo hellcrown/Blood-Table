@@ -165,8 +165,8 @@ export type PlayerAction =
 
 export type C2S =
   | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode; password?: string; auth?: string }
-  | { t: 'join'; name: string; code: string; password?: string; auth?: string }
-  | { t: 'spectate'; name: string; code: string; password?: string; auth?: string }
+  | { t: 'join'; name: string; code: string; password?: string; auth?: string; adminToken?: string }
+  | { t: 'spectate'; name: string; code: string; password?: string; auth?: string; adminToken?: string }
   | { t: 'enterSpectate' }
   | { t: 'replaceBot'; seat: number }
   | { t: 'backToRoom' }

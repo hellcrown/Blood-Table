@@ -295,6 +295,11 @@ function authAccount(req: http.IncomingMessage) {
 }
 
 const manager = new RoomManager();
+// 管理员会话令牌交给房间层：管理端加入/观战任意房间免密码（令牌 24h 过期，adminTokens 表为准）
+manager.setAdminTokenValidator((t) => {
+  const exp = adminTokens.get(t);
+  return exp != null && exp > Date.now();
+});
 
 /**
  * 通用 API 限流：/api/* 每 IP 30 条/秒。
