@@ -71,6 +71,24 @@ interface MatchRow {
   }[];
 }
 
+interface DauDay {
+  day: string;
+  /** 当日去重来源 IP（同一 IP 多开/重连只计一次） */
+  uv: number;
+  /** 当日去重登录账号 */
+  accounts: number;
+  /** 当日新建连接次数（含重连/刷新） */
+  conns: number;
+}
+
+interface DauInfo {
+  /** 实时：当前 WS 连接 / 房间数 / 进行中对局数 */
+  online: number;
+  rooms: number;
+  games: number;
+  days: DauDay[]; // 新→旧，首条恒为今天
+}
+
 /**
  * 管理员面板：输入管理密码登录后可查看所有房间并执行管理操作（如一键清空）。
  * 管理密码由服务器环境变量 ADMIN_KEY 配置（仅开发者可见，玩家端不展示任何细节）。
@@ -87,6 +105,25 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [stats, setStats] = useState<MatchStats | null>(null);
   const [recent, setRecent] = useState<MatchRow[] | null>(null);
   const [matchError, setMatchError] = useState('');
+  const [dau, setDau] = useState<DauInfo | null>(null);
+  const [dauError, setDauError] = useState('');
+
+  const loadDau = useCallback(async (t: string) => {
+    try {
+      const r = await fetch('/api/admin/dau', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      const data = (await r.json()) as DauInfo & { ok?: boolean };
+      setDau({ online: data.online ?? 0, rooms: data.rooms ?? 0, games: data.games ?? 0, days: data.days ?? [] });
+      setDauError('');
+    } catch {
+      setDauError('加载日活数据失败，请重试');
+    }
+  }, []);
 
   const loadMatches = useCallback(async (t: string) => {
     try {
@@ -146,8 +183,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
     if (token) {
       void loadFeedback(token);
       void loadMatches(token);
+      void loadDau(token);
     }
-  }, [token, loadFeedback, loadMatches]);
+  }, [token, loadFeedback, loadMatches, loadDau]);
 
   const loadRooms = useCallback(async (t: string) => {
     try {
@@ -385,6 +423,49 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+            <div className="admin-feedback admin-stats">
+              <div className="admin-feedback-head">
+                <b>📈 日活</b>
+                <span className="spacer" />
+                <button className="btn small" disabled={busy} onClick={() => token && void loadDau(token)}>
+                  刷新
+                </button>
+              </div>
+              {dauError && <p className="admin-error">{dauError}</p>}
+              {dau == null && <p className="hint">加载中…</p>}
+              {dau != null && (
+                <>
+                  <p className="hint">
+                    当前在线连接 {dau.online} · 房间 {dau.rooms} · 进行中对局 {dau.games}
+                  </p>
+                  <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>日期</th>
+                          <th>活跃 IP</th>
+                          <th>登录账号</th>
+                          <th>新连接</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dau.days.map((d, i) => (
+                          <tr key={d.day}>
+                            <td>
+                              {d.day}
+                              {i === 0 ? '（今天）' : ''}
+                            </td>
+                            <td>{d.uv}</td>
+                            <td>{d.accounts}</td>
+                            <td>{d.conns}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
             <div className="admin-feedback">

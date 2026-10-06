@@ -12,6 +12,7 @@ import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
 import { accountName, computeLadderPoints, isNameRegistered, recordLadderEvent, verifyToken } from './auth';
 import { cleanChatText } from './chat';
+import { recordAccountVisit } from './dau';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -843,6 +844,7 @@ export class RoomManager {
     session.ws = ws;
     session.connected = true;
     room.pendingRemove.delete(session.id);
+    if (session.accountId) recordAccountVisit(session.accountId); // 日活：重连回座位也是一次活跃
     // 引擎侧断线标记同步复位：血色 pick 阶段离场者重连后若仍是 connected=false，
     // 竞拍开始会按「已离场」替其预填 0 价且 bCrownBid 静默忽略重复出价，重连者永远无法参与竞拍
     if (room.game && room.mode === 'blood' && 'market' in room.game) {
@@ -918,6 +920,7 @@ export class RoomManager {
           const bp = (room.game as BloodState).players.find((x) => x.id === dupe.id);
           if (bp) bp.connected = true; // 与 handleRejoin 同口径：复位引擎侧断线标记
         }
+        if (accountId) recordAccountVisit(accountId); // 日活：断线会话被接管同样是一次活跃
         return dupe; // 调用方随后 bind(ws) 并 sendHello（hello 会下发 dupe.token 供后续重连）
       }
     }
@@ -953,6 +956,7 @@ export class RoomManager {
     };
     room.sessions.set(session.id, session);
     this.tokenIndex.set(session.token, { room, sessionId: session.id });
+    if (accountId) recordAccountVisit(accountId); // 日活：登录账号入房即一次活跃（匿名按连接 IP 统计）
     if (!room.hostId && !spectator) room.hostId = session.id;
     return session;
   }
@@ -1309,6 +1313,7 @@ export class RoomManager {
     bot.bot = false;
     bot.ws = session.ws;
     bot.connected = true;
+    if (bot.accountId) recordAccountVisit(bot.accountId); // 日活：接替机器人入座也是一次活跃
     this.tokenIndex.set(bot.token, { room, sessionId: bot.id });
     this.bindings.set(session.ws!, { room, session: bot });
     room.sessions.delete(session.id);

@@ -21,6 +21,7 @@ import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from '
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
+import { dauSummary, initDauStore, recordConnection } from './dau';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -650,6 +651,25 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (url.pathname === '/api/admin/dau' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        // 实时面：当前 WS 连接 / 房间 / 进行中对局
+        online: wss.clients.size,
+        rooms: manager.roomCount(),
+        games: manager.countActiveGames(),
+        days: dauSummary(30),
+      }),
+    );
+    return;
+  }
   // 未知 /api/* 一律 404 JSON：此前会落到下面的静态回退，返回 **200 + index.html**，
   // 客户端只能靠 content-type 猜（老服务端没有新接口时尤其容易误判为"接口正常"）
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
@@ -761,6 +781,7 @@ const chatHub = new ChatHub({
 });
 
 chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
+initDauStore(path.resolve(process.cwd(), 'data', 'dau.json'));
 
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
@@ -778,6 +799,7 @@ wss.on('connection', (ws, req) => {
     return;
   }
   ipConns.set(ip, (ipConns.get(ip) ?? 0) + 1);
+  recordConnection(ip); // 日活：仅统计被接受的连接（配额拒绝的脚本流量不算活跃）
   ws.on('close', () => {
     const left = (ipConns.get(ip) ?? 1) - 1;
     if (left <= 0) ipConns.delete(ip);
