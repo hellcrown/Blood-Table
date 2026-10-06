@@ -22,6 +22,7 @@ import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchP
 import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
 import { dauSummary, initDauStore, recordConnection } from './dau';
+import { initAuditStore, listAuditGames, loadAuditGame } from './audit';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -670,6 +671,27 @@ const server = http.createServer((req, res) => {
     );
     return;
   }
+  if (url.pathname === '/api/admin/audit' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, games: listAuditGames() }));
+    return;
+  }
+  if (url.pathname === '/api/admin/audit/game' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    const key = String(url.searchParams.get('key') ?? '').slice(0, 64);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, game: loadAuditGame(key) }));
+    return;
+  }
   // 未知 /api/* 一律 404 JSON：此前会落到下面的静态回退，返回 **200 + index.html**，
   // 客户端只能靠 content-type 猜（老服务端没有新接口时尤其容易误判为"接口正常"）
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
@@ -782,6 +804,7 @@ const chatHub = new ChatHub({
 
 chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
 initDauStore(path.resolve(process.cwd(), 'data', 'dau.json'));
+initAuditStore(path.resolve(process.cwd(), 'data', 'audit'));
 
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);

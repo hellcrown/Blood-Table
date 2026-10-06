@@ -13,6 +13,7 @@ import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
 import { accountName, computeLadderPoints, isNameRegistered, recordLadderEvent, verifyToken } from './auth';
 import { cleanChatText } from './chat';
 import { recordAccountVisit } from './dau';
+import { recordAction, recordChat, recordGameEnd, recordGameStart } from './audit';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -174,6 +175,57 @@ function numArr(v: unknown): number[] {
     throw new blood.BloodError('BAD_MSG', '参数格式错误');
   }
   return v as number[];
+}
+
+/* ---------------- 操作审计（旁路落盘，见 audit.ts；不触碰对局状态） ----------------
+ * 用模块级函数而非类方法：测试普遍把 handleBlood/handleAct 解构出来裸调用（this 为 undefined），
+ * 审计 taps 不得依赖 this。 */
+
+/** 当前对局的审计 key；未开局时 gameStartedAt 为空 → audit 内部按索引未命中自动丢弃 */
+function auditKeyOf(room: Room): string {
+  return `${room.code}:${room.gameStartedAt ?? 0}`;
+}
+
+/** 操作尝试（含将被规则拒绝的——刷非法消息本身是作弊探针） */
+function auditPlayerAct(room: Room, session: Session, t: string, rawMsg: unknown): void {
+  const raw = { ...(rawMsg as Record<string, unknown>) };
+  delete raw.t;
+  delete raw.auth;
+  delete raw.adminToken;
+  delete raw.name;
+  recordAction({
+    key: auditKeyOf(room),
+    ts: Date.now(),
+    seat: session.seat,
+    name: session.name,
+    ...(session.accountId ? { accountId: session.accountId } : {}),
+    t,
+    ...(Object.keys(raw).length > 0 ? { p: raw } : {}),
+  });
+}
+
+/** 开局快照：座位/昵称/账号/bot/IP（断线会话此刻仍可取到 ws.ip）+ 非 bot 座位同 IP 标记 */
+function auditRoomStart(room: Room): void {
+  const players = [...room.sessions.values()]
+    .filter((s) => !s.spectator)
+    .sort((a, b) => a.seat - b.seat)
+    .map((s) => ({
+      seat: s.seat,
+      name: s.name,
+      ...(s.accountId ? { accountId: s.accountId } : {}),
+      ...(s.bot ? { bot: true } : {}),
+      ...(s.ws?.ip ? { ip: s.ws.ip } : {}),
+    }));
+  recordGameStart({
+    room: room.code,
+    mode: room.mode,
+    startedAt: room.gameStartedAt ?? Date.now(),
+    settings:
+      room.mode === 'blood'
+        ? { targetTickets: room.targetTickets, charExpansion: room.charExpansion, expansion: room.expansion }
+        : { ...room.settings },
+    players,
+  });
 }
 
 export class RoomManager {
@@ -418,6 +470,7 @@ export class RoomManager {
   /* ---------------- 血色模式 ---------------- */
 
   private handleBlood(room: Room, session: Session, msg: C2S): void {
+    auditPlayerAct(room, session, msg.t, msg); // 审计：所有操作尝试旁路落盘（未开局自动丢弃）
     if (session.spectator) {
       throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
     }
@@ -688,6 +741,7 @@ export class RoomManager {
         });
         room.matchLogged = false;
         room.gameStartedAt = now;
+        auditRoomStart(room); // 审计：再来一场的新对局开局快照
         // 新一局：logSeq 归零重排，必须让各会话的日志增量游标归零，
         // 否则新局日志的 seq（从 1 开始）会被客户端按"已见过"去重，日志面板停在上一局
         for (const s of room.sessions.values()) s.lastEventSeq = 0;
@@ -1122,9 +1176,10 @@ export class RoomManager {
       engine.startHand(room.game, now);
       room.matchLogged = false;
       room.gameStartedAt = now;
-      this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告（旧局收过不代表新局知道）
+      this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
       if (this.draining) this.notifyDrain(room);
     }
+    auditRoomStart(room); // 审计：开局快照（两种模式统一在此采集，gameStartedAt 已就位）
     this.broadcast(room);
   }
 
@@ -1400,6 +1455,7 @@ export class RoomManager {
   }
 
   private handleAct(room: Room, session: Session, msg: Extract<C2S, { t: 'act' }>): void {
+    auditPlayerAct(room, session, msg.t, msg); // 审计：德州操作旁路落盘
     const g = room.game;
     if (!g || room.mode !== 'classic') throw new GameError('NO_GAME', '对局尚未开始');
     if (session.spectator) throw new GameError('SPECTATING', '观战中不能执行玩家操作');
@@ -1460,6 +1516,14 @@ export class RoomManager {
     const m: ChatMsg = { name: session.name, text, ts: Date.now(), ...(session.accountId ? { account: true } : {}) };
     room.chatLog.push(m);
     if (room.chatLog.length > ROOM_CHAT_MAX) room.chatLog.splice(0, room.chatLog.length - ROOM_CHAT_MAX);
+    recordChat({
+      key: auditKeyOf(room),
+      ts: m.ts,
+      seat: session.seat,
+      name: m.name,
+      ...(session.accountId ? { accountId: session.accountId } : {}),
+      text: m.text,
+    }); // 审计：房间聊天（限频已通过；观战者 seat=-1）
     for (const s of room.sessions.values()) {
       // bot 无连接、断线会话 ws 为 null：send 内部按 readyState 静默跳过
       send(s.ws, { t: 'roomChatMsg', name: m.name, text: m.text, ts: m.ts, ...(m.account ? { account: true } : {}) });
@@ -1649,6 +1713,15 @@ export class RoomManager {
     } catch (e) {
       console.error('[room] 对局落库失败:', e);
     }
+    // 审计：终局摘要（含每人最终状态与 IP）+ 引擎叙述；与 matchLogged 哨兵同频，每局一次
+    recordGameEnd({
+      key: auditKeyOf(room),
+      endedAt: now,
+      ...(durationMin != null ? { durationMin } : {}),
+      winnerSeat: entry.winnerSeat,
+      summary: entry,
+      log: g.log,
+    });
   }
 
   /**
