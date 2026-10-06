@@ -89,6 +89,8 @@ class Net {
   private started = false;
   /** 已写入 lastRoom 的房间码（避免每条 state 消息重复写 localStorage） */
   private notedCode: string | null = null;
+  /** 主动退出房间时所在的连接：该连接上迟到的 state 帧一律丢弃（见 onmessage state 分支） */
+  private leavingWs: WebSocket | null = null;
   /**
    * 本地累积的血战日志（按 seq 有序、去重、有上限）。
    * 服务端只在首帧/落后过多时下发全量，其余帧仅带尾部 + `event` 增量 ——
@@ -162,6 +164,7 @@ class Net {
         return;
       }
       if (msg.t === 'hello') {
+        this.leavingWs = null; // 新会话绑定（含同一连接上的再次入房）：迟到帧防护完成使命
         this.token = msg.token;
         this.playerId = msg.playerId;
         try {
@@ -176,6 +179,11 @@ class Net {
           this.accountListeners.forEach((l) => l(account));
         }
       } else if (msg.t === 'state') {
+        // 主动退出后（见 leaveRoom），服务器处理 leave 前已广播的最后一帧 state 可能仍在途：
+        // 此时套用会把刚清空的 view 复原成旧牌桌（玩家表现为「点退出没反应，要退两次，
+        // 第二次报『尚未加入房间』」），还会把刚清除的 lastRoom 重写回去（大厅重现「回到房间」横幅）。
+        // 该连接上的后续帧一律丢弃；重连后的新连接或 hello（新入房）不受影响。
+        if (ws === this.leavingWs) return;
         const code = typeof msg.view?.code === 'string' ? msg.view.code : null;
         // code 变化或 lastRoom 被他处清空/覆盖（多标签页共享）时重写，自愈
         if (code && (code !== this.notedCode || loadLastRoom()?.code !== code)) {
@@ -343,6 +351,8 @@ class Net {
 
   leaveRoom(): void {
     this.send({ t: 'leave' });
+    // 标记本连接：服务器处理 leave 前发出的 state 帧仍在途，到达后不得把 view 弹回旧牌桌
+    this.leavingWs = this.ws;
     this.clearToken();
     this.notedCode = null; // 同步重置：否则重进同房间时首条 state 不写 lastRoom，横幅失效
     clearLastRoom();
