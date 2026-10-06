@@ -1473,6 +1473,17 @@ select:focus {
   font-weight: 700;
 }
 
+/* 黑市右两格「随牌带走的血筹」：绿色=收益（曾用粉红 +N🩸，被普遍误读成购买加价） */
+.mc-gain {
+  color: #7fd6a4;
+  background: #1d3a2a;
+  border-radius: 99px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .mc-empty {
   color: var(--text-dim);
   text-align: center;

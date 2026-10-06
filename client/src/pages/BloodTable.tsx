@@ -1233,7 +1233,14 @@ export function BloodTable({ view }: { view: BloodView }) {
                         <div className="mc-text">{m.text}</div>
                         <div className="mc-foot">
                           <span className="mc-cost">🩸{m.cost}</span>
-                          {m.bonus > 0 && <span className="mc-bonus">+{m.bonus}🩸</span>}
+                          {m.bonus > 0 && (
+                            <span
+                              className="mc-gain"
+                              title="购买此牌时，栏位上累积的血筹随牌一起带走（是奖励，不加价）；每轮购买阶段结束最右两格各叠 1 血筹，牌被换掉则血筹一同弃置"
+                            >
+                              带走 🩸{m.bonus}
+                            </span>
+                          )}
                           {(view.me.smugglerSlot === i || m.marked) && <span className="mc-bonus">🚚已标记</span>}
                           <span className="spacer" />
                           {view.prompt.k === 'buy' && (
