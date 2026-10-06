@@ -45,7 +45,7 @@ function chatHistory(mgr: RoomManager, room: unknown, session: unknown): void {
 
 /** 造一个 1 房主 + 1 玩家 + 1 观战者的血色等待房（未开局，game=null） */
 type SessionLike = { id: string; ws: StubWs; accountId?: string };
-type RoomLike = { code: string; chatLog: ChatMsg[]; sessions: Map<string, SessionLike> };
+type RoomLike = { code: string; chatLog: ChatMsg[]; game: unknown; sessions: Map<string, SessionLike> };
 
 function setup(): {
   mgr: RoomManager;
@@ -179,5 +179,31 @@ describe('房间内对话 · 边界与生命周期', () => {
     d.dispatch(guest.ws, { t: 'leave' });
     d.dispatch(spec.ws, { t: 'leave' });
     expect(rooms.size).toBe(0); // chatLog 挂在 Room 上，房间删除即清空
+  });
+
+  it('房内有 bot（ws=null）会话时广播不炸：bot 跳过、真人正常收到', () => {
+    const { mgr, room, host, guestSent } = setup();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    m.handleAddBot(room, host);
+    const botCount = [...room.sessions.values()].filter((s) => (s as { bot?: boolean }).bot).length;
+    expect(botCount).toBe(1);
+    chat(mgr, room, host, '机器人听得见吗');
+    expect(room.chatLog).toHaveLength(1);
+    const guestMsgs = guestSent.filter((x) => (x as { t: string }).t === 'roomChatMsg');
+    expect(guestMsgs).toHaveLength(1); // bot 无连接被 send 跳过，真人广播不受影响
+  });
+
+  it('与对局状态机隔离：聊天不触发 state 帧、不推动 lastEventSeq', () => {
+    const { mgr, room, host, guest, hostSent } = setup();
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+    m.handleStart(room, host); // 开血色对局（2 名已入座玩家）
+    expect(room.game).not.toBeNull();
+    const before = hostSent.length;
+    const seqBefore = (guest as unknown as { lastEventSeq: number }).lastEventSeq;
+    chat(mgr, room, host, '对局中聊天');
+    const extra = hostSent.slice(before) as { t: string }[];
+    expect(extra.length).toBeGreaterThan(0);
+    expect(extra.every((x) => x.t === 'roomChatMsg')).toBe(true); // 只有聊天回显，无 state
+    expect((guest as unknown as { lastEventSeq: number }).lastEventSeq).toBe(seqBefore);
   });
 });

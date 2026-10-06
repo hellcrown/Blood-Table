@@ -20,6 +20,7 @@ import {
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
+import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -764,6 +765,8 @@ chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
   (ws as unknown as { ip?: string }).ip = ip;
+  // 心跳：初始存活 + pong 应答复位（缺 pong 监听会让每条连接 30-60s 被误杀一轮，见 heartbeat.ts）
+  attachHeartbeat(ws as unknown as HeartSocket);
   // 新建连接频率超限：直接拒绝
   if (!ipNewConn.get(ip).allow()) {
     ws.close(4008, 'rate limited');
@@ -787,18 +790,8 @@ wss.on('connection', (ws, req) => {
   manager.handleConnection(ws);
 });
 
-// 心跳：清掉死连接
-setInterval(() => {
-  for (const ws of wss.clients) {
-    const alive = (ws as unknown as { isAlive?: boolean }).isAlive !== false;
-    if (!alive) {
-      ws.terminate();
-      continue;
-    }
-    (ws as unknown as { isAlive?: boolean }).isAlive = false;
-    ws.ping();
-  }
-}, 30_000).unref();
+// 心跳：清掉死连接（pong 复位与假时钟测试见 net/heartbeat.ts）
+startHeartbeat(() => wss.clients as unknown as Iterable<HeartSocket>);
 
 // 房间驱动：超时托管 / 结算推进 / 空房清理（兜底 try/catch：tick 内未预期异常不得击穿进程）
 // 排水：deploy.sh 重启前写入 server/.draining 标记，检测到后向对局广播更新公告

@@ -91,6 +91,10 @@ class Net {
   private notedCode: string | null = null;
   /** 主动退出房间时所在的连接：该连接上迟到的 state 帧一律丢弃（见 onmessage state 分支） */
   private leavingWs: WebSocket | null = null;
+  /** 主动退出引发的重连周期：静默进行，不跌入 closed/connecting 状态（避免退房后闪断线横幅） */
+  private quietReconnect = false;
+  /** 当前血战日志所属的房间码：换房（code 变化）时强制全量重置，防跨房日志混排 */
+  private bloodLogCode: string | null = null;
   /**
    * 本地累积的血战日志（按 seq 有序、去重、有上限）。
    * 服务端只在首帧/落后过多时下发全量，其余帧仅带尾部 + `event` 增量 ——
@@ -130,7 +134,8 @@ class Net {
   }
 
   private connect(): void {
-    this.setStatus('connecting');
+    // 主动退出的静默重连周期：跳过 connecting 状态（连接本来就是我们请服务器关的，不是断线）
+    if (!this.quietReconnect) this.setStatus('connecting');
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.wsUrl());
@@ -152,6 +157,7 @@ class Net {
     }, 10_000);
     ws.onopen = () => {
       window.clearTimeout(watchdog);
+      this.quietReconnect = false;
       this.reconnectDelay = 800;
       this.setStatus('open');
       if (this.token) this.send({ t: 'rejoin', token: this.token });
@@ -192,12 +198,17 @@ class Net {
         }
         const v = msg.view as AnyView;
         if (v.kind === 'blood') {
-          // 服务端常规帧只带日志尾部（全量帧标记 logFull），与本地累积合并后再交给消费者
-          v.log = this.mergeBloodLog(v.log ?? [], v.logFull !== false);
+          // 房间码变化 → 强制全量重置：中途入房/观战时服务端首帧只带尾部（lastEventSeq 初始化为
+          // 当前 logSeq，logFull=false），不重置会把上一个房间的日志行按 seq 混排进本局面板
+          const full = v.logFull !== false || code !== this.bloodLogCode;
+          v.log = this.mergeBloodLog(v.log ?? [], full);
+          this.bloodLogCode = code;
         }
         this.view = v;
         this.viewListeners.forEach((l) => l(v));
       } else if (msg.t === 'event') {
+        // 已退出房间：迟到增量并入会污染下一个房间的日志基线（随后虽有换房重置兜底，此处直接掐掉）
+        if (ws === this.leavingWs) return;
         // 血战日志增量：服务端把每帧新增的行单独下发（随后必有一条 state），
         // 先并入本地累积，这样滑出尾部窗口的旧行也不会丢
         this.mergeBloodLog([msg.line], false);
@@ -247,6 +258,15 @@ class Net {
         this.setView(null);
         return;
       }
+      // 主动退出引发的关闭（见 leaveRoom）：连接是我们请服务器关的，静默重连即可，
+      // 不置 closed——否则每次退房后大厅都闪 1 秒多的「连接断开，正在重连」横幅。
+      // 若重连失败，后续连接的 close 不再命中 leavingWs，断线提示照常出现（自愈）。
+      if (ws === this.leavingWs) {
+        this.quietReconnect = true;
+        this.scheduleReconnect();
+        return;
+      }
+      this.quietReconnect = false; // 静默链到此为止：之后任何断开都正常提示
       this.setStatus('closed');
       this.scheduleReconnect();
     };

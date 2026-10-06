@@ -19,6 +19,9 @@ function append(list: ChatMsg[], m: ChatMsg): ChatMsg[] {
   return next.length > LOCAL_MAX ? next.slice(next.length - LOCAL_MAX) : next;
 }
 
+/** 与服务端 10 秒/5 条限频同窗口的本地计数（两通道独立、跨弹层开闭保留）：提前拦住第 6-9 条，避免静默丢失 */
+const sendTimes: Record<Scope, number[]> = { room: [], global: [] };
+
 /**
  * 聊天弹层：房间内对话 + 全服聊天双页签（大厅无房间，仅全服）。
  * - 房间页签：仅同房间成员（含观战者）可见；历史挂在服务端房间对象上（上限 80 条，房间销毁即清空）
@@ -32,11 +35,10 @@ function append(list: ChatMsg[], m: ChatMsg): ChatMsg[] {
 export function ChatModal({ onClose, roomScope = false }: { onClose: () => void; roomScope?: boolean }) {
   const [tab, setTab] = useState<Scope>(roomScope ? 'room' : 'global');
   const [store, setStore] = useState<Record<Scope, ChatMsg[]>>({ room: [], global: [] });
-  const [draft, setDraft] = useState('');
+  // 草稿按页签独立：在房间页签打了一半的话，切去全服看一眼再回车，不会把 A 页签的话发进 B
+  const [drafts, setDrafts] = useState<Record<Scope, string>>({ room: '', global: '' });
   const [cooldown, setCooldown] = useState<Record<Scope, boolean>>({ room: false, global: false });
   const [rateLimited, setRateLimited] = useState<Record<Scope, boolean>>({ room: false, global: false });
-  /** 与服务端 10 秒/5 条限频同窗口的本地计数（两通道独立）：提前拦住第 6-9 条，避免静默丢失 */
-  const sendTimesRef = useRef<Record<Scope, number[]>>({ room: [], global: [] });
   /** 已拉取过历史快照的页签：切页签只拉一次，防反复请求撞限频 */
   const fetchedRef = useRef<Record<Scope, boolean>>({ room: false, global: false });
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -65,14 +67,26 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
     };
   }, []);
 
-  // 首次激活页签时拉历史快照（挂载即拉当前页签，切页签懒拉一次）
+  // 首次激活页签时拉历史快照（挂载即拉当前页签，切页签懒拉一次）。
+  // 发送失败（离线/被限流丢弃）不置位：下次激活或切页签会重试
   useEffect(() => {
     if (fetchedRef.current[tab]) return;
+    if (!net.send(tab === 'global' ? { t: 'chatHistory' } : { t: 'roomChatHistory' })) return;
     fetchedRef.current[tab] = true;
-    net.send(tab === 'global' ? { t: 'chatHistory' } : { t: 'roomChatHistory' });
   }, [tab]);
 
+  // 断线窗口的实时广播物理收不到：重连成功后补拉两个页签的历史（merge 去重，幂等）。
+  // 房间通道仅在房间内拉——大厅发 roomChatHistory 会收到 NOT_IN_ROOM 错误
+  useEffect(() => {
+    return net.onStatus((s) => {
+      if (s !== 'open') return;
+      if (net.view) net.send({ t: 'roomChatHistory' });
+      net.send({ t: 'chatHistory' });
+    });
+  }, []);
+
   const msgs = store[tab];
+  const draft = drafts[tab];
 
   // 新消息到达自动滚到底（v1 一律滚底，简单可靠）
   useEffect(() => {
@@ -81,14 +95,14 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
   }, [tab, msgs.length]);
 
   const send = (scope: Scope): void => {
-    const text = draft.trim();
+    const text = drafts[scope].trim();
     if (!text || cooldown[scope]) return;
     const now = Date.now();
-    const times = sendTimesRef.current[scope].filter((t) => now - t < 10_000);
-    sendTimesRef.current[scope] = times;
+    const times = sendTimes[scope].filter((t) => now - t < 10_000);
     if (times.length >= 5) {
       // 已达服务端窗口上限：按最早一条过期时间冷却，明示而非静默丢失
       const wait = 10_000 - (now - times[0]!) + 100;
+      sendTimes[scope] = times;
       setCooldown((c) => ({ ...c, [scope]: true }));
       setRateLimited((c) => ({ ...c, [scope]: true }));
       window.setTimeout(() => {
@@ -97,9 +111,10 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
       }, wait);
       return;
     }
-    times.push(now);
-    net.send(scope === 'global' ? { t: 'chat', text } : { t: 'roomChat', text });
-    setDraft('');
+    // 离线时消息没发出去：不计入本地窗口、不清草稿（net.send 已给 OFFLINE 提示）
+    if (!net.send(scope === 'global' ? { t: 'chat', text } : { t: 'roomChat', text })) return;
+    sendTimes[scope] = [...times, now];
+    setDrafts((d) => ({ ...d, [scope]: '' }));
     setCooldown((c) => ({ ...c, [scope]: true }));
     setRateLimited((c) => ({ ...c, [scope]: false }));
     window.setTimeout(() => setCooldown((c) => ({ ...c, [scope]: false })), 1200);
@@ -141,7 +156,7 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
             placeholder={
               rateLimited[tab] ? '发言太频繁，请稍候…' : cooldown[tab] ? '稍等片刻…' : '说点什么（最多 120 字）'
             }
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => setDrafts((d) => ({ ...d, [tab]: e.target.value }))}
             onKeyDown={(e) => {
               // 输入法组合中的 Enter 是「确认候选词」，不能当发送
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(tab);

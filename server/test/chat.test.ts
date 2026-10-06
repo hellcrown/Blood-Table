@@ -32,6 +32,9 @@ describe('ChatHub · 消息消费边界', () => {
     expect(hub.onRaw(fakeWs, '{"t":"chat","text":"hi"}')).toBe(true);
     expect(hub.onRaw(fakeWs, '{"t":"chatHistory"}')).toBe(true);
     expect(hub.onRaw(fakeWs, '{"t":"chat" broken')).toBe(true); // 前缀命中但解析失败：消费不进房间层
+    // 房间内聊天走房间分发层，不得被 `{"t":"chat` 前缀误吞（第 7 个字符 r≠c 的差别必须有测试锁住）
+    expect(hub.onRaw(fakeWs, '{"t":"roomChat","text":"hi"}')).toBe(false);
+    expect(hub.onRaw(fakeWs, '{"t":"roomChatHistory"}')).toBe(false);
   });
 });
 
