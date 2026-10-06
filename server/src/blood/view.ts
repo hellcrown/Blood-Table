@@ -17,6 +17,21 @@ function cardView(c: BCard, p: BPlayer): BloodCardView {
 }
 
 export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
+  // 结算队列互动（魅魔/票贩子/炸鸡店老板）挂在我身上且对决演示未确认：先看演示再互动。
+  // 必须放在挂起 switch **之前**——挂起分支会直接返回互动提示，把这道门整个短路成死代码
+  // （复现：特工+炸鸡店老板局，老板没看/没确认演示就被扔进删牌，删完 sdConfirm 又没有
+  // 浮层可关，全桌干等 30s 自动确认，其他人表现为「卡在等待确认」）。旧位置在 settle
+  // 分支内，永远执行不到。
+  const pendEarly = gs.secretPending;
+  if (
+    pendEarly &&
+    pendEarly.seat === p.id &&
+    gs.phase === 'settle' &&
+    ['succubusSteal', 'scalperDeal', 'fryerDel'].includes(pendEarly.kind) &&
+    !p.sdSeen
+  ) {
+    return { k: 'sdConfirm' };
+  }
   // 挂起中的拓展牌交互优先（跨阶段）
   const pend = gs.secretPending;
   if (pend && pend.seat === p.id) {
@@ -167,18 +182,9 @@ export function promptFor(gs: BloodState, p: BPlayer): BloodMyPrompt {
       return { k: 'wait' };
     }
     case 'settle':
-      // 结算队列互动（魅魔/票贩子/炸鸡店老板）挂在我身上时，先看演示再互动：
-      // 未确认演示时返回 sdConfirm——否则互动按钮被演示浮层（z-40 全屏）盖住点不到，
-      // 60s 窗口从演示前就开始倒计时，超时被随机托管，玩家感觉「技能没发动」
-      if (
-        gs.secretPending &&
-        gs.secretPending.seat === p.id &&
-        ['succubusSteal', 'scalperDeal', 'fryerDel'].includes(gs.secretPending.kind) &&
-        !p.sdSeen
-      ) {
-        return { k: 'sdConfirm' };
-      }
-      // 对决展示：未确认者需点击确认（关闭演示浮层即发送）
+      // 对决展示：未确认者需点击确认（关闭演示浮层即发送）。
+      // 结算队列互动（魅魔/票贩子/炸鸡店老板）的「先确认再看互动」门已上提到挂起 switch 之前
+      //（原写在这里被挂起分支短路成死代码，见函数头部注释）
       return p.sdSeen ? { k: 'wait' } : { k: 'sdConfirm' };
     case 'buy': {
       const pend = gs.secretPending;

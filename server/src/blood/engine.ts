@@ -4708,14 +4708,14 @@ export function bFryerDel(gs: BloodState, playerId: string, cardIds: string[], d
   }
   // 还有预算且弃牌区仍有本回合打出的牌：重新挂起继续删（客户端逐张点选，每张一次请求）。
   // 直接清挂起会让队列项永久消失——「至多 3 张」实际只能删 1 张，第二张起必吃 PENDING 错误。
+  // done=true 是显式收尾：即使还删得动也必须结束（曾与 cardIds 一起被忽略，玩家点「完成」仍被反复追问）
   const remainingBudget = Math.min(3 - p.fryerDelCount, p.blood);
-  if (cards.length > 0 && remainingBudget >= 1 && p.discard.some((c) => playedIds.includes(c.id))) {
+  if (!done && cards.length > 0 && remainingBudget >= 1 && p.discard.some((c) => playedIds.includes(c.id))) {
     gs.secretPending = { seat: p.id, kind: 'fryerDel', max: 3 };
     return;
   }
   gs.secretPending = null;
   processSettleQueue(gs, now);
-  void done;
 }
 
 /** 炸鸡店老板：换牌阶段花 1 血筹抽 1 张牌（无次数限制） */
