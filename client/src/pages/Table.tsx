@@ -34,7 +34,7 @@ export function Table({ view }: { view: TableView }) {
         <span>
           房间 <b>{view.code}</b> · 第 {view.handNumber || '-'} 手 · {phaseText(view.phase)}
         </span>
-        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
         <span className="spacer" />
@@ -87,7 +87,7 @@ export function Table({ view }: { view: TableView }) {
       <ActionBar view={view} offsetRef={offsetRef} />
       {view.phase === 'result' && <ResultOverlay view={view} />}
       {view.phase === 'gameover' && <GameOverOverlay view={view} />}
-      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
     </div>
   );
 }

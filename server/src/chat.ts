@@ -29,8 +29,8 @@ export interface ChatDeps {
   resolveIdentity(ws: unknown, name: unknown, auth: unknown): ChatIdentity;
 }
 
-/** 文本清洗：滤控制/零宽字符（防排版污染与隐形指令），trim 后截断 */
-function cleanChatText(raw: unknown): string {
+/** 文本清洗：滤控制/零宽字符（防排版污染与隐形指令），trim 后截断（房间内对话复用同口径） */
+export function cleanChatText(raw: unknown): string {
   return typeof raw === 'string'
     ? raw
         .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029\ufeff]/g, '')

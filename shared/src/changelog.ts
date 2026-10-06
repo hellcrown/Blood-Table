@@ -22,6 +22,14 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-06',
+    title: '房间内聊天',
+    items: [
+      '聊天弹窗升级为「房间 / 全服」双页签：和同桌（含观战者）的交流不再混进全服频道，等待房和对局页都能用',
+      '房间聊天记录保留最近 80 条，重连、刷新后打开还能看到；房间解散时记录随之清空',
+    ],
+  },
+  {
     date: '2026-10-05',
     title: '全服聊天',
     items: [

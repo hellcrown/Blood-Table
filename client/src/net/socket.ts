@@ -17,6 +17,8 @@ type FxListener = (fx: FxEvent) => void;
 type RoomListListener = (rooms: import('@shared/protocol').PublicRoomInfo[]) => void;
 type ChatMsgListener = (m: import('@shared/protocol').ChatMsg) => void;
 type ChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
+type RoomChatMsgListener = (m: import('@shared/protocol').ChatMsg) => void;
+type RoomChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
 
 export interface AccountInfo {
   id: string;
@@ -79,6 +81,8 @@ class Net {
   private roomListListeners = new Set<RoomListListener>();
   private chatMsgListeners = new Set<ChatMsgListener>();
   private chatLogListeners = new Set<ChatLogListener>();
+  private roomChatMsgListeners = new Set<RoomChatMsgListener>();
+  private roomChatLogListeners = new Set<RoomChatLogListener>();
   private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
@@ -197,6 +201,10 @@ class Net {
         this.chatMsgListeners.forEach((l) => l(msg));
       } else if (msg.t === 'chatLog') {
         this.chatLogListeners.forEach((l) => l(msg.msgs));
+      } else if (msg.t === 'roomChatMsg') {
+        this.roomChatMsgListeners.forEach((l) => l(msg));
+      } else if (msg.t === 'roomChatLog') {
+        this.roomChatLogListeners.forEach((l) => l(msg.msgs));
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -431,6 +439,18 @@ class Net {
   onChatLog(l: ChatLogListener): () => void {
     this.chatLogListeners.add(l);
     return () => this.chatLogListeners.delete(l);
+  }
+
+  /** 房间内聊天：实时消息（仅同房间会话可见，含本人回显） */
+  onRoomChatMsg(l: RoomChatMsgListener): () => void {
+    this.roomChatMsgListeners.add(l);
+    return () => this.roomChatMsgListeners.delete(l);
+  }
+
+  /** 房间内聊天：历史快照（打开聊天窗时拉取） */
+  onRoomChatLog(l: RoomChatLogListener): () => void {
+    this.roomChatLogListeners.add(l);
+    return () => this.roomChatLogListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {

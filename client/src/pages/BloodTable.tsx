@@ -1034,7 +1034,7 @@ export function BloodTable({ view }: { view: BloodView }) {
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
             </button>
-            <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+            <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
               💬
             </button>
           </span>
@@ -3120,7 +3120,7 @@ export function BloodTable({ view }: { view: BloodView }) {
     )}
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
     </div>
   );
 }

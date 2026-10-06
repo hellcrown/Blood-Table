@@ -1,6 +1,6 @@
 import { randomBytes, randomInt, createHash, timingSafeEqual } from 'node:crypto';
 import type { RawData, WebSocket } from 'ws';
-import type { C2S, GameMode, PublicRoomInfo, S2C, Suit } from '@shared/protocol';
+import type { C2S, ChatMsg, GameMode, PublicRoomInfo, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
@@ -11,6 +11,7 @@ import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
 import { accountName, computeLadderPoints, isNameRegistered, recordLadderEvent, verifyToken } from './auth';
+import { cleanChatText } from './chat';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,6 +23,7 @@ const MAX_ROOMS_PER_IP = 5; // 单 IP 同时拥有的房间上限（留 CGNAT �
 const MAX_JOIN_PER_MIN = 30;
 const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买
 const MAX_SPECTATORS = 10; // 单房间观战人数上限
+const ROOM_CHAT_MAX = 80; // 房间内对话历史上限：随房间存亡（销毁即清空），不落盘
 
 declare module 'ws' {
   interface WebSocket {
@@ -64,6 +66,8 @@ export interface Room {
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   sessions: Map<string, Session>;
+  /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
+  chatLog: ChatMsg[];
   game: GState | BloodState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
@@ -195,6 +199,16 @@ export class RoomManager {
     () => new SlidingWindow(60_000, 12),
     (w, now) => w.idle(now),
   );
+  /** 房间内对话限频：10 秒 5 条/IP（与全服聊天同口径；超频静默丢弃） */
+  private roomChatLimits = new IpTable(
+    () => new SlidingWindow(10_000, 5),
+    (w, now) => w.idle(now),
+  );
+  /** 房间对话历史快照限流：6 次/分/IP（80 条约 8KB，防循环拉取） */
+  private roomChatHistLimits = new IpTable(
+    () => new SlidingWindow(60_000, 6),
+    (w, now) => w.idle(now),
+  );
   /** 管理员会话令牌校验器（index.ts 注入，指向 adminTokens 表）：持有有效令牌的 join/spectate 免密码 */
   private adminTokenValidator: ((t: string) => boolean) | null = null;
 
@@ -221,6 +235,8 @@ export class RoomManager {
     setInterval(() => {
       this.joinAttempts.prune();
       this.roomListLimit.prune();
+      this.roomChatLimits.prune();
+      this.roomChatHistLimits.prune();
       // pwJoins 是唯一漏在清理之外的限流表：任何访问过密码房的 IP 都会永久留一条
       // （与 net/limits.ts 的「带闲置自动清理，防 Map 无限膨胀」注释相矛盾）
       this.pwJoins.prune();
@@ -350,6 +366,12 @@ export class RoomManager {
     switch (msg.t) {
       case 'leave':
         this.handleLeave(room, session);
+        return;
+      case 'roomChat':
+        this.handleRoomChat(room, session, msg);
+        return;
+      case 'roomChatHistory':
+        this.handleRoomChatHistory(room, session);
         return;
       case 'start':
         this.handleStart(room, session);
@@ -869,6 +891,7 @@ export class RoomManager {
       expansion: false,
       targetTickets: 0,
       sessions: new Map(),
+      chatLog: [],
       game: null,
       pendingRemove: new Set(),
       emptySince: 0,
@@ -1414,6 +1437,35 @@ export class RoomManager {
     for (const s of room.sessions.values()) {
       send(s.ws, { t: 'fx', kind: msg.kind, from: from.seat, to: to.seat });
     }
+  }
+
+  /* ---------------- 房间内对话 ---------------- */
+
+  /**
+   * 房间内对话：发言者须已入房（含观战者），广播给房内全部会话（含本人回显）。
+   * 历史挂在 Room.chatLog（上限 80 条）——房间销毁（全员离开/闲置回收/异常清理）即随之丢弃，
+   * 天然满足「销毁前可见」；不落盘：房间本身无持久化，对局重启同样清零。
+   * 身份直接取会话名（入房时已清洗/查重，登录者强制账号名），无需再防冒名。
+   */
+  private handleRoomChat(room: Room, session: Session, msg: Extract<C2S, { t: 'roomChat' }>): void {
+    const text = cleanChatText(msg.text);
+    if (!text) return;
+    const ip = session.ws?.ip ?? '';
+    if (!this.roomChatLimits.get(ip).allow()) return; // 超频静默丢弃（与全服聊天同口径：无回显即未发出）
+    const m: ChatMsg = { name: session.name, text, ts: Date.now(), ...(session.accountId ? { account: true } : {}) };
+    room.chatLog.push(m);
+    if (room.chatLog.length > ROOM_CHAT_MAX) room.chatLog.splice(0, room.chatLog.length - ROOM_CHAT_MAX);
+    for (const s of room.sessions.values()) {
+      // bot 无连接、断线会话 ws 为 null：send 内部按 readyState 静默跳过
+      send(s.ws, { t: 'roomChatMsg', name: m.name, text: m.text, ts: m.ts, ...(m.account ? { account: true } : {}) });
+    }
+  }
+
+  /** 房间对话历史快照（打开聊天面板时拉取；限流防循环拉取出站洪水） */
+  private handleRoomChatHistory(room: Room, session: Session): void {
+    const ip = session.ws?.ip ?? '';
+    if (!this.roomChatHistLimits.get(ip).allow()) return;
+    send(session.ws, { t: 'roomChatLog', msgs: room.chatLog.slice() });
   }
 
   private handleRematch(room: Room, session: Session): void {

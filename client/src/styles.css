@@ -336,6 +336,29 @@ select:focus {
   gap: 10px;
 }
 
+/* 聊天页签（房间 / 全服） */
+.chat-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.chat-tab {
+  flex: 1;
+  padding: 7px 0;
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-tab.active {
+  background: rgba(216, 169, 78, 0.14);
+  color: var(--gold);
+  font-weight: 700;
+}
+
 .chat-log {
   height: 320px;
   overflow-y: auto;

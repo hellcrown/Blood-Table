@@ -167,7 +167,7 @@ export function Room({ view }: { view: TableView }) {
             <button className="btn small" onClick={() => copyInvite()}>
               {copyMsg ?? '复制邀请'}
             </button>
-        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="全服聊天：所有在线玩家可见">
+        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
         <span className="spacer" />
@@ -446,7 +446,7 @@ export function Room({ view }: { view: TableView }) {
         </div>
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
       </div>
-      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
     </div>
   );
 }

@@ -186,6 +186,8 @@ export type C2S =
   | { t: 'listRooms' }
   | { t: 'chat'; text: string; name?: string; auth?: string }
   | { t: 'chatHistory' }
+  | { t: 'roomChat'; text: string }
+  | { t: 'roomChatHistory' }
   | import('./bloodProtocol').BloodAction;
 
 /* ---------------- 服务端 → 客户端 ---------------- */
@@ -199,4 +201,6 @@ export type S2C =
   | { t: 'pong'; n: number }
   | { t: 'roomList'; rooms: PublicRoomInfo[] }
   | { t: 'chatMsg'; name: string; text: string; ts: number; account?: boolean }
-  | { t: 'chatLog'; msgs: ChatMsg[] };
+  | { t: 'chatLog'; msgs: ChatMsg[] }
+  | { t: 'roomChatMsg'; name: string; text: string; ts: number; account?: boolean }
+  | { t: 'roomChatLog'; msgs: ChatMsg[] };
