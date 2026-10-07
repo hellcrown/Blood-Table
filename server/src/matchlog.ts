@@ -36,6 +36,9 @@ export interface MatchEntry {
   seatCount: number;
   /** 冠军座位 */
   winnerSeat: number;
+  /** 房间码 + 开局时间：与操作审计（audit.ts，保留 2 天）关联的主键；旧记录无此字段 */
+  room?: string;
+  startedAt?: number;
   /** 血色：目标票数/拓展开关；德州：盲注与起始筹码 */
   settings?: {
     targetTickets?: number;

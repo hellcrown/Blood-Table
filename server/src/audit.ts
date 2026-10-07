@@ -245,6 +245,13 @@ export function listAuditGames(): AuditGameIndex[] {
   return [...index.values()].reverse();
 }
 
+/** 按房间码+开局时间查找审计对局（对局统计「详情」入口的关联键）；无审计记录返回 null */
+export function findAudit(room: string, startedAt: number): { key: string; sameIp?: number[] } | null {
+  const idx = index.get(`${room}:${startedAt}`);
+  if (!idx) return null;
+  return { key: idx.key, ...(idx.sameIp ? { sameIp: idx.sameIp } : {}) };
+}
+
 /** 管理端：按 key 加载一局的完整时间线（扫留存文件；找不到返回 null） */
 export function loadAuditGame(key: string): AuditGameDetail | null {
   const startIdx = index.get(key);

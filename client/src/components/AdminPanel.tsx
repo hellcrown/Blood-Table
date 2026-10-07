@@ -58,6 +58,11 @@ interface MatchRow {
   mode: string;
   seatCount: number;
   winnerSeat: number;
+  room?: string;
+  startedAt?: number;
+  /** 操作审计关联（保留 2 天；无审计记录时无「详情」入口） */
+  auditKey?: string;
+  auditSameIp?: number[];
   players: {
     name: string;
     seat: number;
@@ -95,20 +100,6 @@ interface AuditPlayer {
   accountId?: string;
   bot?: boolean;
   ip?: string;
-}
-
-interface AuditGame {
-  key: string;
-  room: string;
-  mode: 'blood' | 'classic';
-  startedAt: number;
-  endedAt?: number;
-  durationMin?: number;
-  seatCount: number;
-  players: AuditPlayer[];
-  /** 非 bot 座位中共享同一 IP 的座位（线索非定罪：CGNAT 出口可能合并真人） */
-  sameIp?: number[];
-  winnerSeat?: number;
 }
 
 interface AuditActionLine {
@@ -213,37 +204,21 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [matchError, setMatchError] = useState('');
   const [dau, setDau] = useState<DauInfo | null>(null);
   const [dauError, setDauError] = useState('');
-  const [audit, setAudit] = useState<AuditGame[] | null>(null);
-  const [auditError, setAuditError] = useState('');
-  const [auditOpenKey, setAuditOpenKey] = useState<string | null>(null);
-  const [auditDetail, setAuditDetail] = useState<AuditDetail | null>(null);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AuditDetail | null>(null);
+  const [detailError, setDetailError] = useState('');
 
-  const loadAudit = useCallback(async (t: string) => {
-    try {
-      const r = await fetch('/api/admin/audit', { headers: { Authorization: `Bearer ${t}` } });
-      if (r.status === 401) {
-        sessionStorage.removeItem(TOKEN_KEY);
-        setToken(null);
-        setError('登录已过期，请重新输入密码');
+  const toggleGameDetail = useCallback(
+    async (t: string, key: string | undefined) => {
+      if (!key) return;
+      if (detailKey === key) {
+        setDetailKey(null);
+        setDetail(null);
         return;
       }
-      const data = (await r.json()) as { games?: AuditGame[] };
-      setAudit(data.games ?? []);
-      setAuditError('');
-    } catch {
-      setAuditError('加载审计列表失败，请重试');
-    }
-  }, []);
-
-  const openAuditGame = useCallback(
-    async (t: string, key: string) => {
-      if (auditOpenKey === key) {
-        setAuditOpenKey(null);
-        setAuditDetail(null);
-        return;
-      }
-      setAuditOpenKey(key);
-      setAuditDetail(null);
+      setDetailKey(key);
+      setDetail(null);
+      setDetailError('');
       try {
         const r = await fetch(`/api/admin/audit/game?key=${encodeURIComponent(key)}`, {
           headers: { Authorization: `Bearer ${t}` },
@@ -255,12 +230,12 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
           return;
         }
         const data = (await r.json()) as { game?: AuditDetail | null };
-        setAuditDetail(data.game ?? null);
+        setDetail(data.game ?? null);
       } catch {
-        setAuditError('加载审计明细失败，请重试');
+        setDetailError('加载对局详情失败，请重试');
       }
     },
-    [auditOpenKey],
+    [detailKey],
   );
 
   const loadDau = useCallback(async (t: string) => {
@@ -339,9 +314,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
       void loadFeedback(token);
       void loadMatches(token);
       void loadDau(token);
-      void loadAudit(token);
     }
-  }, [token, loadFeedback, loadMatches, loadDau, loadAudit]);
+  }, [token, loadFeedback, loadMatches, loadDau]);
 
   const loadRooms = useCallback(async (t: string) => {
     try {
@@ -561,10 +535,21 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                 <div className="feedback-list">
                   {recent.map((m) => (
                     <div key={`${m.endedAt}-${m.winnerSeat}`} className="feedback-item">
-                      <div className="feedback-item-meta">
-                        {new Date(m.endedAt).toLocaleString('zh-CN', { hour12: false })}
-                        {m.durationMin != null ? ` · ${m.durationMin} 分钟` : ''}
-                        {` · ${m.mode === 'blood' ? '血色' : '德州'} ${m.seatCount} 人`}
+                      <div className="feedback-item-meta" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ flex: 1 }}>
+                          {new Date(m.endedAt).toLocaleString('zh-CN', { hour12: false })}
+                          {m.durationMin != null ? ` · ${m.durationMin} 分钟` : ''}
+                          {` · ${m.mode === 'blood' ? '血色' : '德州'} ${m.seatCount} 人`}
+                          {m.auditSameIp && <b style={{ color: '#d4a017' }}> · ⚠️同IP</b>}
+                        </span>
+                        {m.auditKey && (
+                          <button
+                            className="btn tiny"
+                            onClick={() => token && void toggleGameDetail(token, m.auditKey)}
+                          >
+                            {detailKey === m.auditKey ? '收起' : '详情'}
+                          </button>
+                        )}
                       </div>
                       <div className="feedback-item-text">
                         {m.players
@@ -576,66 +561,27 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           )
                           .join(' · ')}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="admin-feedback admin-stats">
-              <div className="admin-feedback-head">
-                <b>🕵️ 操作审计</b>
-                <span className="spacer" />
-                <button className="btn small" disabled={busy} onClick={() => token && void loadAudit(token)}>
-                  刷新
-                </button>
-              </div>
-              {auditError && <p className="admin-error">{auditError}</p>}
-              {audit == null && <p className="hint">加载中…</p>}
-              {audit != null && audit.length === 0 && (
-                <p className="hint">近 2 天暂无对局记录（审计保留今天+昨天）</p>
-              )}
-              {audit != null && audit.length > 0 && (
-                <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-                  {audit.map((g) => (
-                    <div key={g.key} className="feedback-item" style={{ cursor: 'pointer' }}>
-                      <div
-                        className="feedback-item-meta"
-                        onClick={() => token && void openAuditGame(token, g.key)}
-                      >
-                        {new Date(g.startedAt).toLocaleString('zh-CN', { hour12: false })}
-                        {` · ${g.mode === 'blood' ? '血色' : '德州'} ${g.seatCount} 人`}
-                        {g.durationMin != null ? ` · ${g.durationMin} 分钟` : ' · 未结束'}
-                        {g.sameIp && <b style={{ color: '#d4a017' }}>{` · ⚠️ 座位${g.sameIp.join('/')} 同IP`}</b>}
-                      </div>
-                      <div className="feedback-item-text" onClick={() => token && void openAuditGame(token, g.key)}>
-                        {g.players
-                          .map(
-                            (p) =>
-                              `${g.winnerSeat === p.seat ? '👑' : ''}${p.name}${p.bot ? '🤖' : ''}${
-                                p.accountId ? '👤' : ''
-                              }`,
-                          )
-                          .join(' · ')}
-                      </div>
-                      {auditOpenKey === g.key && (
-                        <div style={{ maxHeight: 300, overflowY: 'auto', marginTop: 6, fontSize: 12 }}>
-                          {auditDetail?.start.sameIp && (
+                      {detailKey != null && detailKey === m.auditKey && (
+                        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+                          {detailError && <p className="admin-error">{detailError}</p>}
+                          {detail == null && <p className="hint">加载中…</p>}
+                          {detail?.start.sameIp && (
                             <p className="hint" style={{ color: '#d4a017' }}>
-                              ⚠️ 座位 {auditDetail.start.sameIp.join('/')} 同 IP——可能是同一人双开或同网络出口（CGNAT 会误报），仅作线索
+                              ⚠️ 座位 {detail.start.sameIp.join('/')} 同
+                              IP——可能是同一人双开或同一网络出口（CGNAT 会误报），仅作线索
                             </p>
                           )}
-                          {auditDetail == null && <p className="hint">加载中…</p>}
-                          {auditDetail != null && auditDetail.acts.length === 0 && (
-                            <p className="hint">该局没有已记录的操作</p>
-                          )}
-                          {auditDetail?.acts.map((a, i) => (
+                          {detail != null && detail.acts.length === 0 && <p className="hint">该局没有已记录的操作</p>}
+                          {detail?.acts.map((a, i) => (
                             <div key={`${a.ts}-${i}`} className="chat-msg">
-                              <span className="chat-time">+{fmtOffset(a.ts - auditDetail.start.startedAt)}</span>
+                              <span className="chat-time">+{fmtOffset(a.ts - detail.start.startedAt)}</span>
                               <b className={a.t === 'chat' ? '' : 'chat-name acct'}>
                                 [{a.seat >= 0 ? `座${a.seat}` : '观战'}]{a.name}
                               </b>
                               <span className="chat-text">
-                                {a.t === 'chat' ? `💬 ${actDetail(a)}` : `${ACT_LABEL[a.t] ?? a.t}${actDetail(a) ? ` · ${actDetail(a)}` : ''}`}
+                                {a.t === 'chat'
+                                  ? `💬 ${actDetail(a)}`
+                                  : `${ACT_LABEL[a.t] ?? a.t}${actDetail(a) ? ` · ${actDetail(a)}` : ''}`}
                               </span>
                             </div>
                           ))}

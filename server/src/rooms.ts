@@ -1658,6 +1658,8 @@ export class RoomManager {
         mode: 'blood',
         seatCount: g.players.length,
         winnerSeat: g.final.winnerSeat,
+        room: room.code,
+        ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
         settings: {
           // 引擎解析后的实际目标（resolveTargetTickets：自定义钳 8-30，缺省按 maxPlayers 24/20/16）。
           // 此前记 room 原始设置——开局人数少于座位数或旧值 1-7 时与对局实际 target 不一致，天梯结算口径随之扭曲
@@ -1692,6 +1694,8 @@ export class RoomManager {
         mode: 'classic',
         seatCount: cg.players.length,
         winnerSeat: final.ranking[0]?.seat ?? -1,
+        room: room.code,
+        ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
         settings: { ...room.settings },
         players: final.ranking.map((r, i): MatchPlayerRow => {
           const p = cg.players.find((x) => x.seat === r.seat);

@@ -22,7 +22,7 @@ import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchP
 import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
 import { dauSummary, initDauStore, recordConnection } from './dau';
-import { initAuditStore, listAuditGames, loadAuditGame } from './audit';
+import { findAudit, initAuditStore, loadAuditGame } from './audit';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -637,8 +637,13 @@ const server = http.createServer((req, res) => {
       return;
     }
     const all = listMatches();
+    // 近期对局关联操作审计（保留 2 天）：auditKey/sameIp 供管理端渲染「详情」入口与同 IP 提示
+    const recent = all.slice(-60).reverse().map((e) => {
+      const found = e.room != null && e.startedAt != null ? findAudit(e.room, e.startedAt) : null;
+      return { ...e, ...(found ? { auditKey: found.key, ...(found.sameIp ? { auditSameIp: found.sameIp } : {}) } : {}) };
+    });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, stats: matchStats(), recent: all.slice(-30).reverse() }));
+    res.end(JSON.stringify({ ok: true, stats: matchStats(), recent }));
     return;
   }
   if (url.pathname === '/api/admin/matches/clear' && req.method === 'POST') {
@@ -669,16 +674,6 @@ const server = http.createServer((req, res) => {
         days: dauSummary(30),
       }),
     );
-    return;
-  }
-  if (url.pathname === '/api/admin/audit' && req.method === 'GET') {
-    if (!isAdmin(req)) {
-      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, games: listAuditGames() }));
     return;
   }
   if (url.pathname === '/api/admin/audit/game' && req.method === 'GET') {

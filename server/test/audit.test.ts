@@ -49,6 +49,9 @@ describe('audit · 操作审计', () => {
     audit.recordChat({ key, ts: startedAt + 7000, seat: -1, name: '观众', text: '精彩！' });
     audit.recordGameEnd({ key, endedAt: startedAt + 400_000, durationMin: 6.6, winnerSeat: 0, summary: { rank: 'done' }, log: [{ seq: 1 }] });
 
+    expect(audit.findAudit('ABCD', startedAt)).toEqual({ key, sameIp: [0, 1] });
+    expect(audit.findAudit('ABCD', startedAt + 1)).toBeNull(); // 开局时间不同 → 无关联
+
     const games = audit.listAuditGames();
     expect(games).toHaveLength(1);
     expect(games[0]).toMatchObject({ key, room: 'ABCD', mode: 'blood', endedAt: startedAt + 400_000, durationMin: 6.6, winnerSeat: 0 });

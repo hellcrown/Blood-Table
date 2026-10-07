@@ -76,6 +76,8 @@ describe('对局记录落库 matchlog', () => {
     recordMatch({
       ...base,
       mode: 'blood',
+      room: 'ABCD',
+      startedAt: base.endedAt - 400_000,
       settings: { targetTickets: 24, charExpansion: false, expansion: false },
       players: [
         { name: '甲', seat: 0, rank: 1, charId: 'dealer', tickets: 24, blood: 30, wasAuto: false },
@@ -91,6 +93,9 @@ describe('对局记录落库 matchlog', () => {
         { name: '丙', seat: 1, rank: 2, chips: 0 },
       ],
     });
+
+    // room/startedAt 往返：管理端「详情」入口靠它与审计关联
+    expect(listMatches().some((m) => m.room === 'ABCD' && m.startedAt === base.endedAt - 400_000)).toBe(true);
 
     const stats = matchStats();
     expect(stats.total).toBe(2);
