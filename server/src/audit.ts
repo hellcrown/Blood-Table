@@ -17,6 +17,8 @@ const SWEEP_MS = 60 * 60_000;
 const ACT_P_MAX_CHARS = 600;
 /** 每局 act 行数上限（超出只计 dropped 数；正常对局远低于此） */
 const ACT_CAP = 2000;
+/** 每局 chat 行数上限（聊天另有每 IP 限频，正常对局远低于此） */
+const CHAT_CAP = 500;
 /** t（消息类型名）长度上限 */
 const ACT_T_MAX = 24;
 
@@ -41,9 +43,11 @@ export interface AuditGameIndex {
   sameIp?: number[];
   winnerSeat?: number;
   settings?: unknown;
-  /** 运行时统计（不入盘）：本局已写/已丢弃的 act 行数（超 ACT_CAP 后只计数） */
+  /** 运行时统计（不入盘）：本局已写/已丢弃的 act/chat 行数（超各自上限后只计数） */
   actWritten?: number;
   actDropped?: number;
+  chatWritten?: number;
+  chatDropped?: number;
 }
 
 export interface AuditActionLine {
@@ -63,7 +67,15 @@ export interface AuditGameDetail {
   start: { key: string; room: string; mode: 'blood' | 'classic'; startedAt: number; players: AuditPlayer[]; sameIp?: number[]; settings?: unknown };
   /** act 行超上限被丢弃的数量（无丢弃则缺省） */
   actsTruncated?: number;
-  end?: { endedAt: number; durationMin?: number; winnerSeat?: number; actsTruncated?: number; summary: unknown; log?: unknown };
+  end?: {
+    endedAt: number;
+    durationMin?: number;
+    winnerSeat?: number;
+    actsTruncated?: number;
+    chatTruncated?: number;
+    summary: unknown;
+    log?: unknown;
+  };
   acts: AuditActionLine[];
 }
 
@@ -126,6 +138,7 @@ export function recordGameStart(input: {
     ...(sameIp ? { sameIp } : {}),
     ...(input.settings != null ? { settings: input.settings } : {}),
     actWritten: 0,
+    chatWritten: 0,
   };
   index.set(idx.key, idx);
   appendLine({ k: 'start', ...idx, actWritten: undefined, actDropped: undefined });
@@ -170,11 +183,19 @@ export function recordAction(input: {
 
 /** 房间聊天（handleRoomChat 广播前；限频已通过） */
 export function recordChat(input: { key: string; ts: number; seat: number; name: string; accountId?: string; text: string }): void {
-  if (!dir || !index.has(input.key)) return;
+  const idx = index.get(input.key);
+  if (!dir || !idx) return;
+  // chat 独立上限：限频之外的持久洪泛防御（正常对局远低于此）
+  if ((idx.chatWritten ?? 0) >= CHAT_CAP) {
+    idx.chatDropped = (idx.chatDropped ?? 0) + 1;
+    return;
+  }
+  idx.chatWritten = (idx.chatWritten ?? 0) + 1;
   appendLine({ k: 'chat', t: 'chat', ...input });
 }
 
-/** 终局（maybeRecordFinal / 解散回收；须已有开局索引，孤儿 end 不落盘） */
+/** 终局（maybeRecordFinal / 解散回收；须已有开局索引，孤儿 end 不落盘）。
+ * resolvedOnly=true（解散路径）：已有真实终局摘要时不得覆盖。 */
 export function recordGameEnd(input: {
   key: string;
   endedAt: number;
@@ -182,9 +203,11 @@ export function recordGameEnd(input: {
   winnerSeat?: number;
   summary: unknown;
   log?: unknown;
+  resolvedOnly?: boolean;
 }): void {
   const idx = index.get(input.key);
   if (!dir || !idx) return;
+  if (input.resolvedOnly && idx.endedAt != null) return; // 双保险：真实终局摘要优先于 resolved:false
   idx.endedAt = input.endedAt;
   if (input.durationMin != null) idx.durationMin = input.durationMin;
   if (input.winnerSeat != null) idx.winnerSeat = input.winnerSeat;
@@ -194,7 +217,9 @@ export function recordGameEnd(input: {
     endedAt: input.endedAt,
     ...(input.durationMin != null ? { durationMin: input.durationMin } : {}),
     ...(input.winnerSeat != null ? { winnerSeat: input.winnerSeat } : {}),
+    ...(input.resolvedOnly ? { resolved: false } : {}),
     ...(idx.actDropped ? { actsTruncated: idx.actDropped } : {}),
+    ...(idx.chatDropped ? { chatTruncated: idx.chatDropped } : {}),
     summary: input.summary,
     ...(input.log != null ? { log: input.log } : {}),
   });
@@ -261,6 +286,7 @@ export function initAuditStore(auditDir: string): void {
               ...(Array.isArray(o.sameIp) ? { sameIp: o.sameIp as number[] } : {}),
               ...(o.settings != null ? { settings: o.settings } : {}),
               actWritten: 0,
+              chatWritten: 0,
             });
           } else if (o.k === 'end' && typeof o.key === 'string' && index.has(o.key)) {
             const idx = index.get(o.key)!;
@@ -326,6 +352,7 @@ export function loadAuditGame(key: string): AuditGameDetail | null {
               durationMin?: number;
               winnerSeat?: number;
               actsTruncated?: number;
+              chatTruncated?: number;
               summary: unknown;
               log?: unknown;
             };
@@ -334,6 +361,7 @@ export function loadAuditGame(key: string): AuditGameDetail | null {
               durationMin: e.durationMin,
               winnerSeat: e.winnerSeat,
               ...(e.actsTruncated ? { actsTruncated: e.actsTruncated } : {}),
+              ...(e.chatTruncated ? { chatTruncated: e.chatTruncated } : {}),
               summary: e.summary,
               log: e.log,
             };
@@ -347,6 +375,8 @@ export function loadAuditGame(key: string): AuditGameDetail | null {
     console.error('[audit] 审计明细读取失败:', e);
     return detail; // 读盘失败时至少返回索引摘要
   }
+  // 兜底截尾（正常路径有 act/chat 上限，理论到不了）：保留最近的 5000 条
+  if (detail.acts.length > 5000) detail.acts = detail.acts.slice(-5000);
   return detail;
 }
 

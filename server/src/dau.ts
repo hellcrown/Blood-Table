@@ -58,11 +58,13 @@ function summarize(rec: DayRec): DauDaySummary {
   return { day: rec.day, uv: rec.ips.size, accounts: rec.accounts.size, conns: rec.conns };
 }
 
+const MAX_IPS_PER_DAY = 50_000; // 单日去重 IP 软上限：IPv6 轮换源刷连接时保护 dau.json 体积（conns 照计）
+
 /** 记一条新连接（须在配额校验通过后调用，脚本刷连接不进日活） */
 export function recordConnection(ip: string): void {
   if (!ip) return;
   const rec = currentDay();
-  rec.ips.add(ip);
+  if (rec.ips.size < MAX_IPS_PER_DAY) rec.ips.add(ip);
   rec.conns += 1;
   dirty = true;
 }
@@ -109,19 +111,36 @@ export function initDauStore(filePath: string): void {
       }
     }
   } catch (e) {
-    console.error('[dau] 日活数据加载失败（仅内存）:', e);
+    // 损坏文件改存 .bak 抢救，而不是等下一次 flush 被空数据覆盖
+    try {
+      fs.renameSync(filePath, `${filePath}.bak`);
+      console.error('[dau] 原快照已改存 .bak:', e);
+    } catch {
+      console.error('[dau] 日活数据加载失败且备份失败（仅内存）:', e);
+    }
   }
   if (days.length > KEEP_DAYS) days = days.slice(-KEEP_DAYS);
+  days.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)); // currentDay 依赖「末条=最新」
   setInterval(flush, FLUSH_MS).unref();
 }
 
-/** 管理端汇总：最近 lastN 天（含今天，新→旧） */
+/** 管理端汇总：恒为最近 lastN 个日历日（含今天，新→旧）。无流量的一天补零行——
+ * 否则表格日期错位，分不清「没人」还是「缺数据」；超出保留窗口的旧日为全零 */
 export function dauSummary(lastN = 30): DauDaySummary[] {
   currentDay(); // 确保今天有条目（哪怕还是零）
-  return days.slice(-lastN).map(summarize).reverse();
+  const byDay = new Map(days.map((d) => [d.day, summarize(d)]));
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - (lastN - 1));
+  const out: DauDaySummary[] = [];
+  for (const t = new Date(start); t <= end; t.setDate(t.getDate() + 1)) {
+    const day = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    out.push(byDay.get(day) ?? { day, uv: 0, accounts: 0, conns: 0 });
+  }
+  return out.reverse();
 }
 
-/** 测试钩子：立即落盘一次（绕过 60s 周期） */
-export function flushDauForTest(): void {
+/** 立即落盘一次（退出钩子与测试共用）：同步写，开销可忽略 */
+export function flushDau(): void {
   flush();
 }

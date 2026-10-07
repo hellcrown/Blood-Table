@@ -28,14 +28,17 @@ describe('dau · 日活统计', () => {
     vi.resetModules();
   });
 
-  it('同日去重：重复 IP/账号只计一次，连接次数照加', async () => {
+  it('同日去重：重复 IP/账号只计一次，连接次数照加；无流量日按日历补零', async () => {
     const dau = await fresh();
     dau.recordConnection('1.1.1.1');
     dau.recordConnection('1.1.1.1');
     dau.recordConnection('2.2.2.2');
     dau.recordAccountVisit('acc-A');
     dau.recordAccountVisit('acc-A');
-    expect(dau.dauSummary(7)).toEqual([{ day: '2026-10-06', uv: 2, accounts: 1, conns: 3 }]);
+    const days = dau.dauSummary(7);
+    expect(days).toHaveLength(7); // 零日补齐：09-30..10-05 为零行，表格日期不错位；[0] 恒为今天
+    expect(days[0]).toEqual({ day: '2026-10-06', uv: 2, accounts: 1, conns: 3 });
+    expect(days[6]).toEqual({ day: '2026-09-30', uv: 0, accounts: 0, conns: 0 });
   });
 
   it('跨天切分：新的一天开启新条目，旧条目不变', async () => {
@@ -45,12 +48,14 @@ describe('dau · 日活统计', () => {
     setNow(at(2026, 10, 7));
     dau.recordConnection('3.3.3.3');
     const days = dau.dauSummary(7);
-    expect(days.map((d) => d.day)).toEqual(['2026-10-07', '2026-10-06']);
+    // 最近 7 天（10-01..10-07），其中 10-06/07 有数据、其余零行；[0] 恒为今天
+    expect(days).toHaveLength(7);
     expect(days[0]).toEqual({ day: '2026-10-07', uv: 1, accounts: 0, conns: 1 });
     expect(days[1]).toEqual({ day: '2026-10-06', uv: 1, accounts: 1, conns: 1 });
+    expect(days[6]).toEqual({ day: '2026-10-01', uv: 0, accounts: 0, conns: 0 });
   });
 
-  it('保留天数裁剪：内部最多 180 天，summary 按请求条数返回', async () => {
+  it('保留天数裁剪：内部最多 180 天；summary 恒为 lastN 个日历日（超出窗口补零）', async () => {
     const dau = await fresh();
     for (let i = 199; i >= 0; i--) {
       setNow(at(2026, 10, 6 - i)); // 从 200 天前正向记到今天（Date 算术自动跨月回退）
@@ -58,7 +63,8 @@ describe('dau · 日活统计', () => {
     }
     expect(dau.dauSummary(30)).toHaveLength(30);
     expect(dau.dauSummary(30)[0]!.day).toBe('2026-10-06');
-    expect(dau.dauSummary(500)).toHaveLength(180); // 超出保留窗口的部分已被裁掉
+    // 零日补齐语义：summary(500) 恒为 500 个日历日（超出 180 天保留窗的部分为全零行）
+    expect(dau.dauSummary(500)).toHaveLength(500);
   });
 
   it('快照落盘与重载：模拟重启后数据完整恢复', async () => {
@@ -69,14 +75,16 @@ describe('dau · 日活统计', () => {
       dau1.recordConnection('1.1.1.1');
       dau1.recordConnection('1.1.1.1');
       dau1.recordAccountVisit('acc-A');
-      dau1.flushDauForTest();
+      dau1.flushDau();
       expect(JSON.parse(fs.readFileSync(file, 'utf-8')).days).toEqual([
         { day: '2026-10-06', ips: ['1.1.1.1'], accounts: ['acc-A'], conns: 2 },
       ]);
       // 模拟进程重启：全新模块实例从文件恢复
       const dau2 = await fresh();
       dau2.initDauStore(file);
-      expect(dau2.dauSummary(7)).toEqual([{ day: '2026-10-06', uv: 1, accounts: 1, conns: 2 }]);
+      const days = dau2.dauSummary(7);
+      expect(days).toHaveLength(7);
+      expect(days[0]).toEqual({ day: '2026-10-06', uv: 1, accounts: 1, conns: 2 });
     } finally {
       fs.rmSync(file, { force: true });
     }
@@ -85,6 +93,8 @@ describe('dau · 日活统计', () => {
   it('未初始化存储时纯内存可用（测试环境口径）', async () => {
     const dau = await fresh();
     dau.recordConnection('9.9.9.9');
-    expect(dau.dauSummary(7)).toEqual([{ day: '2026-10-06', uv: 1, accounts: 0, conns: 1 }]);
+    const days = dau.dauSummary(7);
+    expect(days).toHaveLength(7);
+    expect(days[0]).toEqual({ day: '2026-10-06', uv: 1, accounts: 0, conns: 1 });
   });
 });

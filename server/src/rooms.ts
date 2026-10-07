@@ -1618,10 +1618,12 @@ export class RoomManager {
   private disposeRoom(room: Room): void {
     // 审计：中途解散（空房回收/毒房间强制回收）的进行中对局补一条 end，时间线不再悬空；
     // resolved:false 标记非正常终局（这类局不进 matchlog，但审计文件里可按 key 追溯）。
+    // matchLogged=false 守卫：正常终局（maybeRecordFinal 已写真摘要）后的 5 分钟空房回收
+    // 不得用 resolved:false 覆盖真实胜负摘要。
     // 独立 try：毒房间的属性读取本身就可能抛错（round7 毒房间即如此），审计绝不能阻断解散
     try {
-      if (room.game != null && room.gameStartedAt != null) {
-        recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log });
+      if (room.game != null && room.gameStartedAt != null && !room.matchLogged) {
+        recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log, resolvedOnly: true });
       }
     } catch (e) {
       console.error('[audit] 解散局审计记录失败:', e);
@@ -1903,8 +1905,8 @@ export class RoomManager {
     const n = this.rooms.size;
     for (const room of this.rooms.values()) {
       try {
-        if (room.game != null && room.gameStartedAt != null) {
-          recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log });
+        if (room.game != null && room.gameStartedAt != null && !room.matchLogged) {
+          recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log, resolvedOnly: true });
         }
       } catch {
         /* 审计失败不阻断清空 */

@@ -21,7 +21,7 @@ import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from '
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
 import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
-import { dauSummary, initDauStore, recordConnection } from './dau';
+import { dauSummary, flushDau, initDauStore, recordConnection } from './dau';
 import { findAudit, initAuditStore, loadAuditGame } from './audit';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
@@ -800,6 +800,18 @@ const chatHub = new ChatHub({
 chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
 initDauStore(path.resolve(process.cwd(), 'data', 'dau.json'));
 initAuditStore(path.resolve(process.cwd(), 'data', 'audit'));
+
+// 退出前把日活快照落盘（pm2 restart 发 SIGINT；同步写，毫秒级）——否则每次发版丢最多 60s 的当日记录
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(sig, () => {
+    try {
+      flushDau();
+    } catch {
+      /* 退出路径尽力而为 */
+    }
+    process.exit(0);
+  });
+}
 
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);

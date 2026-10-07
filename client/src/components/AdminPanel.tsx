@@ -321,11 +321,17 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (token) {
-      void loadFeedback(token);
-      void loadMatches(token);
-      void loadDau(token);
+    if (!token) {
+      // 登出/令牌过期：详情三态一并重置（重登后不得残留「加载中…」或陈旧时间线）
+      detailReqRef.current = null;
+      setDetailKey(null);
+      setDetail(null);
+      setDetailError('');
+      return;
     }
+    void loadFeedback(token);
+    void loadMatches(token);
+    void loadDau(token);
   }, [token, loadFeedback, loadMatches, loadDau]);
 
   const loadRooms = useCallback(async (t: string) => {
