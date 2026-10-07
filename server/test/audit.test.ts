@@ -92,6 +92,7 @@ describe('audit · 操作审计', () => {
     const files = fs.readdirSync(dir).filter((f) => f.startsWith('audit-'));
     expect(files).toEqual([]); // 当天文件懒创建：清理后尚无新写入
     expect(audit2.listAuditGames()).toHaveLength(0);
+    expect(audit2.findAudit('OLD1', at(2026, 10, 5))).toBeNull(); // 索引同口径淘汰（磁盘删了内存也不能留）
     expect(audit2.loadAuditGame('OLD1:' + at(2026, 10, 5))).toBeNull();
   });
 
@@ -105,6 +106,57 @@ describe('audit · 操作审计', () => {
     const audit2 = await fresh(dir);
     expect(audit2.listAuditGames()).toHaveLength(1);
     expect(audit2.loadAuditGame(`GOOD:${at(2026, 10, 7, 9)}`)!.start.room).toBe('GOOD');
+  });
+
+  it('rooms 采集点集成：auth/adminToken/name 裁剪、超长 p 截断、观战者 seat=-1、未开局丢弃', async () => {
+    const dir = tmpdir();
+    const audit = await fresh(dir);
+    const { RoomManager } = await import('../src/rooms');
+    const { BloodError } = await import('../src/blood/engine');
+    const mgr = new RoomManager();
+    const sent: unknown[] = [];
+    const ws = { readyState: 1, OPEN: 1, send: (d: string) => sent.push(JSON.parse(d)), on: () => {}, close: () => {}, ip: '9.9.9.9' };
+    const session = { id: 's0', token: 'tok', name: '甲', seat: -1, connected: true, ws, lastEventSeq: 0 } as never;
+    const room = {
+      code: 'TAP1', hostId: 's0', ownerIp: '', maxPlayers: 4, mode: 'blood',
+      settings: {}, charExpansion: false, expansion: false, targetTickets: 0,
+      sessions: new Map([['s0', session]]), chatLog: [], game: null, pendingRemove: new Set(),
+      emptySince: 0, botBrains: new Map(), botNextAct: new Map(), matchLogged: true, gameStartedAt: undefined,
+    } as never;
+    const h = (mgr as unknown as { handleBlood: (r: never, s: never, m: unknown) => void }).handleBlood;
+    // 未开局（gameStartedAt undefined）：操作尝试不落盘（引擎侧经 ws 回 NO_GAME，不抛错）
+    h(room, session, { t: 'bSteal', seat: 0, auth: 'tok', adminToken: 'adm', name: 'hack' });
+    expect(sent.some((x) => (x as { code?: string }).code === 'NO_GAME')).toBe(true);
+    expect(audit.listAuditGames()).toHaveLength(0);
+    // 开局（gameStartedAt 就位）：观战者（seat=-1）的尝试被记录，且 auth/adminToken/name 被裁剪、超长数组截断
+    (room as { gameStartedAt?: number }).gameStartedAt = at(2026, 10, 7, 10);
+    audit.recordGameStart({ room: 'TAP1', mode: 'blood', startedAt: at(2026, 10, 7, 10), players: [{ seat: 0, name: '甲' }] });
+    const junk = 'x'.repeat(2000);
+    h(room, session, { t: 'bSteal', seat: 0, auth: 'tok', adminToken: 'adm', name: 'hack', junk }); // 观战/无局：尝试仍被审计
+    const key = `TAP1:${at(2026, 10, 7, 10)}`;
+    const detail = audit.loadAuditGame(key)!;
+    expect(detail.acts).toHaveLength(1);
+    const line = JSON.stringify(detail.acts[0]);
+    expect(line).not.toContain('tok');
+    expect(line).not.toContain('adm');
+    expect(line).not.toContain('"name":"hack"');
+    expect(line).toContain('truncated'); // 2000 字符 junk 被截断
+  });
+
+  it('每局 act 行数上限：超限只计 dropped，end 行带 actsTruncated', async () => {
+    const dir = tmpdir();
+    const audit = await fresh(dir);
+    const startedAt = at(2026, 10, 7, 10);
+    audit.recordGameStart({ room: 'CAP1', mode: 'blood', startedAt, players: [{ seat: 0, name: '甲' }] });
+    const key = `CAP1:${startedAt}`;
+    for (let i = 0; i < 2005; i++) {
+      audit.recordAction({ key, ts: startedAt + i, seat: 0, name: '甲', t: 'bPlay', p: { i } });
+    }
+    audit.recordGameEnd({ key, endedAt: startedAt + 500_000, winnerSeat: 0, summary: {} });
+    const detail = audit.loadAuditGame(key)!;
+    expect(detail.acts.length).toBeLessThanOrEqual(2000);
+    expect(detail.end?.actsTruncated).toBe(5);
+    expect(detail.acts.filter((a) => a.t === 'bPlay').length + detail.acts.filter((a) => a.t !== 'bPlay').length).toBe(detail.acts.length);
   });
 
   it('未初始化存储时全部 no-op（测试/降级口径）', async () => {

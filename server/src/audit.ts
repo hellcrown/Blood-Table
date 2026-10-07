@@ -4,16 +4,21 @@
  *   只保留今天+昨天两个文件（init 与每小时清理更旧的）
  * - 行类型：start（开局快照：座位/昵称/账号/bot/IP/同IP标记）｜act（操作尝试，含被规则拒绝的——
  *   刷非法消息本身是作弊探针）｜chat（房间聊天）｜end（终局：结果摘要 + 引擎叙述 log）
- * - 一局的唯一 key = `${房间码}:${开局毫秒时间戳}`；classic handleRematch 已改为重置
- *   gameStartedAt（与血色 bRematch 对齐），否则重开局的 key 会撞车
+ * - 一局的唯一 key = `${房间码}:${开局毫秒时间戳}`；classic 经 handleRematch→waiting→handleStart
+ *   重置 gameStartedAt（与血色 bRematch 对齐），否则重开局的 key 会撞车
  * - 内存只驻留「对局索引」（start/end 摘要）；动作明细按 key 从当日/昨日文件扫描，查看时才读盘
  * - 未 initAuditStore（测试不传目录 / 未调用）时接口返回空、写入为 no-op
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-const KEEP_FILES = 2; // 今天 + 昨天
 const SWEEP_MS = 60 * 60_000;
+/** 单条 act 行的参数序列化上限（超出截断存 {truncated}，防超大自定义字段直灌磁盘） */
+const ACT_P_MAX_CHARS = 600;
+/** 每局 act 行数上限（超出只计 dropped 数；正常对局远低于此） */
+const ACT_CAP = 2000;
+/** t（消息类型名）长度上限 */
+const ACT_T_MAX = 24;
 
 export interface AuditPlayer {
   seat: number;
@@ -35,6 +40,10 @@ export interface AuditGameIndex {
   /** 非 bot 座位中共享同一 IP 的座位（线索非定罪：CGNAT 出口可能合并真人） */
   sameIp?: number[];
   winnerSeat?: number;
+  settings?: unknown;
+  /** 运行时统计（不入盘）：本局已写/已丢弃的 act 行数（超 ACT_CAP 后只计数） */
+  actWritten?: number;
+  actDropped?: number;
 }
 
 export interface AuditActionLine {
@@ -52,7 +61,9 @@ export interface AuditActionLine {
 
 export interface AuditGameDetail {
   start: { key: string; room: string; mode: 'blood' | 'classic'; startedAt: number; players: AuditPlayer[]; sameIp?: number[]; settings?: unknown };
-  end?: { endedAt: number; durationMin?: number; winnerSeat?: number; summary: unknown; log?: unknown };
+  /** act 行超上限被丢弃的数量（无丢弃则缺省） */
+  actsTruncated?: number;
+  end?: { endedAt: number; durationMin?: number; winnerSeat?: number; actsTruncated?: number; summary: unknown; log?: unknown };
   acts: AuditActionLine[];
 }
 
@@ -70,11 +81,12 @@ function filePathFor(name: string): string {
   return path.join(dir!, name);
 }
 
+let dirReady = false;
+
 /** 追加一行（appendFileSync 逐条落盘；未初始化或写入失败静默降级——审计不可阻断对局） */
 function appendLine(line: object): void {
-  if (!dir) return;
+  if (!dir || !dirReady) return; // 目录在 initAuditStore 一次性建好，逐行 mkdir 纯浪费
   try {
-    fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(filePathFor(todayFile()), `${JSON.stringify(line)}\n`);
   } catch (e) {
     console.error('[audit] 审计写入失败（不影响对局）:', e);
@@ -112,9 +124,11 @@ export function recordGameStart(input: {
     seatCount: input.players.length,
     players: input.players,
     ...(sameIp ? { sameIp } : {}),
+    ...(input.settings != null ? { settings: input.settings } : {}),
+    actWritten: 0,
   };
   index.set(idx.key, idx);
-  appendLine({ k: 'start', ...idx, ...(input.settings != null ? { settings: input.settings } : {}) });
+  appendLine({ k: 'start', ...idx, actWritten: undefined, actDropped: undefined });
 }
 
 /** 操作尝试（handleBlood / handleAct 入口；含将被规则拒绝的消息） */
@@ -127,7 +141,20 @@ export function recordAction(input: {
   t: string;
   p?: unknown;
 }): void {
-  if (!dir || !index.has(input.key)) return; // 未开局/旧局残留消息不记
+  const idx = index.get(input.key);
+  if (!dir || !idx) return; // 未开局/旧局残留消息不记
+  // 防刷盘：消息类型限长、参数序列化截断、每局行数封顶（超出只计 dropped，审计不可被灌爆）
+  if (idx.actWritten != null && idx.actWritten >= ACT_CAP) {
+    idx.actDropped = (idx.actDropped ?? 0) + 1;
+    return;
+  }
+  idx.actWritten = (idx.actWritten ?? 0) + 1;
+  const t = input.t.length > ACT_T_MAX ? input.t.slice(0, ACT_T_MAX) : input.t;
+  let pField: unknown;
+  if (input.p != null) {
+    const json = JSON.stringify(input.p);
+    pField = json.length <= ACT_P_MAX_CHARS ? input.p : { truncated: json.slice(0, ACT_P_MAX_CHARS) };
+  }
   const line: AuditActionLine = {
     k: 'act',
     key: input.key,
@@ -135,8 +162,8 @@ export function recordAction(input: {
     seat: input.seat,
     name: input.name,
     ...(input.accountId ? { accountId: input.accountId } : {}),
-    t: input.t,
-    ...(input.p != null ? { p: input.p } : {}),
+    t,
+    ...(pField != null ? { p: pField } : {}),
   };
   appendLine(line);
 }
@@ -147,7 +174,7 @@ export function recordChat(input: { key: string; ts: number; seat: number; name:
   appendLine({ k: 'chat', t: 'chat', ...input });
 }
 
-/** 终局（maybeRecordFinal；matchLogged 哨兵保证每局一次） */
+/** 终局（maybeRecordFinal / 解散回收；须已有开局索引，孤儿 end 不落盘） */
 export function recordGameEnd(input: {
   key: string;
   endedAt: number;
@@ -156,40 +183,49 @@ export function recordGameEnd(input: {
   summary: unknown;
   log?: unknown;
 }): void {
-  if (!dir) return;
   const idx = index.get(input.key);
-  if (idx) {
-    idx.endedAt = input.endedAt;
-    if (input.durationMin != null) idx.durationMin = input.durationMin;
-    if (input.winnerSeat != null) idx.winnerSeat = input.winnerSeat;
-  }
+  if (!dir || !idx) return;
+  idx.endedAt = input.endedAt;
+  if (input.durationMin != null) idx.durationMin = input.durationMin;
+  if (input.winnerSeat != null) idx.winnerSeat = input.winnerSeat;
   appendLine({
     k: 'end',
     key: input.key,
     endedAt: input.endedAt,
     ...(input.durationMin != null ? { durationMin: input.durationMin } : {}),
     ...(input.winnerSeat != null ? { winnerSeat: input.winnerSeat } : {}),
+    ...(idx.actDropped ? { actsTruncated: idx.actDropped } : {}),
     summary: input.summary,
     ...(input.log != null ? { log: input.log } : {}),
   });
 }
 
-/** 删除超过保留窗口（今天+昨天之外）的审计文件 */
+/** 删除超过保留窗口（今天+昨天之外）的审计文件，并同步淘汰内存索引中的过期对局 */
 function sweepOldFiles(): void {
   if (!dir) return;
   try {
-    const keep = new Set<string>();
     const now = new Date();
-    keep.add(`audit-${dayTag(now)}.jsonl`);
+    const keep = new Set<string>();
+    const todayTag = dayTag(now);
+    keep.add(`audit-${todayTag}.jsonl`);
     keep.add(`audit-${dayTag(new Date(now.getTime() - 86_400_000))}.jsonl`);
+    // 未来日期文件（时钟回拨/时区偏移）：一律保留，宁多勿误删
     for (const f of fs.readdirSync(dir)) {
-      if (f.startsWith('audit-') && f.endsWith('.jsonl') && !keep.has(f)) {
+      if (!f.startsWith('audit-') || !f.endsWith('.jsonl')) continue;
+      const tag = f.slice('audit-'.length, -'.jsonl'.length);
+      if (!keep.has(f) && tag <= todayTag) {
         try {
           fs.unlinkSync(filePathFor(f));
         } catch {
           /* 忽略单个文件清理失败 */
         }
       }
+    }
+    // 内存索引同口径淘汰（磁盘删了、内存不删 = 幽灵详情入口 + 隐私残留）：
+    // 以「昨天 00:00」为界（按日界而非 now-48h，避免把昨天仍留存的局提前赶走）
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+    for (const [k, v] of index) {
+      if (v.startedAt < cutoff) index.delete(k);
     }
   } catch (e) {
     console.error('[audit] 过期审计清理失败:', e);
@@ -201,6 +237,7 @@ export function initAuditStore(auditDir: string): void {
   dir = auditDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
+    dirReady = true;
     sweepOldFiles(); // 先清理再扫描：被删文件的数据不得进内存索引
     const names = fs
       .readdirSync(dir)
@@ -222,6 +259,8 @@ export function initAuditStore(auditDir: string): void {
               seatCount: players.length,
               players,
               ...(Array.isArray(o.sameIp) ? { sameIp: o.sameIp as number[] } : {}),
+              ...(o.settings != null ? { settings: o.settings } : {}),
+              actWritten: 0,
             });
           } else if (o.k === 'end' && typeof o.key === 'string' && index.has(o.key)) {
             const idx = index.get(o.key)!;
@@ -264,6 +303,7 @@ export function loadAuditGame(key: string): AuditGameDetail | null {
       startedAt: startIdx.startedAt,
       players: startIdx.players,
       ...(startIdx.sameIp ? { sameIp: startIdx.sameIp } : {}),
+      ...(startIdx.settings != null ? { settings: startIdx.settings } : {}),
     },
     acts: [],
   };
@@ -281,8 +321,22 @@ export function loadAuditGame(key: string): AuditGameDetail | null {
           if (o.key !== key) continue;
           if (o.k === 'act' || o.k === 'chat') detail.acts.push(o as AuditActionLine);
           else if (o.k === 'end') {
-            const e = o as unknown as { endedAt: number; durationMin?: number; winnerSeat?: number; summary: unknown; log?: unknown };
-            detail.end = { endedAt: e.endedAt, durationMin: e.durationMin, winnerSeat: e.winnerSeat, summary: e.summary, log: e.log };
+            const e = o as unknown as {
+              endedAt: number;
+              durationMin?: number;
+              winnerSeat?: number;
+              actsTruncated?: number;
+              summary: unknown;
+              log?: unknown;
+            };
+            detail.end = {
+              endedAt: e.endedAt,
+              durationMin: e.durationMin,
+              winnerSeat: e.winnerSeat,
+              ...(e.actsTruncated ? { actsTruncated: e.actsTruncated } : {}),
+              summary: e.summary,
+              log: e.log,
+            };
           }
         } catch {
           /* 坏行跳过 */

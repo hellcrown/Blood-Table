@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { BLOOD_PHASE_LABELS, CLASSIC_PHASE_LABELS } from '@shared/bloodConstants';
 import { net } from '../net/socket';
@@ -182,6 +182,7 @@ function actDetail(a: AuditActionLine): string {
 }
 
 const fmtOffset = (ms: number): string => {
+  if (!Number.isFinite(ms)) return '—';
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
@@ -207,15 +208,19 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<AuditDetail | null>(null);
   const [detailError, setDetailError] = useState('');
+  /** 最新一次详情请求的 key：慢响应返回时若已切换目标，丢弃响应（防 A 局时间线错挂到 B 行） */
+  const detailReqRef = useRef<string | null>(null);
 
   const toggleGameDetail = useCallback(
     async (t: string, key: string | undefined) => {
       if (!key) return;
       if (detailKey === key) {
+        detailReqRef.current = null;
         setDetailKey(null);
         setDetail(null);
         return;
       }
+      detailReqRef.current = key;
       setDetailKey(key);
       setDetail(null);
       setDetailError('');
@@ -224,14 +229,20 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
           headers: { Authorization: `Bearer ${t}` },
         });
         if (r.status === 401) {
+          detailReqRef.current = null;
+          setDetailKey(null);
+          setDetail(null);
+          setDetailError('');
           sessionStorage.removeItem(TOKEN_KEY);
           setToken(null);
           setError('登录已过期，请重新输入密码');
           return;
         }
         const data = (await r.json()) as { game?: AuditDetail | null };
+        if (detailReqRef.current !== key) return; // 已切换目标：丢弃迟到响应
         setDetail(data.game ?? null);
       } catch {
+        if (detailReqRef.current !== key) return;
         setDetailError('加载对局详情失败，请重试');
       }
     },
@@ -386,6 +397,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
     sessionStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setRooms(null);
+    setDetailKey(null);
+    setDetail(null);
+    setDetailError('');
   };
 
   return (
@@ -562,7 +576,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           .join(' · ')}
                       </div>
                       {detailKey != null && detailKey === m.auditKey && (
-                        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+                        <div style={{ maxHeight: 320, overflowY: 'auto', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12 }}>
                           {detailError && <p className="admin-error">{detailError}</p>}
                           {detail == null && <p className="hint">加载中…</p>}
                           {detail?.start.sameIp && (
@@ -571,7 +585,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                               IP——可能是同一人双开或同一网络出口（CGNAT 会误报），仅作线索
                             </p>
                           )}
-                          {detail != null && detail.acts.length === 0 && <p className="hint">该局没有已记录的操作</p>}
+                          {detail != null && detail.acts.length === 0 && (
+                            <p className="hint">该局没有已记录的操作（或明细已超出 2 天保留期）</p>
+                          )}
                           {detail?.acts.map((a, i) => (
                             <div key={`${a.ts}-${i}`} className="chat-msg">
                               <span className="chat-time">+{fmtOffset(a.ts - detail.start.startedAt)}</span>

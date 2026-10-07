@@ -1616,6 +1616,16 @@ export class RoomManager {
 
   /** 解散房间：令牌全部失效并通知在线会话回大厅（空房回收为静默版，在线会话本身为空） */
   private disposeRoom(room: Room): void {
+    // 审计：中途解散（空房回收/毒房间强制回收）的进行中对局补一条 end，时间线不再悬空；
+    // resolved:false 标记非正常终局（这类局不进 matchlog，但审计文件里可按 key 追溯）。
+    // 独立 try：毒房间的属性读取本身就可能抛错（round7 毒房间即如此），审计绝不能阻断解散
+    try {
+      if (room.game != null && room.gameStartedAt != null) {
+        recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log });
+      }
+    } catch (e) {
+      console.error('[audit] 解散局审计记录失败:', e);
+    }
     for (const s of room.sessions.values()) {
       this.tokenIndex.delete(s.token);
       if (s.ws && s.connected) {
@@ -1892,6 +1902,13 @@ export class RoomManager {
   clearAllRooms(): number {
     const n = this.rooms.size;
     for (const room of this.rooms.values()) {
+      try {
+        if (room.game != null && room.gameStartedAt != null) {
+          recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log });
+        }
+      } catch {
+        /* 审计失败不阻断清空 */
+      }
       for (const s of room.sessions.values()) {
         this.tokenIndex.delete(s.token);
         send(s.ws, { t: 'error', code: 'ROOM_CLOSED', msg: '服务器房间已全部清空，请重新建房' });
