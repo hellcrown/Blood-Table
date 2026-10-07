@@ -154,9 +154,39 @@ describe('audit · 操作审计', () => {
     }
     audit.recordGameEnd({ key, endedAt: startedAt + 500_000, winnerSeat: 0, summary: {} });
     const detail = audit.loadAuditGame(key)!;
-    expect(detail.acts.length).toBeLessThanOrEqual(2000);
+    expect(detail.acts).toHaveLength(2000); // 上限封顶：精确 2000 行
     expect(detail.end?.actsTruncated).toBe(5);
-    expect(detail.acts.filter((a) => a.t === 'bPlay').length + detail.acts.filter((a) => a.t !== 'bPlay').length).toBe(detail.acts.length);
+  });
+
+  it('resolvedOnly 双守卫：解散补写不得覆盖真实终局摘要', async () => {
+    const dir = tmpdir();
+    const audit = await fresh(dir);
+    const startedAt = at(2026, 10, 7, 10);
+    audit.recordGameStart({ room: 'FIN1', mode: 'blood', startedAt, players: [{ seat: 0, name: '甲' }] });
+    const key = `FIN1:${startedAt}`;
+    audit.recordAction({ key, ts: startedAt + 1000, seat: 0, name: '甲', t: 'bPlay', p: { cardIds: ['c1'] } });
+    audit.recordGameEnd({ key, endedAt: startedAt + 400_000, durationMin: 6.6, winnerSeat: 0, summary: { real: true }, log: [{ seq: 1 }] });
+    // 模拟 5 分钟空房回收对已终局对局的解散补写：必须被拒绝
+    audit.recordGameEnd({ key, endedAt: startedAt + 500_000, summary: { resolved: false }, log: [], resolvedOnly: true });
+    const detail = audit.loadAuditGame(key)!;
+    expect(detail.end?.endedAt).toBe(startedAt + 400_000);
+    expect(detail.end?.summary).toEqual({ real: true });
+    expect(detail.end?.durationMin).toBe(6.6);
+  });
+
+  it('chat 行独立上限：超 CHAT_CAP 只计 dropped，end 行带 chatTruncated', async () => {
+    const dir = tmpdir();
+    const audit = await fresh(dir);
+    const startedAt = at(2026, 10, 7, 10);
+    audit.recordGameStart({ room: 'CHT1', mode: 'blood', startedAt, players: [{ seat: 0, name: '甲' }] });
+    const key = `CHT1:${startedAt}`;
+    for (let i = 0; i < 503; i++) {
+      audit.recordChat({ key, ts: startedAt + i, seat: 0, name: '甲', text: `m${i}` });
+    }
+    audit.recordGameEnd({ key, endedAt: startedAt + 100_000, summary: {}, resolvedOnly: true });
+    const detail = audit.loadAuditGame(key)!;
+    expect(detail.acts.filter((a) => a.t === 'chat')).toHaveLength(500);
+    expect(detail.end?.chatTruncated).toBe(3);
   });
 
   it('未初始化存储时全部 no-op（测试/降级口径）', async () => {

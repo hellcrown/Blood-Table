@@ -58,13 +58,21 @@ function summarize(rec: DayRec): DauDaySummary {
   return { day: rec.day, uv: rec.ips.size, accounts: rec.accounts.size, conns: rec.conns };
 }
 
-const MAX_IPS_PER_DAY = 50_000; // 单日去重 IP 软上限：IPv6 轮换源刷连接时保护 dau.json 体积（conns 照计）
+const MAX_IPS_PER_DAY = 10_000; // 单日去重 IP 软上限：IPv6 轮换源刷连接时保护 dau.json 体积（conns 照计；IPv6 先按 /64 归并）
+
+/** 记一条新连接（须在配额校验通过后调用，脚本刷连接不进日活）。
+ * IPv6 按 /64 前缀归并：/128 轮换源一机一天可产出 4 万+「独立地址」，归并后 UV 语义仍是「来源网络」 */
+export function normalizeIpForUv(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  const groups = ip.split(':');
+  return `${groups.slice(0, 4).join(':')}::`;
+}
 
 /** 记一条新连接（须在配额校验通过后调用，脚本刷连接不进日活） */
 export function recordConnection(ip: string): void {
   if (!ip) return;
   const rec = currentDay();
-  if (rec.ips.size < MAX_IPS_PER_DAY) rec.ips.add(ip);
+  if (rec.ips.size < MAX_IPS_PER_DAY) rec.ips.add(normalizeIpForUv(ip));
   rec.conns += 1;
   dirty = true;
 }

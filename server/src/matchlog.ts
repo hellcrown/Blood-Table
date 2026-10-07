@@ -259,7 +259,12 @@ export function clearMatches(): void {
 }
 
 /** 统计聚合（管理端展示用） */
+/** matchStats 全量聚合（2 万条 × 座位）缓存：管理端刷新共用，按条数+末条终局时间失效 */
+let statsCache: { key: string; value: MatchStats } | null = null;
+
 export function matchStats(now = Date.now()): MatchStats {
+  const cacheKey = `${list.length}:${list[list.length - 1]?.endedAt ?? 0}`;
+  if (statsCache?.key === cacheKey) return statsCache.value;
   let seats = 0;
   let botSeats = 0;
   let last7d = 0;
@@ -296,7 +301,7 @@ export function matchStats(now = Date.now()): MatchStats {
     }))
     .sort((a, b) => b.games - a.games)
     .slice(0, 12);
-  return {
+  const result: MatchStats = {
     total: list.length,
     last7d,
     avgDurationMin: durCount ? Math.round((durSum / durCount) * 10) / 10 : null,
@@ -304,4 +309,6 @@ export function matchStats(now = Date.now()): MatchStats {
     byMode,
     chars,
   };
+  statsCache = { key: cacheKey, value: result };
+  return result;
 }

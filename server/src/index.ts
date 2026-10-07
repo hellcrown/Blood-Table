@@ -87,8 +87,40 @@ function issueAdminToken(): string {
   const now = Date.now();
   for (const [t, exp] of adminTokens) if (exp < now) adminTokens.delete(t);
   const token = randomBytes(24).toString('hex');
+  // 新登录作废全部旧令牌：单管理员场景无损，令牌泄漏（截屏/贴错）后重新登录即止损，无需重启
+  adminTokens.clear();
   adminTokens.set(token, now + 24 * 3600_000);
   return token;
+}
+
+/** 管理操作审计：破坏性操作（清空房间/反馈/对局）追加一行（谁、何时、做了什么） */
+function logAdminOp(req: http.IncomingMessage, action: string, detail: unknown): void {
+  try {
+    fs.mkdirSync(path.resolve(process.cwd(), 'data'), { recursive: true });
+    fs.appendFileSync(
+      path.resolve(process.cwd(), 'data', 'admin-ops.jsonl'),
+      `${JSON.stringify({ ts: Date.now(), ip: clientIp(req), ua: String(req.headers['user-agent'] ?? '').slice(0, 120), action, detail })}
+`,
+    );
+  } catch {
+    /* 审计失败不阻断管理操作 */
+  }
+}
+
+/** 破坏性管理操作（清空类）须显式携带 confirm:true（服务端强制，不依赖前端 window.confirm） */
+function hasConfirm(body: string): boolean {
+  try {
+    return (JSON.parse(body) as { confirm?: unknown }).confirm === true;
+  } catch {
+    return false;
+  }
+}
+
+/** DNS rebinding 防护：loopback 运维口的 Host 必须是本机（rebind 域名会带来攻击者 Host） */
+function isLocalHostHeader(req: http.IncomingMessage): boolean {
+  const host = String(req.headers.host ?? '').toLowerCase();
+  const bare = host.replace(/:\d+$/, '');
+  return bare === 'localhost' || bare === '127.0.0.1' || bare === '[::1]';
 }
 
 /** 恒时比较：哈希后定长对比，避免逐字符比较的时序侧信道泄漏密钥/密码 */
@@ -336,6 +368,7 @@ const server = http.createServer((req, res) => {
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
   );
   const url = new URL(req.url ?? '/', 'http://localhost');
+  if (url.pathname.startsWith('/api/admin/')) res.setHeader('Cache-Control', 'no-store'); // 含玩家 IP/账号，禁缓存
   // 通用 API 限流（静态资源不限）：超限直接 429，别让刷接口的流量挤占对局 tick
   if (url.pathname.startsWith('/api/') && !apiLimit.get(clientIp(req)).allow()) {
     res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -416,7 +449,12 @@ const server = http.createServer((req, res) => {
       send(200, { ok: true, token: r.token, account: r.account });
     })
       .catch(() => {
-        /* body 超限已断开连接 */
+        /* body 超限已断开连接；其余异常同样断开，杜绝无响应挂起 */
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
       });
     return;
   }
@@ -453,7 +491,12 @@ const server = http.createServer((req, res) => {
       send(200, { ok: true, token: r.token, account: r.account });
     })
       .catch(() => {
-        /* body 超限已断开连接 */
+        /* body 超限已断开连接；其余异常同样断开，杜绝无响应挂起 */
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
       });
     return;
   }
@@ -467,7 +510,12 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: true }));
       })
       .catch(() => {
-        /* body 超限已断开连接 */
+        /* body 超限已断开连接；其余异常同样断开，杜绝无响应挂起 */
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
       });
     return;
   }
@@ -505,8 +553,9 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/info') {
-    // 内网地址清单只下发给内网来源：公网访客拿到它纯属服务器信息泄漏
-    const priv = isPrivateIp(clientIp(req));
+    // 内网地址清单只下发给内网来源：公网访客拿到它纯属服务器信息泄漏；
+    // Host 还必须是本机（DNS rebinding：恶意页面对 rebind 域名发请求时 Host 是攻击者域名）
+    const priv = isPrivateIp(clientIp(req)) && isLocalHostHeader(req);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ port: PORT, lan: priv ? lanIps : [], tailscale: priv ? tailscaleIps : [] }));
     return;
@@ -545,6 +594,18 @@ const server = http.createServer((req, res) => {
       });
     return;
   }
+  if (url.pathname === '/api/admin/logout' && req.method === 'POST') {
+    // 吊销当前 Bearer 令牌（客户端登出/泄漏止损）；无 body
+    const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? '');
+    const token = m?.[1] ?? '';
+    if (token) {
+      adminTokens.delete(token);
+      logAdminOp(req, 'logout', {});
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (url.pathname === '/api/admin/rooms' && req.method === 'GET') {
     if (!isAdmin(req)) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -556,35 +617,69 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/admin/rooms/clear' && req.method === 'POST') {
-    if (!isAdmin(req)) {
-      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
-      return;
-    }
-    const n = manager.clearAllRooms();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, cleared: n }));
+    void readBody(req)
+      .then((body) => {
+        if (!isAdmin(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+          return;
+        }
+        if (!hasConfirm(body)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '缺少 confirm:true' }));
+          return;
+        }
+        const n = manager.clearAllRooms();
+        logAdminOp(req, 'rooms.clear', { cleared: n });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, cleared: n }));
+      })
+      .catch(() => {
+        /* body 超限已断开连接 */
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
+      });
     return;
   }
   if (url.pathname === '/api/admin/feedback/clear' && req.method === 'POST') {
-    if (!isAdmin(req)) {
-      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
-      return;
-    }
-    clearFeedback();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true }));
+    void readBody(req)
+      .then((body) => {
+        if (!isAdmin(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+          return;
+        }
+        if (!hasConfirm(body)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '缺少 confirm:true' }));
+          return;
+        }
+        clearFeedback();
+        logAdminOp(req, 'feedback.clear', {});
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch(() => {
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
+      });
     return;
   }
   if (url.pathname === '/api/rooms/clear' && req.method === 'POST') {
-    // 本机运维接口：只允许服务器自身调用；外部请走管理员登录
-    if (!isLoopback(req)) {
+    // 本机运维接口：只允许服务器自身调用且 Host 必须为本机（DNS rebinding 防护）；外部请走管理员登录
+    if (!isLoopback(req) || !isLocalHostHeader(req)) {
       res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, msg: '仅限服务器本机调用（外部请使用管理员登录）' }));
       return;
     }
     const n = manager.clearAllRooms();
+    logAdminOp(req, 'rooms.clear', { cleared: n });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, cleared: n }));
     return;
@@ -647,14 +742,30 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/admin/matches/clear' && req.method === 'POST') {
-    if (!isAdmin(req)) {
-      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
-      return;
-    }
-    clearMatches();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true }));
+    void readBody(req)
+      .then((body) => {
+        if (!isAdmin(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+          return;
+        }
+        if (!hasConfirm(body)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '缺少 confirm:true' }));
+          return;
+        }
+        clearMatches();
+        logAdminOp(req, 'matches.clear', {});
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch(() => {
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
+      });
     return;
   }
   if (url.pathname === '/api/admin/dau' && req.method === 'GET') {

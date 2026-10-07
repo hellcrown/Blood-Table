@@ -114,7 +114,14 @@ interface AuditActionLine {
 
 interface AuditDetail {
   start: { key: string; room: string; mode: 'blood' | 'classic'; startedAt: number; players: AuditPlayer[]; sameIp?: number[] };
-  end?: { endedAt: number; durationMin?: number; winnerSeat?: number };
+  end?: {
+    endedAt: number;
+    durationMin?: number;
+    winnerSeat?: number;
+    actsTruncated?: number;
+    chatTruncated?: number;
+    summary?: unknown;
+  };
   acts: AuditActionLine[];
 }
 
@@ -383,7 +390,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
     try {
       const r = await fetch('/api/admin/rooms/clear', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
       });
       const data = (await r.json()) as { ok?: boolean; cleared?: number; msg?: string };
       if (r.status === 401) {
@@ -400,6 +408,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   };
 
   const logout = () => {
+    if (token) {
+      void fetch('/api/admin/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    }
     sessionStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setRooms(null);
@@ -590,6 +601,15 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                               ⚠️ 座位 {detail.start.sameIp.join('/')} 同
                               IP——可能是同一人双开或同一网络出口（CGNAT 会误报），仅作线索
                             </p>
+                          )}
+                          {detail?.end != null && (detail.end.summary as { resolved?: boolean } | undefined)?.resolved === false && (
+                            <p className="hint" style={{ color: '#d4a017' }}>⚠️ 该局中途解散，未打完（终局摘要为回收记录）</p>
+                          )}
+                          {detail?.end?.actsTruncated != null && (
+                            <p className="hint">操作明细超单局上限：另丢弃 {detail.end.actsTruncated} 条（刷非法消息的探针流量）</p>
+                          )}
+                          {detail?.end?.chatTruncated != null && (
+                            <p className="hint">聊天记录超单局上限：另丢弃 {detail.end.chatTruncated} 条</p>
                           )}
                           {detail != null && detail.acts.length === 0 && (
                             <p className="hint">该局没有已记录的操作（或明细已超出 2 天保留期）</p>
