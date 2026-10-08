@@ -295,12 +295,18 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
     try {
       const r = await fetch('/api/admin/feedback/clear', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${t}` },
+        headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
       });
       if (r.status === 401) {
         sessionStorage.removeItem(TOKEN_KEY);
         setToken(null);
         setError('登录已过期，请重新输入密码');
+        return;
+      }
+      if (!r.ok) {
+        // 服务端拒绝（如缺 confirm）：保留现列表并明示，不得伪装成已清空
+        setFeedbackError('清空失败，请重试');
         return;
       }
       setFeedback([]);

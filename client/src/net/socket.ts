@@ -159,8 +159,10 @@ class Net {
       window.clearTimeout(watchdog);
       this.quietReconnect = false;
       this.reconnectDelay = 800;
-      this.setStatus('open');
+      // rejoin 必须先于 setStatus('open')：状态监听者（如聊天弹窗的重连补拉）会在 open
+      // 同步发出房间请求，服务端按消息序处理——先绑座才不会吃到 NOT_IN_ROOM
       if (this.token) this.send({ t: 'rejoin', token: this.token });
+      this.setStatus('open');
     };
     ws.onmessage = (ev) => {
       let msg: S2C;

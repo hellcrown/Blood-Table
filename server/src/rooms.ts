@@ -51,6 +51,8 @@ export interface Session {
   spectator?: boolean;
   /** 上次鲜花/鸡蛋互动时间（限频用） */
   lastReact?: number;
+  /** 本会话最近一次绑定连接的来源 IP（断线后 ws 置 null 会丢 ws.ip，审计快照用 lastIp 兜底） */
+  lastIp?: string;
 }
 
 export interface Room {
@@ -204,7 +206,7 @@ function auditPlayerAct(room: Room, session: Session, t: string, rawMsg: unknown
   });
 }
 
-/** 开局快照：座位/昵称/账号/bot/IP（断线会话此刻仍可取到 ws.ip）+ 非 bot 座位同 IP 标记 */
+/** 开局快照：座位/昵称/账号/bot/IP（断线会话取 lastIp 兜底）+ 非 bot 座位同 IP 标记 */
 function auditRoomStart(room: Room): void {
   const players = [...room.sessions.values()]
     .filter((s) => !s.spectator)
@@ -214,7 +216,7 @@ function auditRoomStart(room: Room): void {
       name: s.name,
       ...(s.accountId ? { accountId: s.accountId } : {}),
       ...(s.bot ? { bot: true } : {}),
-      ...(s.ws?.ip ? { ip: s.ws.ip } : {}),
+      ...(s.ws?.ip ? { ip: s.ws.ip } : s.lastIp ? { ip: s.lastIp } : {}),
     }));
   recordGameStart({
     room: room.code,
@@ -290,8 +292,7 @@ export class RoomManager {
       this.roomListLimit.prune();
       this.roomChatLimits.prune();
       this.roomChatHistLimits.prune();
-      // pwJoins 是唯一漏在清理之外的限流表：任何访问过密码房的 IP 都会永久留一条
-      // （与 net/limits.ts 的「带闲置自动清理，防 Map 无限膨胀」注释相矛盾）
+      // pwJoins 曾漏在清理之外（访问过密码房的 IP 永久留一条），现已补齐同口径 prune
       this.pwJoins.prune();
       const now = Date.now();
       for (const [code, w] of this.pwFailsByRoom) {
@@ -322,12 +323,11 @@ export class RoomManager {
         // 观战会话断开：宽限 30s 再移除。立刻移除会让网络抖动（客户端 ~1s 后自动重连）
         // 直接把观战者踢回大厅（会话令牌已随移除失效，重连收到「会话已失效」）；
         // 宽限期内重连经 tokenIndex 接管原会话，超时未归才移除释放观战坑位
-        session.connected = false;
         const t = setTimeout(() => {
           try {
             if (!session.connected && room.sessions.get(session.id) === session) {
               this.removeSession(room, session);
-              if (room.sessions.size === 0) this.rooms.delete(room.code);
+              if (room.sessions.size === 0 && this.rooms.get(room.code) === room) this.rooms.delete(room.code);
               this.broadcast(room);
             }
           } catch (e) {
@@ -766,8 +766,11 @@ export class RoomManager {
         send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
         return;
     }
-    const actor = bs.players.find((x) => x.id === pid);
-    if (actor) actor.wasAuto = false; // 真人操作：清除超时托管标记
+    // bRematch/backToRoom 已替换/清空 room.game 时，bs 是被丢弃的旧引用——不得再写
+    if (room.game === bs) {
+      const actor = bs.players.find((x) => x.id === pid);
+      if (actor) actor.wasAuto = false; // 真人操作：清除超时托管标记
+    }
     this.broadcast(room);
   }
 
@@ -785,6 +788,11 @@ export class RoomManager {
 
   /** 观战加入：不占座位、不参与操作，仅接收对局视图 */
   private handleSpectate(ws: WebSocket, msg: Extract<C2S, { t: 'spectate' }>): void {
+    // 与 join 同口径烧尝试配额：spectate 对房间存在性同样可探测（ROOM_NOT_FOUND vs 密码错误），
+    // 漏烧会把 join 侧的房间码暴力枚举防御整个旁路掉
+    if (!this.joinAttempts.get(ws.ip ?? '').allow()) {
+      throw new GameError('RATE_LIMITED', '尝试过于频繁，请稍后再试');
+    }
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
@@ -801,7 +809,9 @@ export class RoomManager {
         throw new GameError(err, '房间密码错误');
       }
     }
-    const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator).length;
+    // 计数排除本连接当前绑定的会话：同连接重入观战（换房间码重试）时不得把自己算进满员
+    const bound = this.bindings.get(ws)?.session;
+    const spectatorCount = [...room.sessions.values()].filter((s) => s.spectator && s.id !== bound?.id).length;
     if (spectatorCount >= MAX_SPECTATORS && !this.isAdminMessage(msg)) {
       throw new GameError('ROOM_LIMIT', '观战人数已达上限');
     }
@@ -929,6 +939,7 @@ export class RoomManager {
   private bind(ws: WebSocket, room: Room, session: Session): void {
     session.ws = ws;
     session.connected = true;
+    if (ws.ip) session.lastIp = ws.ip; // 断线会话的 ws 会被置空，审计快照靠 lastIp 拿回 IP
     this.bindings.set(ws, { room, session });
   }
 
@@ -1057,7 +1068,7 @@ export class RoomManager {
     if (session.spectator) {
       this.removeSession(room, session);
       if (room.sessions.size === 0) {
-        this.rooms.delete(room.code);
+        if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
         return;
       }
       this.broadcast(room);
@@ -1126,7 +1137,7 @@ export class RoomManager {
       this.removeSession(room, session);
     }
     if (room.sessions.size === 0) {
-      this.rooms.delete(room.code);
+      if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
       return;
     }
     this.broadcast(room);
@@ -1796,8 +1807,6 @@ export class RoomManager {
           const logFull = wasFresh || behind > LOG_TAIL_LINES;
           const view: BloodView = buildBloodView(room, g, s.id, { logFull, logTail: LOG_TAIL_LINES });
           send(s.ws, { t: 'state', view });
-        } else if (g) {
-          send(s.ws, { t: 'state', view: buildView(room, s.id) });
         } else {
           send(s.ws, { t: 'state', view: buildView(room, s.id) });
         }
