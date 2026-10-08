@@ -461,7 +461,10 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/auth/login' && req.method === 'POST') {
     void readBody(req).then((body) => {
       const send = (code: number, obj: unknown): void => {
-        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(code, {
+          'Content-Type': 'application/json; charset=utf-8',
+          ...(code === 200 ? { 'Cache-Control': 'no-store' } : {}), // 200 含登录令牌
+        });
         res.end(JSON.stringify(obj));
       };
       const ip = clientIp(req);
@@ -520,6 +523,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+    res.setHeader('Cache-Control', 'no-store'); // 含账号名与个人战绩
     const send = (code: number, obj: unknown): void => {
       res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(obj));
@@ -711,7 +715,12 @@ const server = http.createServer((req, res) => {
       }
     })
       .catch(() => {
-        /* body 超限已断开连接：无需响应，但必须接住拒绝防进程崩溃 */
+        /* body 超限已断开连接；其余异常同样断开 */
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
       });
     return;
   }

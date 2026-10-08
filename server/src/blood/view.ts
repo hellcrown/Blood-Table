@@ -255,9 +255,13 @@ export function buildBloodView(
       lastAction: p.lastAction,
     };
     if (revealPublic) {
-      // 瞎掰王宣告成立（无人质疑）时，亮牌按宣告的牌展示
+      // 瞎掰王宣告成立（无人质疑）时，亮牌按宣告的牌展示——与结算行同口径「无芯片宣告牌」：
+      // 芯片角标/修正点数只属于被宣告牌遮住的真实牌，挂上来既泄露真实牌力元信息，
+      // 又与本方结算演示（result 行无芯片）自相矛盾
       const bluffing = gs.bluffer && gs.bluffer.seat === p.id && !gs.bluffer.challenged;
-      sv.played = (bluffing ? gs.bluffer!.declared : p.play).map((c) => cardView(c, p));
+      sv.played = bluffing
+        ? gs.bluffer!.declared.map((c) => ({ id: c.id, r: c.r, s: c.s, chipIds: [], effR: c.r }))
+        : p.play.map((c) => cardView(c, p));
       const ev = evalForPlayer(p, gs);
       sv.handName = ev.catName;
       sv.pips = ev.pips;

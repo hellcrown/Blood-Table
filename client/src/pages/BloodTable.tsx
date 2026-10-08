@@ -419,12 +419,12 @@ export function BloodTable({ view }: { view: BloodView }) {
 
   const prevFinalRef = useRef<string | null>(null);
   useEffect(() => {
-    const key = view.final ? `w${view.final.winnerSeat}` : null;
+    const key = view.final ? `w${view.final.winnerSeat}@r${view.round}` : null;
     const prev = prevFinalRef.current;
     prevFinalRef.current = key;
     if (!key || key === prev) return;
     if (view.me.seat < 0) return; // 观战者不播胜负音
-    playSfx(key === `w${view.me.seat}` ? 'win' : 'lose');
+    playSfx(view.final!.winnerSeat === view.me.seat ? 'win' : 'lose');
   }, [view.final]);
 
   const prevAnnAtRef = useRef(0);
@@ -1079,7 +1079,7 @@ export function BloodTable({ view }: { view: BloodView }) {
         )}
 
         {spectating && (
-          <div className="spectate-banner">🔭 观战中 —— 对局结束后点击空座位可随时加入</div>
+          <div className="spectate-banner">🔭 观战中 —— 对局结束后退出房间再重新加入即可入座</div>
         )}
         <div className="blood-area table-ring">
           {opponents.map((opp) => (
@@ -2829,6 +2829,8 @@ export function BloodTable({ view }: { view: BloodView }) {
               <div className="panel-actions" style={{ marginTop: 14 }}>
                 <button
                   className="btn primary"
+                  disabled={!target}
+                  title={!target ? '目标牌已不在弃牌区，请取消后重选' : undefined}
                   onClick={() => {
                     if (insertConfirm.buySlot != null) {
                       send({ t: 'bBuy', slot: insertConfirm.buySlot, insertInto: insertConfirm.cardId });
@@ -2995,7 +2997,7 @@ export function BloodTable({ view }: { view: BloodView }) {
               if (myChar) {
                 return (
                   <div className="char-pick-waiting">
-                    <CharPortrait def={BLOOD_CHAR_BY_ID.get(myChar)!} size="md" />
+                    <CharPortrait def={BLOOD_CHAR_BY_ID.get(myChar) ?? { id: myChar, name: myChar, emoji: '❔', hue: 0, tags: [], impl: 'full', text: '' }} size="md" />
                     <p>
                       已选择【{BLOOD_CHAR_BY_ID.get(myChar)?.name}】
                       {oppP && !oppP.charId && ' · 等待对方选择…'}
@@ -3007,7 +3009,12 @@ export function BloodTable({ view }: { view: BloodView }) {
               return (
                 <div className="char-pick-row">
                   {(view.me.charOptions ?? []).map((id) => (
-                    <CharPortrait key={id} def={BLOOD_CHAR_BY_ID.get(id)!} size="lg" onClick={() => setCharDetail(id)} />
+                    <CharPortrait
+                      key={id}
+                      def={BLOOD_CHAR_BY_ID.get(id) ?? { id, name: id, emoji: '❔', hue: 0, tags: [], impl: 'full', text: '' }}
+                      size="lg"
+                      onClick={() => setCharDetail(id)}
+                    />
                   ))}
                 </div>
               );

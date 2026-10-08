@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Card, Rank, Suit } from '@shared/protocol';
 import { computePots, legalActionsFor } from '../src/game/betting';
 import { addPlayer, applyAction, autoAction, createGame, startHand } from '../src/game/engine';
+import type { PlayerAction } from '@shared/protocol';
 import type { GState } from '../src/game/types';
 
 const RANK_MAP: Record<string, Rank> = { T: 10, J: 11, Q: 12, K: 13, A: 14 };
@@ -259,5 +260,35 @@ describe('输入防御', () => {
     expect(p.committed).toBe(before.committed);
     expect(Number.isFinite(gs.currentBet)).toBe(true);
     expect(Number.isFinite(gs.minRaise)).toBe(true);
+  });
+});
+
+describe('未跟注退还（面对 0 跟注弃牌的退化线）', () => {
+  function driveToUncontested(): { gs: GState; btn: number; bb: number } {
+    const gs = makeGame(2, 1000);
+    startHand(gs, 0);
+    const btn = gs.buttonSeat;
+    const bb = gs.bbSeat!;
+    const mk = (to?: number): PlayerAction => (to != null ? { k: 'raise', to } : { k: 'fold' });
+    act(gs, btn, mk(1000)); // SB 全下（committed 1000）
+    act(gs, bb, { k: 'fold' }); // BB 弃牌（盲注 10 已弃）→ 无人跟注结算
+    return { gs, btn, bb };
+  }
+
+  it('未被跟注的部分退回赢家：不并入底池（all-in 赢池上限）', () => {
+    const { gs, btn, bb } = driveToUncontested();
+    expect(gs.phase).toBe('result');
+    const w = seat(gs, btn);
+    const l = seat(gs, bb);
+    // 退还 990（1000-10）后底池只剩 10+5=... 退回后 pot=10（弃牌者盲注）+10（赢家街内已并入 committed 的部分）
+    expect(w.chips).toBe(1010); // 0 + 退回 990 + 底池 20
+    expect(l.chips).toBe(990);
+    expect(w.chips + l.chips).toBe(2000); // 筹码守恒
+    expect(gs.log.some((x) => x.text.includes('未被跟注'))).toBe(true);
+  });
+
+  it('无人跟注结算清零本街 bet（result 期座位不再残留下注徽章）', () => {
+    const { gs } = driveToUncontested();
+    expect(gs.players.every((p) => p.bet === 0)).toBe(true);
   });
 });

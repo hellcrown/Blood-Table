@@ -259,11 +259,12 @@ export function clearMatches(): void {
 }
 
 /** 统计聚合（管理端展示用） */
-/** matchStats 全量聚合（2 万条 × 座位）缓存：管理端刷新共用，按条数+末条终局时间失效 */
+/** matchStats 全量聚合（2 万条 × 座位）缓存：管理端刷新共用，按条数+末条终局时间+日期桶失效 */
 let statsCache: { key: string; value: MatchStats } | null = null;
 
 export function matchStats(now = Date.now()): MatchStats {
-  const cacheKey = `${list.length}:${list[list.length - 1]?.endedAt ?? 0}`;
+  // 键必须含日期桶：last7d 依赖「现在」，键不变时缓存会让「近 7 天」跨日冻结
+  const cacheKey = `${list.length}:${list[list.length - 1]?.endedAt ?? 0}:${Math.floor(now / 86_400_000)}`;
   if (statsCache?.key === cacheKey) return statsCache.value;
   let seats = 0;
   let botSeats = 0;

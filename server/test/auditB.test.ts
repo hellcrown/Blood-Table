@@ -322,6 +322,35 @@ describe('批次 B · 复制芯片不得让同一张牌有两个点数（B5）',
     const view = buildBloodView(room, gs, 'p0');
     expect(view.me.hand.find((c) => c.id === card.id)?.effR).toBe(7);
   });
+
+  it('瞎掰王宣告成立时座位亮牌为无芯片宣告牌（真实芯片角标不得挂上假牌面）', () => {
+    const gs = make2p();
+    gs.phase = 'reveal';
+    const me = gs.players[0];
+    me.charId = 'bluffer';
+    me.play = [
+      { id: 'c1', r: 5, s: 's' },
+      { id: 'c2', r: 9, s: 'h' },
+    ];
+    me.chips.push({ id: 'ch-1', def: 'calib', on: 'c1' }); // 真实牌挂了芯片
+    gs.bluffer = {
+      seat: 'p0',
+      declared: [
+        { id: 'c1', r: 13, s: 's' },
+        { id: 'c2', r: 13, s: 'h' },
+      ],
+      challenged: false,
+      challengers: [],
+    };
+    const room = { code: '7B-bluf', mode: 'blood', maxPlayers: 2, sessions: new Map() } as unknown as Room;
+    const view = buildBloodView(room, gs, 'p1'); // 对手视角
+    const opp = view.players.find((x) => x.seat === 0)!;
+    expect(opp.played).toHaveLength(2);
+    for (const c of opp.played ?? []) {
+      expect(c.chipIds).toEqual([]); // 回归点：修复前挂真实芯片 ['ch-1']
+      expect(c.effR).toBe(13); // 按宣告面净点数，不吃芯片修正
+    }
+  });
 });
 
 describe('批次 B · 皇叔宿命胜利必须及时（B5）', () => {

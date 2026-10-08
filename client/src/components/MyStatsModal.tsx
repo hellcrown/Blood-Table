@@ -57,8 +57,10 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
       .then((d) => {
         if (alive) setData(d);
       })
-      .catch(() => {
-        if (alive) setError('加载失败，请稍后重试');
+      .catch((e) => {
+        if (!alive) return;
+        // 401=令牌过期（重试无用），与其余错误区分提示
+        setError(e instanceof Error && e.message === '401' ? '登录已过期，请重新登录' : '加载失败，请稍后重试');
       });
     return () => {
       alive = false;

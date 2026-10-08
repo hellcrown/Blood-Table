@@ -389,9 +389,19 @@ function awardUncontested(gs: GState, now: number): void {
   gs.resultAt = now;
   gs.showdown = false; // 无人跟注不摊牌：赢家的底牌保持暗置
   const winner = activePlayers(gs)[0];
+  // 未跟注部分退还（all-in 赢池上限）：赢家投入超过其他任何人投入的部分从未被跟注，
+  // 不属于底池——此前全数归赢家，面对 0 跟注误触弃牌时可让对手白得未被跟注的部分
+  const othersMax = Math.max(0, ...gs.players.filter((p) => p !== winner).map((p) => p.committed));
+  const refund = Math.max(0, winner.committed - othersMax);
+  if (refund > 0) {
+    winner.chips += refund;
+    winner.committed -= refund;
+    pushLog(gs, 'win', `${winner.name} 的 ${refund} 未被跟注，退回`);
+  }
   const amount = gs.players.reduce((s, p) => s + p.committed, 0);
   winner.chips += amount;
   winner.won += amount;
+  for (const p of gs.players) p.bet = 0; // 本街已结束：清零下注徽章（否则 result 期座位残留 bet 标签）
   pushLog(gs, 'win', `${winner.name} 收下底池 ${amount}（其余玩家弃牌）`);
   buildResult(gs, now);
 }
@@ -406,7 +416,7 @@ function settlePots(gs: GState, contenders: GPlayer[], now: number, withShowdown
     const winners = elig.filter((p) => p.handScore === maxScore);
     const share = Math.floor(pot.amount / winners.length);
     let rem = pot.amount - share * winners.length;
-    // 余码从庄家下一位开始顺时针分给赢家
+    // 余码按与庄家的座位距离就近分配（庄家本人优先）
     const ordered = winners.slice().sort(
       (a, b) => seatDistance(gs.seatCount, gs.buttonSeat, a.seat) - seatDistance(gs.seatCount, gs.buttonSeat, b.seat),
     );
