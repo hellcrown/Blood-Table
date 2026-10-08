@@ -179,9 +179,14 @@ export function MinesTable({ view }: { view: MinesView }) {
 
       <div className="act-row" style={{ marginTop: 10 }}>
         {!spectating && myStatus === 'playing' && view.phase === 'playing' && (
-          <button className={`btn ${flagMode ? 'primary' : ''}`} onClick={() => setFlagMode((v) => !v)}>
-            {flagMode ? '🚩 标记模式（开）' : '⛏ 揭开模式'}
-          </button>
+          <>
+            <button className={`btn ${!flagMode ? 'primary' : ''}`} onClick={() => setFlagMode(false)}>
+              ⛏ 翻开
+            </button>
+            <button className={`btn ${flagMode ? 'primary' : ''}`} onClick={() => setFlagMode(true)}>
+              🚩 标记
+            </button>
+          </>
         )}
         <span className="hint">
           已揭开 {merged.length}/{view.totalSafe} · 本地标记 {flags.size}

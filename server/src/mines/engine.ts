@@ -47,41 +47,15 @@ export function createMinesGame(
   difficulty: MinesDifficulty,
   players: MinesPlayerInit[],
   now: number,
+  timeSec = 0,
 ): MinesState {
   const preset = MINES_PRESETS[difficulty] ?? MINES_PRESETS.easy;
   const cols = preset.cols;
   const rows = preset.rows;
   const cells = cols * rows;
 
-  // 布雷：随机挑 mines 个格子
-  let mineSet = new Set<number>(shuffle(Array.from({ length: cells }, (_, i) => i)).slice(0, preset.mines));
-
-  // 公共安全开场区：随机选一个非雷格，清空其 3×3 邻域内的雷（挪到其他空闲格）
-  const opening = (function pickOpening(): number {
-    const safe: number[] = [];
-    for (let i = 0; i < cells; i++) if (!mineSet.has(i)) safe.push(i);
-    return safe[randomInt(0, safe.length)];
-  })();
-  const nr = Math.floor(opening / cols);
-  const nc = opening % cols;
-  const neighborhood = new Set<number>();
-  for (const [dr, dc] of DIRS) {
-    const r = nr + dr;
-    const c = nc + dc;
-    if (r >= 0 && r < rows && c >= 0 && c < cols) neighborhood.add(r * cols + c);
-  }
-  const free: number[] = [];
-  for (let i = 0; i < cells; i++) {
-    // opening 本身也不得落雷：否则公共安全开场区失效（全员开局只揭 1 格）
-    if (i !== opening && !mineSet.has(i) && !neighborhood.has(i)) free.push(i);
-  }
-  for (const cell of neighborhood) {
-    if (!mineSet.has(cell)) continue;
-    mineSet.delete(cell);
-    const target = free[randomInt(0, free.length)];
-    mineSet.add(target);
-    free.splice(free.indexOf(target), 1);
-  }
+  // 布雷：随机挑 mines 个格子（全覆盖开局，无自动揭开的安全区——首格由玩家自己抉择）
+  const mineSet = new Set<number>(shuffle(Array.from({ length: cells }, (_, i) => i)).slice(0, preset.mines));
 
   // 相邻雷数
   const counts = new Array<number>(cells).fill(0);
@@ -102,7 +76,6 @@ export function createMinesGame(
   }
 
   const totalSafe = cells - mineSet.size;
-  const openingReveal = floodReveal(mineSet, counts, cols, rows, opening);
 
   return {
     difficulty,
@@ -116,12 +89,12 @@ export function createMinesGame(
     players: shuffle(players).map((p) => ({
       ...p,
       status: 'playing' as const,
-      revealed: [...openingReveal],
+      revealed: [], // 全覆盖开局
     })),
     startedAt: now,
     log: [],
     logSeq: 0,
-    deadline: now + preset.timeMs,
+    deadline: now + (timeSec > 0 ? timeSec * 1000 : preset.timeMs), // 房间可自定义时限（0=按难度默认）
     winnerId: null,
     ranking: [],
     revealedAll: false,

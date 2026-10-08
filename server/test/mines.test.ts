@@ -36,7 +36,7 @@ function findMineCell(state: MinesState, playerId: string): { r: number; c: numb
 }
 
 describe('扫雷 · 生成', () => {
-  it('三档难度：雷数与雷位守恒，开局安全区已揭开且无雷', () => {
+  it('三档难度：雷数与雷位守恒，开局全覆盖', () => {
     for (const difficulty of ['easy', 'medium', 'hard'] as const) {
       const gs = setup(difficulty);
       expect(gs.minesSet.size).toBe(gs.mines);
@@ -44,13 +44,19 @@ describe('扫雷 · 生成', () => {
       let mineCount = 0;
       for (let i = 0; i < gs.counts.length; i++) if (gs.counts[i] < 0) mineCount++;
       expect(mineCount).toBe(gs.mines);
-      // 开局安全区：全员已揭开且无雷
+      // 全覆盖开局：无人预揭任何格子
       for (const p of gs.players) {
         expect(p.status).toBe('playing');
-        expect(p.revealed.length).toBeGreaterThan(0);
-        for (const i of p.revealed) expect(gs.minesSet.has(i)).toBe(false);
+        expect(p.revealed).toEqual([]);
       }
     }
+  });
+
+  it('自定义时限：deadline 按房间的秒数生效；缺省按难度预设', () => {
+    const custom = createMinesGame('easy', PLAYERS, NOW, 120);
+    expect(custom.deadline).toBe(NOW + 120_000);
+    const fallback = createMinesGame('easy', PLAYERS, NOW, 0);
+    expect(fallback.deadline).toBe(NOW + 180_000); // easy 预设 3 分钟
   });
 
   it('全员棋盘相同：开场区一致', () => {

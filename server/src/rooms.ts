@@ -77,6 +77,8 @@ export interface Room {
   targetTickets: number;
   /** 扫雷模式：难度（默认 easy） */
   minesDifficulty: 'easy' | 'medium' | 'hard';
+  /** 扫雷模式：时限秒数（0=按难度默认） */
+  minesTimeSec: number;
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
@@ -234,7 +236,7 @@ function auditRoomStart(room: Room): void {
       room.mode === 'blood'
         ? { targetTickets: room.targetTickets, charExpansion: room.charExpansion, expansion: room.expansion }
         : room.mode === 'mines'
-          ? { difficulty: room.minesDifficulty }
+          ? { difficulty: room.minesDifficulty, timeSec: room.minesTimeSec }
           : { ...room.settings },
     players,
   });
@@ -971,6 +973,7 @@ export class RoomManager {
       expansion: false,
       targetTickets: 0,
       minesDifficulty: 'easy' as const,
+      minesTimeSec: 0,
       sessions: new Map(),
       chatLog: [],
       game: null,
@@ -1181,7 +1184,7 @@ export class RoomManager {
         .filter((s) => !s.spectator)
         .sort((a, b) => a.seat - b.seat)
         .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
-      room.game = mines.createMinesGame(room.minesDifficulty, players, now);
+      room.game = mines.createMinesGame(room.minesDifficulty, players, now, room.minesTimeSec);
       room.matchLogged = false; // 终局审计 end 的哨兵（broadcast mines 分支置位）
       room.gameStartedAt = now;
       // 新一局：扫雷 logSeq 归零重排，日志增量游标归零（否则新局日志被客户端按已见去重）
@@ -1263,6 +1266,9 @@ export class RoomManager {
       if (msg.minesDifficulty === 'easy' || msg.minesDifficulty === 'medium' || msg.minesDifficulty === 'hard') {
         room.minesDifficulty = msg.minesDifficulty;
       }
+    }
+    if (msg.minesTimeSec != null) {
+      room.minesTimeSec = clampInt(msg.minesTimeSec, 0, 3600, 0); // 0=按难度默认，其余 60s~1h
     }
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     if (msg.targetTickets != null) {
@@ -1455,7 +1461,7 @@ export class RoomManager {
       .sort((a, b) => a.seat - b.seat)
       .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
     if (players.length < 1) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 1 名玩家'); // 扫雷 1~2 人：与 handleStart 同口径
-    room.game = mines.createMinesGame(room.minesDifficulty, players, Date.now());
+    room.game = mines.createMinesGame(room.minesDifficulty, players, Date.now(), room.minesTimeSec);
     room.matchLogged = false;
     room.gameStartedAt = Date.now();
     this.drainNotified.delete(room.code); // 新一局重新预告（若在排水期）

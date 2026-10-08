@@ -143,6 +143,7 @@ export function Room({ view }: { view: TableView }) {
     expansion?: boolean;
     targetTickets?: number;
     minesDifficulty?: 'easy' | 'medium' | 'hard';
+    minesTimeSec?: number;
     password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -276,12 +277,9 @@ export function Room({ view }: { view: TableView }) {
             {isHost ? '' : '（房主可修改）'}
           </div>
           {view.mode === 'mines' ? (
-            <div className="settings-grid" style={{ marginTop: 10 }}>
-              <label
-                className="charpick-toggle"
-                title="初级 9×9/10 雷 · 中级 16×16/40 雷 · 高级 30×16/99 雷"
-              >
-                难度
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">难度：</span>
                 <select
                   value={view.minesDifficulty}
                   disabled={!isHost}
@@ -294,7 +292,23 @@ export function Room({ view }: { view: TableView }) {
                   <option value="hard">高级 30×16 / 99 雷</option>
                 </select>
                 <span className="hint">点雷出局 · 先扫完全部安全格者胜</span>
-              </label>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">时间限制：</span>
+                <select
+                  value={view.minesTimeSec ?? 0}
+                  disabled={!isHost}
+                  onChange={(e) => update({ minesTimeSec: Number(e.target.value) })}
+                >
+                  <option value={0}>默认（初级 3 分 · 中级 6 分 · 高级 10 分）</option>
+                  <option value={120}>2 分钟</option>
+                  <option value={180}>3 分钟</option>
+                  <option value={300}>5 分钟</option>
+                  <option value={600}>10 分钟</option>
+                  <option value={900}>15 分钟</option>
+                </select>
+                <span className="hint">倒计时归零按当前进度排名</span>
+              </div>
             </div>
           ) : view.mode === 'blood' ? (
             <p className="hint">

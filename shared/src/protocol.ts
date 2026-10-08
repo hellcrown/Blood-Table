@@ -124,6 +124,8 @@ export interface TableView {
   expansion: boolean;
   /** 扫雷模式：难度（默认 easy） */
   minesDifficulty?: 'easy' | 'medium' | 'hard';
+  /** 扫雷模式：时限秒数（0=按难度默认：初级 3 分/中级 6 分/高级 10 分） */
+  minesTimeSec?: number;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   players: SeatView[];
@@ -181,7 +183,7 @@ export type C2S =
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard' }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
