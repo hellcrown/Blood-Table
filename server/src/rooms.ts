@@ -14,6 +14,8 @@ import { accountName, computeLadderPoints, isNameRegistered, recordLadderEvent, 
 import { cleanChatText } from './chat';
 import { recordAccountVisit } from './dau';
 import { recordAction, recordChat, recordGameEnd, recordGameStart } from './audit';
+import { dianjiangRemaining, recordDianjiangUse } from './dianjiang';
+import { charPoolIds } from '@shared/bloodChars';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -53,6 +55,8 @@ export interface Session {
   lastReact?: number;
   /** 本会话最近一次绑定连接的来源 IP（断线后 ws 置 null 会丢 ws.ip，审计快照用 lastIp 兜底） */
   lastIp?: string;
+  /** 点将卡：本局指定角色（等待房设置；开局生效并扣当日次数；仅注册账号有效） */
+  dianjiangPick?: string;
 }
 
 export interface Room {
@@ -426,6 +430,9 @@ export class RoomManager {
       case 'roomChatHistory':
         this.handleRoomChatHistory(room, session);
         return;
+      case 'dianjiang':
+        this.handleDianjiang(room, session, msg);
+        return;
       case 'start':
         this.handleStart(room, session);
         return;
@@ -736,9 +743,12 @@ export class RoomManager {
           .filter((s) => !s.spectator && (s.bot || s.connected || s.token !== ''))
           .sort((a, b) => a.seat - b.seat)
           .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+        const { forced, honored } = this.collectForcedChars(room);
         room.game = blood.createBloodGame(players.length, players, now, room.charExpansion, room.expansion, {
           targetTickets: room.targetTickets || undefined,
+          forcedChars: forced,
         });
+        for (const h of honored) recordDianjiangUse(h.accountId); // 再来一场是新的一局，重新扣次
         room.matchLogged = false;
         room.gameStartedAt = now;
         auditRoomStart(room); // 审计：再来一场的新对局开局快照
@@ -1160,9 +1170,12 @@ export class RoomManager {
       for (const s of room.sessions.values()) {
         if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
       }
+      const { forced, honored } = this.collectForcedChars(room);
       room.game = blood.createBloodGame(players.length, players, now, room.charExpansion, room.expansion, {
         targetTickets: room.targetTickets || undefined,
+        forcedChars: forced,
       });
+      for (const h of honored) recordDianjiangUse(h.accountId); // 指定真正生效才扣当日次数
       room.matchLogged = false;
       room.gameStartedAt = now;
       // 新一局：logSeq 归零重排，让各会话的日志增量游标归零（否则新局日志会被客户端按已见过去重）
@@ -1546,6 +1559,46 @@ export class RoomManager {
     const ip = session.ws?.ip ?? '';
     if (!this.roomChatHistLimits.get(ip).allow()) return;
     send(session.ws, { t: 'roomChatLog', msgs: room.chatLog.slice() });
+  }
+
+  /**
+   * 点将卡：等待房指定/取消本局角色。仅注册账号、仅血色房等待期、角色须在当前房间池内。
+   * 开局时生效并扣当日次数（见 collectForcedChars）；次数用完再设置直接拒绝，明示而非静默失效。
+   */
+  private handleDianjiang(room: Room, session: Session, msg: Extract<C2S, { t: 'dianjiang' }>): void {
+    if (room.mode !== 'blood') throw new GameError('BAD_MODE', '点将卡仅血色模式可用');
+    if (room.game) throw new GameError('IN_GAME', '对局进行中不能更改点将');
+    if (session.spectator) throw new GameError('SPECTATING', '观战中不能使用点将卡');
+    if (msg.charId == null) {
+      session.dianjiangPick = undefined;
+      this.broadcast(room);
+      return;
+    }
+    if (!session.accountId) throw new GameError('AUTH_REQUIRED', '点将卡仅注册用户可用，请先登录');
+    const charId = String(msg.charId);
+    if (!charPoolIds(room.charExpansion).includes(charId)) throw new GameError('BAD_CARD', '该角色不在本局角色池中');
+    if (dianjiangRemaining(session.accountId) <= 0) {
+      throw new GameError('RATE_LIMITED', '今日点将次数已用完（每天 3 局），明天再来');
+    }
+    session.dianjiangPick = charId;
+    this.broadcast(room);
+  }
+
+  /** 开局前收集各座位的点将指定：座位序先到先得（同角色冲突后者落选且不扣次） */
+  private collectForcedChars(room: Room): { forced: Record<string, string>; honored: { accountId: string }[] } {
+    const forced: Record<string, string> = {};
+    const honored: { accountId: string }[] = [];
+    if (room.mode !== 'blood') return { forced, honored };
+    const pool = charPoolIds(room.charExpansion);
+    for (const s of [...room.sessions.values()].filter((x) => !x.spectator).sort((a, b) => a.seat - b.seat)) {
+      if (!s.dianjiangPick || !s.accountId) continue;
+      if (dianjiangRemaining(s.accountId) <= 0) continue;
+      if (!pool.includes(s.dianjiangPick)) continue;
+      if (Object.values(forced).includes(s.dianjiangPick)) continue; // 同角色先到先得
+      forced[s.id] = s.dianjiangPick;
+      honored.push({ accountId: s.accountId });
+    }
+    return { forced, honored };
   }
 
   private handleRematch(room: Room, session: Session): void {

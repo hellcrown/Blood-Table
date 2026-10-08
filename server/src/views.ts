@@ -1,6 +1,7 @@
 import type { SeatView, TableView } from '@shared/protocol';
 import type { Room } from './rooms';
 import type { GState } from './game/types';
+import { dianjiangRemaining } from './dianjiang';
 
 /** 构建面向某个观察者的个性化视图（他人底牌在摊牌前不下发） */
 export function buildView(room: Room, viewerId: string | null): TableView {
@@ -47,7 +48,7 @@ export function buildView(room: Room, viewerId: string | null): TableView {
         handName: null,
         won: 0,
       }));
-    return {
+    const view: TableView = {
       ...base,
       phase: 'waiting',
       handNumber: 0,
@@ -62,6 +63,16 @@ export function buildView(room: Room, viewerId: string | null): TableView {
       result: null,
       final: null,
     };
+    // 血色等待房：自己的点将指定与今日剩余次数（仅下发给自己；classic 无角色概念不下发）
+    if (room.mode === 'blood' && viewerId != null) {
+      const me = room.sessions.get(viewerId);
+      const meView = view.players.find((p) => p.id === viewerId);
+      if (me && meView && me.accountId) {
+        meView.dianjiangPick = me.dianjiangPick ?? null;
+        meView.dianjiangLeft = dianjiangRemaining(me.accountId);
+      }
+    }
+    return view;
   }
 
   const revealAll = g.phase === 'result' || g.phase === 'gameover';

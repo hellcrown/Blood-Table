@@ -23,6 +23,7 @@ import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
 import { dauSummary, flushDau, initDauStore, recordConnection } from './dau';
 import { findAudit, initAuditStore, loadAuditGame } from './audit';
+import { initDianjiangStore } from './dianjiang';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -920,6 +921,7 @@ const chatHub = new ChatHub({
 chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
 initDauStore(path.resolve(process.cwd(), 'data', 'dau.json'));
 initAuditStore(path.resolve(process.cwd(), 'data', 'audit'));
+initDianjiangStore(path.resolve(process.cwd(), 'data', 'dianjiang.json'));
 
 // 退出前把日活快照落盘（pm2 restart 发 SIGINT；同步写，毫秒级）——否则每次发版丢最多 60s 的当日记录
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {

@@ -22,6 +22,15 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-08',
+    title: '点将卡',
+    items: [
+      '点将卡上线（注册用户专享）：每天 3 局可在等待房指定本局角色，开局直接获得，不再看随机脸色',
+      '在血色房等待页的「🗡️ 点将卡」处选角色即可；开局生效才计次，「再来一场」算新的一局；同角色被朋友先点时后到者不扣次数',
+      '指定角色限定在本房间角色池内（未开拓展选将的基础房只能点基础 4 角色）',
+    ],
+  },
+  {
     date: '2026-10-06',
     title: '房间内聊天',
     items: [

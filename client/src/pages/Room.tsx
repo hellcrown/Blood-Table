@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomSettings, SeatView, TableView } from '@shared/protocol';
+import { charPoolIds, BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { CharPortrait } from '../components/CharCard';
 
 /** 兜底复制：textarea + execCommand，http 局域网（非安全上下文）下也能用 */
 function fallbackCopy(text: string): boolean {
@@ -37,6 +39,7 @@ export function Room({ view }: { view: TableView }) {
   const pwDirtyRef = useRef(false); // 本轮 focus 后是否实际编辑过（防 blur 误清已设密码/Enter 后二次提交）
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [djPickerOpen, setDjPickerOpen] = useState(false);
 
   // 服务端设置的三个数值：只在**数值真的变化**时同步草稿。
   // 依赖整个 view.settings（每条广播都是新对象）会在别人入座/改设置时，把房主正在输入、
@@ -414,6 +417,42 @@ export function Room({ view }: { view: TableView }) {
           </div>
         </div>
 
+        {view.mode === 'blood' && (
+          <div className="settings-panel">
+            <div className="box-title">🗡️ 点将卡{me?.dianjiangLeft != null ? `（今日剩余 ${me.dianjiangLeft} 局）` : ''}</div>
+            {!net.account ? (
+              <p className="hint">注册登录后可用：每天 3 局可指定本局角色（在大厅左下角注册/登录）</p>
+            ) : (
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                {me?.dianjiangPick ? (
+                  <>
+                    <CharPortrait def={BLOOD_CHAR_BY_ID.get(me.dianjiangPick)!} size="sm" />
+                    <span>
+                      本局指定【{BLOOD_CHAR_BY_ID.get(me.dianjiangPick)?.name ?? me.dianjiangPick}】
+                      <span className="hint">（开局生效；「再来一场」算新的一局）</span>
+                    </span>
+                    <button className="btn small" onClick={() => net.send({ t: 'dianjiang', charId: null })}>
+                      取消指定
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="hint">未指定——本局角色按常规随机</span>
+                    <button
+                      className="btn small primary"
+                      disabled={(me?.dianjiangLeft ?? 0) <= 0}
+                      title={(me?.dianjiangLeft ?? 0) <= 0 ? '今日次数已用完，明天再来' : undefined}
+                      onClick={() => setDjPickerOpen(true)}
+                    >
+                      {(me?.dianjiangLeft ?? 0) <= 0 ? '今日已用完' : '选择角色'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="start-row">
           {isHost ? (
             <button className="btn primary big" disabled={!canStart} onClick={() => net.send({ t: 'start' })}>
@@ -447,6 +486,34 @@ export function Room({ view }: { view: TableView }) {
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
       </div>
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {djPickerOpen && (
+        <div className="overlay" onClick={() => setDjPickerOpen(false)}>
+          <div className="panel" onClick={(e) => e.stopPropagation()}>
+            <h3>🗡️ 点将卡 · 选择本局角色</h3>
+            <p className="hint">
+              仅限本房间角色池（{view.charExpansion ? '全部角色' : '基础 4 角色'}）；开局生效并消耗 1 次今日配额
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: '60vh', overflowY: 'auto' }}>
+              {charPoolIds(view.charExpansion).map((cid) => (
+                <CharPortrait
+                  key={cid}
+                  def={BLOOD_CHAR_BY_ID.get(cid)!}
+                  size="sm"
+                  onClick={() => {
+                    net.send({ t: 'dianjiang', charId: cid });
+                    setDjPickerOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+            <div className="panel-actions">
+              <button className="btn" onClick={() => setDjPickerOpen(false)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

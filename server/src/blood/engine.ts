@@ -101,6 +101,9 @@ export interface BloodPlayerInit {
 export interface BloodOptions {
   /** 自定义目标票数（钳制 8-30）；缺省按人数 24/20/16 */
   targetTickets?: number;
+  /** 点将卡：playerId → 指定角色（须在当前角色池内；同角色重复按插入序先到先得，
+   *  不在池内的条目静默丢弃——rooms 层负责校验与扣次，引擎侧只做防御性兜底） */
+  forcedChars?: Record<string, string>;
 }
 
 /** 目标票数：自定义覆盖优先（钳制 8-30），否则按人数 */
@@ -241,20 +244,49 @@ export function createBloodGame(
   for (const p of bps) p.blood = 3;
 
   // 选将/分配先行（竞拍在选将之后：看到角色再决定出多少价换先手）。
-  // 2人局每人随机 2 张选 1；基础池仅 4 名角色，3/4 人局发不出 2×人数 张，退回随机分配
-  const pool = shuffle(charPoolIds(charExpansion));
-  gs.charDeck = shuffle(charPoolIds(charExpansion)); // 无面人每回合抽角色用
-  pushLog(gs, 'sys', `🎭 本局角色池：${charExpansion ? `全部 ${pool.length} 名角色（含拓展）` : `基础版 ${pool.length} 名角色`}`);
-  if (seatCount === 2 || pool.length >= seatCount * 2) {
-    for (const p of bps) p.charOptions = [pool.pop()!, pool.pop()!];
+  // 2人局每人随机 2 张选 1；基础池仅 4 名角色，3/4 人局发不出 2×人数 张，退回随机分配。
+  // 点将卡：被指定的角色从随机池剔除（保证他人随机不与之重复），指定者 charOptions 恒单选
+  const poolAll = charPoolIds(charExpansion);
+  const forcedMap = new Map<string, string>();
+  if (options.forcedChars) {
+    for (const [pid, cid] of Object.entries(options.forcedChars)) {
+      if (!poolAll.includes(cid) || [...forcedMap.values()].includes(cid)) continue; // 防御性兜底
+      forcedMap.set(pid, cid);
+    }
+  }
+  const pool = shuffle(poolAll.filter((id) => ![...forcedMap.values()].includes(id)));
+  gs.charDeck = shuffle(poolAll); // 无面人每回合抽角色用（全池，不受点将剔除影响）
+  pushLog(gs, 'sys', `🎭 本局角色池：${charExpansion ? `全部 ${poolAll.length} 名角色（含拓展）` : `基础版 ${poolAll.length} 名角色`}`);
+  const unforced = bps.filter((p) => !forcedMap.has(p.id));
+  const forcedLog = (p: BPlayer, f: string): void => {
+    pushLog(gs, 'sys', `🗡 ${pname(p)} 使用点将卡，指定角色【${BLOOD_CHAR_BY_ID.get(f)!.name}】`);
+  };
+  if (seatCount === 2 || pool.length >= unforced.length * 2) {
+    // 选将分支：点将者 charOptions 恒单选（bPickChar 照常点击确认），其余随机 2 选 1
+    for (const p of bps) {
+      const f = forcedMap.get(p.id);
+      if (f == null) continue;
+      p.charOptions = [f];
+      forcedLog(p, f);
+    }
+    for (const p of unforced) p.charOptions = [pool.pop()!, pool.pop()!];
     gs.phase = 'pick';
-    pushLog(gs, 'sys', `🎭 ${seatCount}人局选将：每人从两张随机角色牌中选择一张`);
+    pushLog(gs, 'sys', `🎭 ${seatCount}人局选将：${forcedMap.size > 0 ? '点将者直接获得指定角色，' : ''}其余每人从两张随机角色牌中选择一张`);
     gs.deadline = now + BLOOD_TURN_MS;
   } else {
-    const assigned = bps.map((p) => {
+    // 分配分支（基础池 3/4 人局发不出 2×人数）：点将者直接获得指定角色，无选将交互
+    for (const p of unforced) {
       p.charId = pool.pop()!;
-      return `${pname(p)}【${BLOOD_CHAR_BY_ID.get(p.charId)!.name}】`;
-    });
+      p.charOptions = [];
+    }
+    for (const p of bps) {
+      const f = forcedMap.get(p.id);
+      if (f == null || p.charId != null) continue;
+      p.charId = f;
+      p.charOptions = [];
+      forcedLog(p, f);
+    }
+    const assigned = bps.filter((p) => p.charId != null).map((p) => `${pname(p)}【${BLOOD_CHAR_BY_ID.get(p.charId!)!.name}】`);
     pushLog(gs, 'sys', `🎭 ${seatCount}人局随机分配角色：${assigned.join('、')}`);
     beginCrownBid(gs, now); // 无选将交互：分配完直接进入竞拍
   }

@@ -57,6 +57,10 @@ export interface SeatView {
   /** 本街是否已行动（短全下限制判定用） */
   acted?: boolean;
   hasCards: boolean;
+  /** 血色等待房：本座位的点将指定（仅下发给自己的视图；null=未指定） */
+  dianjiangPick?: string | null;
+  /** 血色等待房：自己今日剩余点将次数（仅下发给自己的视图） */
+  dianjiangLeft?: number;
   /** 自己的底牌，或摊牌后公开的底牌；其余情况为 null */
   hole: Card[] | null;
   handName: string | null;
@@ -188,6 +192,7 @@ export type C2S =
   | { t: 'chatHistory' }
   | { t: 'roomChat'; text: string }
   | { t: 'roomChatHistory' }
+  | { t: 'dianjiang'; charId: string | null }
   | import('./bloodProtocol').BloodAction;
 
 /* ---------------- 服务端 → 客户端 ---------------- */
