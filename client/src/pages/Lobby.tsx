@@ -126,7 +126,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     net.send({
       t: 'create',
       name: displayName,
-      maxPlayers,
+      maxPlayers: mode === 'mines' ? 2 : maxPlayers, // 扫雷固定 1~2 人
       mode,
       ...(createPw.trim() ? { password: createPw.trim() } : {}),
     });

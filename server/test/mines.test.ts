@@ -160,6 +160,25 @@ describe('扫雷 · 观战视图', () => {
     expect(p0.revealed.length).toBe(before);
   });
 
+  it('单人局：1 人即可成局，踩雷出局即终局（无胜者），通关即胜', () => {
+    const gs = createMinesGame('easy', PLAYERS.slice(0, 1), NOW);
+    expect(gs.players).toHaveLength(1);
+    // 通关路径
+    for (let i = 0; i < gs.counts.length; i++) {
+      if (gs.counts[i] < 0 || gs.players[0].revealed.includes(i)) continue;
+      mReveal(gs, gs.players[0].id, Math.floor(i / gs.cols), i % gs.cols, NOW + 1);
+    }
+    expect(gs.phase).toBe('gameover');
+    expect(gs.winnerId).toBe(gs.players[0].id);
+    // 踩雷路径：1 人踩雷 → 终局无胜者
+    const gs2 = createMinesGame('easy', PLAYERS.slice(0, 1), NOW);
+    const mine = findMineCell(gs2, gs2.players[0].id);
+    mReveal(gs2, gs2.players[0].id, mine.r, mine.c, NOW + 1);
+    expect(gs2.phase).toBe('gameover');
+    expect(gs2.winnerId).toBeNull();
+    expect(gs2.ranking).toHaveLength(1);
+  });
+
   it('中途退出：立即出局并结算（最后存活者获胜，退出者不判胜）', () => {
     const gs = createMinesGame('easy', PLAYERS.slice(0, 3), NOW); // 3 人局：1 踩雷 + 1 退出 → 剩 1 人即终局
     const [a, b, c] = gs.players;

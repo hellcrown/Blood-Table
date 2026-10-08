@@ -859,7 +859,7 @@ export class RoomManager {
     }
     this.detachBinding(ws);
     const mode: GameMode = msg.mode === 'blood' ? 'blood' : msg.mode === 'mines' ? 'mines' : 'classic';
-    const room = this.createRoom(msg.maxPlayers, mode, ip);
+    const room = this.createRoom(mode === 'mines' ? 2 : msg.maxPlayers, mode, ip); // 扫雷固定 1~2 人
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
     if (pw) room.password = pw;
     const session = this.addSession(room, msg.name, false, this.resolveAccount(msg.auth));
@@ -1171,7 +1171,9 @@ export class RoomManager {
   private handleStart(room: Room, session: Session): void {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以开始游戏');
     const seatedPlayers = [...room.sessions.values()].filter((s) => !s.spectator).length;
-    if (seatedPlayers < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家');
+    if (seatedPlayers < (room.mode === 'mines' ? 1 : 2)) {
+      throw new GameError('NOT_ENOUGH_PLAYERS', room.mode === 'mines' ? '至少需要 1 名玩家' : '至少需要 2 名玩家');
+    }
     const now = Date.now();
     if (room.mode === 'mines') {
       if (room.game) return;
@@ -1248,7 +1250,8 @@ export class RoomManager {
     if (msg.startChips != null) s.startChips = clampInt(msg.startChips, 20, 1_000_000, s.startChips);
     if (s.bb < s.sb) s.bb = s.sb;
     if (s.startChips < s.bb) s.startChips = s.bb;
-    if (msg.maxPlayers != null) {
+    if (msg.maxPlayers != null && room.mode !== 'mines') {
+      // 扫雷房人数固定 1~2：忽略 maxPlayers 变更（UI 也不提供）
       const mp = clampInt(msg.maxPlayers, 2, 4, room.maxPlayers);
       const stranded = [...room.sessions.values()].some((x) => x.seat >= mp);
       if (stranded) throw new GameError('SEATS_OCCUPIED', '有玩家坐在更大号座位，无法缩小房间');
@@ -1451,7 +1454,7 @@ export class RoomManager {
       .filter((s) => !s.spectator)
       .sort((a, b) => a.seat - b.seat)
       .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
-    if (players.length < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家'); // 与 handleStart 同口径
+    if (players.length < 1) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 1 名玩家'); // 扫雷 1~2 人：与 handleStart 同口径
     room.game = mines.createMinesGame(room.minesDifficulty, players, Date.now());
     room.matchLogged = false;
     room.gameStartedAt = Date.now();

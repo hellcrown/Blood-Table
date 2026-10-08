@@ -132,7 +132,7 @@ export function Room({ view }: { view: TableView }) {
   const mySeatBase = view.players.find((p) => p.id === net.playerId)?.seat ?? 0;
   const tablePosSeat = (offset: number): number => (mySeatBase + offset) % 4;
 
-  const canStart = view.players.length >= 2;
+  const canStart = view.players.length >= (view.mode === 'mines' ? 1 : 2); // 扫雷支持单人开局
 
   const update = (patch: {
     sb?: number;
@@ -272,7 +272,7 @@ export function Room({ view }: { view: TableView }) {
 
         <div className="settings-panel">
           <div className="box-title">
-            {view.mode === 'blood' ? '血色牌局 · 对局规则' : '房间设置（德州扑克）'}
+            {view.mode === 'blood' ? '血色牌局 · 对局规则' : view.mode === 'mines' ? '扫雷竞速 · 对局规则' : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
           {view.mode === 'mines' ? (
@@ -503,7 +503,7 @@ export function Room({ view }: { view: TableView }) {
               )}
             </>
           )}
-          {!canStart && <span className="hint">至少需要 2 名玩家</span>}
+          {!canStart && <span className="hint">{view.mode === 'mines' ? '至少需要 1 名玩家（最多 2 人）' : '至少需要 2 名玩家'}</span>}
         </div>
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
       </div>
