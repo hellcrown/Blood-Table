@@ -253,11 +253,15 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
               />
             </div>
             <div className="row" style={{ marginTop: 10 }}>
-              <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
-                <option value={2}>2 人局</option>
-                <option value={3}>3 人局</option>
-                <option value={4}>4 人局</option>
-              </select>
+              {mode === 'mines' ? (
+                <span className="hint" style={{ alignSelf: 'center' }}>1~2 人竞速（各自独立棋盘）</span>
+              ) : (
+                <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
+                  <option value={2}>2 人局</option>
+                  <option value={3}>3 人局</option>
+                  <option value={4}>4 人局</option>
+                </select>
+              )}
               <button className="btn primary" disabled={!nameOk || !connected} onClick={create}>
                 创建
               </button>
