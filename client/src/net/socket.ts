@@ -3,7 +3,7 @@ import type { BloodView } from '@shared/bloodProtocol';
 import { mergeBloodLog as mergeLogs } from './bloodLog';
 
 export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
-export type AnyView = import('@shared/protocol').TableView | BloodView;
+export type AnyView = import('@shared/protocol').TableView | BloodView | import('@shared/minesProtocol').MinesView;
 
 type ViewListener = (v: AnyView | null) => void;
 type ErrorListener = (code: string, msg: string) => void;

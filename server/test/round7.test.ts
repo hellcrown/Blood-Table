@@ -235,12 +235,12 @@ describe('第七轮 · 重开与房主接任', () => {
   it('房主断线：终局 backToRoom 由在场者接任回房间，断线真人会话被清理', () => {
     const { mgr, room, bs } = gameover3pRoom();
     room.sessions.get('p0')!.connected = false;
-    // 未终局（final 空）：IN_GAME 且不接任
+    // 未终局（final 空）：IN_GAME 且不接任（backToRoom 已上提分发层 → handleBackToRoom，直调验语义）
     expectGameError(
-      () =>
-        (
-          mgr as unknown as { handleBlood: (r: Room, s: Session, m: { t: string }) => void }
-        ).handleBlood(room, room.sessions.get('s2')!, { t: 'backToRoom' }),
+      () => (mgr as unknown as { handleBackToRoom: (r: Room, s: Session) => void }).handleBackToRoom(
+        room,
+        room.sessions.get('s2')!,
+      ),
       'IN_GAME',
     );
     expect(room.hostId).toBe('p0');
@@ -248,8 +248,8 @@ describe('第七轮 · 重开与房主接任', () => {
     // 终局：接任 + 回房间 + 断线真人会话清理
     bs.final = { winnerSeat: 0, ranking: [] } as BloodState['final'];
     (
-      mgr as unknown as { handleBlood: (r: Room, s: Session, m: { t: string }) => void }
-    ).handleBlood(room, room.sessions.get('s2')!, { t: 'backToRoom' });
+      mgr as unknown as { handleBackToRoom: (r: Room, s: Session) => void }
+    ).handleBackToRoom(room, room.sessions.get('s2')!);
     expect(room.hostId).toBe('s2');
     expect(room.game).toBeNull();
     expect(room.sessions.has('p0')).toBe(false);

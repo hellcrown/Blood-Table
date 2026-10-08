@@ -142,6 +142,7 @@ export function Room({ view }: { view: TableView }) {
     charExpansion?: boolean;
     expansion?: boolean;
     targetTickets?: number;
+    minesDifficulty?: 'easy' | 'medium' | 'hard';
     password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -274,7 +275,28 @@ export function Room({ view }: { view: TableView }) {
             {view.mode === 'blood' ? '血色牌局 · 对局规则' : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
-          {view.mode === 'blood' ? (
+          {view.mode === 'mines' ? (
+            <div className="settings-grid" style={{ marginTop: 10 }}>
+              <label
+                className="charpick-toggle"
+                title="初级 9×9/10 雷 · 中级 16×16/40 雷 · 高级 30×16/99 雷"
+              >
+                难度
+                <select
+                  value={view.minesDifficulty}
+                  disabled={!isHost}
+                  onChange={(e) =>
+                    update({ minesDifficulty: e.target.value as 'easy' | 'medium' | 'hard' })
+                  }
+                >
+                  <option value="easy">初级 9×9 / 10 雷</option>
+                  <option value="medium">中级 16×16 / 40 雷</option>
+                  <option value="hard">高级 30×16 / 99 雷</option>
+                </select>
+                <span className="hint">点雷出局 · 先扫完全部安全格者胜</span>
+              </label>
+            </div>
+          ) : view.mode === 'blood' ? (
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·
               开局定角色（角色牌足够时每人抽2选1：拓展池3/4人局可选将；基础池随机分配）·

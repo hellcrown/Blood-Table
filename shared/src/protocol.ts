@@ -122,6 +122,8 @@ export interface TableView {
   charExpansion: boolean;
   /** 血色模式：拓展黑市开关（开=牌库并入拓展牌；默认关） */
   expansion: boolean;
+  /** 扫雷模式：难度（默认 easy） */
+  minesDifficulty?: 'easy' | 'medium' | 'hard';
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   players: SeatView[];
@@ -141,7 +143,7 @@ export interface TableView {
 
 /* ---------------- 客户端 → 服务端 ---------------- */
 
-export type GameMode = 'classic' | 'blood';
+export type GameMode = 'classic' | 'blood' | 'mines';
 
 export interface PlayerActionFold {
   k: 'fold';
@@ -174,10 +176,12 @@ export type C2S =
   | { t: 'enterSpectate' }
   | { t: 'replaceBot'; seat: number }
   | { t: 'backToRoom' }
+  | { t: 'mReveal'; r: number; c: number }
+  | { t: 'mRematch' }
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard' }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
@@ -199,7 +203,7 @@ export type C2S =
 
 export type S2C =
   | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
-  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView }
+  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView }
   | { t: 'event'; line: LogLine }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }

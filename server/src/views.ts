@@ -3,8 +3,8 @@ import type { Room } from './rooms';
 import type { GState } from './game/types';
 import { dianjiangRemaining } from './dianjiang';
 
-/** 构建面向某个观察者的个性化视图（他人底牌在摊牌前不下发） */
-export function buildView(room: Room, viewerId: string | null): TableView {
+/** 构建面向某个观察者的个性化视图（他人底牌在摊牌前不下发）；asWaiting=true 强制按房间等待页构建（观战者终局返回用） */
+export function buildView(room: Room, viewerId: string | null, asWaiting = false): TableView {
   const now = Date.now();
   const base = {
     kind: 'classic' as const,
@@ -17,10 +17,11 @@ export function buildView(room: Room, viewerId: string | null): TableView {
     charExpansion: room.charExpansion,
     targetTickets: room.targetTickets,
     expansion: room.expansion,
+    minesDifficulty: room.minesDifficulty,
     serverTime: now,
   };
 
-  const g = room.game as GState | null;
+  const g = asWaiting ? null : (room.game as GState | null);
   if (!g) {
     // 观战者不作为座位玩家展示
     const seatedSessions = [...room.sessions.values()].filter((s) => !s.spectator);

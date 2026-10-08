@@ -33,7 +33,7 @@ export interface AuditPlayer {
 export interface AuditGameIndex {
   key: string;
   room: string;
-  mode: 'blood' | 'classic';
+  mode: 'blood' | 'classic' | 'mines';
   startedAt: number;
   endedAt?: number;
   durationMin?: number;
@@ -64,7 +64,7 @@ export interface AuditActionLine {
 }
 
 export interface AuditGameDetail {
-  start: { key: string; room: string; mode: 'blood' | 'classic'; startedAt: number; players: AuditPlayer[]; sameIp?: number[]; settings?: unknown };
+  start: { key: string; room: string; mode: 'blood' | 'classic' | 'mines'; startedAt: number; players: AuditPlayer[]; sameIp?: number[]; settings?: unknown };
   /** act 行超上限被丢弃的数量（无丢弃则缺省） */
   actsTruncated?: number;
   end?: {
@@ -121,7 +121,7 @@ function sameIpSeats(players: AuditPlayer[]): number[] | undefined {
 /** 开局（handleStart / 血色 bRematch / classic handleRematch） */
 export function recordGameStart(input: {
   room: string;
-  mode: 'blood' | 'classic';
+  mode: 'blood' | 'classic' | 'mines';
   startedAt: number;
   settings?: unknown;
   players: AuditPlayer[];
@@ -279,7 +279,7 @@ export function initAuditStore(auditDir: string): void {
             index.set(o.key, {
               key: o.key,
               room: String(o.room ?? ''),
-              mode: o.mode === 'classic' ? 'classic' : 'blood',
+              mode: o.mode === 'classic' ? 'classic' : o.mode === 'mines' ? 'mines' : 'blood',
               startedAt: typeof o.startedAt === 'number' ? o.startedAt : 0,
               seatCount: players.length,
               players,

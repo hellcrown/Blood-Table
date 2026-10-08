@@ -7,6 +7,8 @@ import * as blood from './blood/engine';
 import { buildBloodView, LOG_TAIL_LINES, promptFor } from './blood/view';
 import { botAct, createBrain, updateBrains, type BotBrain } from './blood/botAI';
 import type { BloodState } from './blood/types';
+import type { MinesDifficulty, MinesState } from '@shared/minesProtocol';
+import * as mines from './mines/engine';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
@@ -73,10 +75,12 @@ export interface Room {
   expansion: boolean;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
+  /** 扫雷模式：难度（默认 easy） */
+  minesDifficulty: 'easy' | 'medium' | 'hard';
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
-  game: GState | BloodState | null;
+  game: GState | BloodState | MinesState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
   /** 房间密码（可选；设置后加入/观战须携带） */
@@ -229,7 +233,9 @@ function auditRoomStart(room: Room): void {
     settings:
       room.mode === 'blood'
         ? { targetTickets: room.targetTickets, charExpansion: room.charExpansion, expansion: room.expansion }
-        : { ...room.settings },
+        : room.mode === 'mines'
+          ? { difficulty: room.minesDifficulty }
+          : { ...room.settings },
     players,
   });
 }
@@ -456,6 +462,15 @@ export class RoomManager {
         return;
       case 'replaceBot':
         this.handleReplaceBot(room, session, msg);
+        return;
+      case 'mReveal':
+        this.handleMReveal(room, session, msg);
+        return;
+      case 'mRematch':
+        this.handleMRematch(room, session);
+        return;
+      case 'backToRoom':
+        this.handleBackToRoom(room, session);
         return;
       case 'act':
         this.handleAct(room, session, msg);
@@ -759,24 +774,12 @@ export class RoomManager {
         if (this.draining) this.notifyDrain(room);
         break;
       }
-      case 'backToRoom': {
-        if (!bs.final) throw new GameError('IN_GAME', '对局尚未结束');
-        // hostId 空缺或房主会话已断线（关标签页未走离开流程）时由首个调用者接任——校验全部通过后才接任，失败不留副作用
-        const hostSess = room.hostId ? room.sessions.get(room.hostId) : undefined;
-        if (!room.hostId || !hostSess?.connected) room.hostId = session.id;
-        if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
-        // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
-        for (const s of [...room.sessions.values()]) {
-          if (!s.bot && !s.connected) this.removeSession(room, s);
-        }
-        room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
-        break; // switch 收尾统一 broadcast，不再重复
-      }
       default:
         send(session.ws, { t: 'error', code: 'UNKNOWN_MSG', msg: '未知消息' });
         return;
     }
-    // bRematch/backToRoom 已替换/清空 room.game 时，bs 是被丢弃的旧引用——不得再写
+    // backToRoom 已上提到分发层（handleBackToRoom，按模式分支）；此处血色只剩 bRematch。
+    // bRematch 已替换 room.game 时，bs 是被丢弃的旧引用——不得再写
     if (room.game === bs) {
       const actor = bs.players.find((x) => x.id === pid);
       if (actor) actor.wasAuto = false; // 真人操作：清除超时托管标记
@@ -855,7 +858,7 @@ export class RoomManager {
       throw new GameError('ROOM_LIMIT', `每个 IP 同时最多创建 ${MAX_ROOMS_PER_IP} 个房间，请先解散旧房间`);
     }
     this.detachBinding(ws);
-    const mode: GameMode = msg.mode === 'blood' ? 'blood' : 'classic';
+    const mode: GameMode = msg.mode === 'blood' ? 'blood' : msg.mode === 'mines' ? 'mines' : 'classic';
     const room = this.createRoom(msg.maxPlayers, mode, ip);
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
     if (pw) room.password = pw;
@@ -967,6 +970,7 @@ export class RoomManager {
       charExpansion: false,
       expansion: false,
       targetTickets: 0,
+      minesDifficulty: 'easy' as const,
       sessions: new Map(),
       chatLog: [],
       game: null,
@@ -1085,6 +1089,17 @@ export class RoomManager {
       return;
     }
     const g = room.game;
+    // 扫雷模式：进行中离场立即出局并结算（幽灵玩家不得参与排名/判胜），随后移除会话
+    if (room.mode === 'mines' && g && 'difficulty' in g) {
+      if ((g as MinesState).phase === 'playing') mines.mLeave(g as MinesState, session.id, Date.now());
+      this.removeSession(room, session);
+      if (room.sessions.size === 0) {
+        if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+        return;
+      }
+      this.broadcast(room);
+      return;
+    }
     // 血色模式：直接离场标记断线（回合由超时托管兜底），终局/构筑前由 GC 清理
     if (room.mode === 'blood' && g) {
       session.connected = false;
@@ -1158,7 +1173,18 @@ export class RoomManager {
     const seatedPlayers = [...room.sessions.values()].filter((s) => !s.spectator).length;
     if (seatedPlayers < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家');
     const now = Date.now();
-    if (room.mode === 'blood') {
+    if (room.mode === 'mines') {
+      if (room.game) return;
+      const players = [...room.sessions.values()]
+        .filter((s) => !s.spectator)
+        .sort((a, b) => a.seat - b.seat)
+        .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+      room.game = mines.createMinesGame(room.minesDifficulty, players, now);
+      room.matchLogged = false; // 终局审计 end 的哨兵（broadcast mines 分支置位）
+      room.gameStartedAt = now;
+      // 新一局：扫雷 logSeq 归零重排，日志增量游标归零（否则新局日志被客户端按已见去重）
+      for (const s of room.sessions.values()) s.lastEventSeq = 0;
+    } else if (room.mode === 'blood') {
       if (room.game) return;
       const players = [...room.sessions.values()]
         .filter((s) => !s.spectator)
@@ -1229,6 +1255,12 @@ export class RoomManager {
       room.maxPlayers = mp;
     }
     if (msg.charExpansion != null) room.charExpansion = !!msg.charExpansion;
+    if (msg.minesDifficulty != null) {
+      // 扫雷难度：仅白名单枚举；对局进行中的拒绝由上方 IN_GAME 守卫覆盖（扫雷 game 非等待期）
+      if (msg.minesDifficulty === 'easy' || msg.minesDifficulty === 'medium' || msg.minesDifficulty === 'hard') {
+        room.minesDifficulty = msg.minesDifficulty;
+      }
+    }
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     if (msg.targetTickets != null) {
       const n = Math.round(msg.targetTickets);
@@ -1400,6 +1432,57 @@ export class RoomManager {
     gp.name = bot.name;
     bs.log.push({ seq: ++bs.logSeq, kind: 'action', text: `👋 ${bot.name} 接替机器人入座` });
     this.sendHello(session.ws!, bot);
+    this.broadcast(room);
+  }
+
+  private handleMReveal(room: Room, session: Session, msg: Extract<C2S, { t: 'mReveal' }>): void {
+    if (session.spectator) throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
+    const g = room.game;
+    if (room.mode !== 'mines' || !g || g.phase !== 'playing') return;
+    mines.mReveal(g as MinesState, session.id, msg.r, msg.c, Date.now());
+    this.broadcast(room);
+  }
+
+  private handleMRematch(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一局');
+    const g = room.game;
+    if (room.mode !== 'mines' || !g || (g as MinesState).phase !== 'gameover') return;
+    const players = [...room.sessions.values()]
+      .filter((s) => !s.spectator)
+      .sort((a, b) => a.seat - b.seat)
+      .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+    if (players.length < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家'); // 与 handleStart 同口径
+    room.game = mines.createMinesGame(room.minesDifficulty, players, Date.now());
+    room.matchLogged = false;
+    room.gameStartedAt = Date.now();
+    this.drainNotified.delete(room.code); // 新一局重新预告（若在排水期）
+    auditRoomStart(room); // 再来一局写新局的审计开局行
+    for (const s of room.sessions.values()) s.lastEventSeq = 0;
+    this.broadcast(room);
+  }
+
+  /** 返回房间等待页（终局后）。本分发分支遮蔽了 handleBlood 内血色的旧 case（已删），
+   *  其语义必须在此按模式完整保留：血色=断线接任+断线会话清理；扫雷/德州=房主（或接任者）清局 */
+  private handleBackToRoom(room: Room, session: Session): void {
+    const g = room.game;
+    if (!g) throw new GameError('IN_GAME', '对局尚未结束');
+    if (room.mode === 'blood') {
+      // 血色终局判定按 final（finishByTickets/宿命胜利都同步置位；phase 单独不可信）
+      if (!('final' in g) || !g.final) throw new GameError('IN_GAME', '对局尚未结束');
+    } else if (g.phase !== 'gameover') {
+      throw new GameError('IN_GAME', '对局尚未结束');
+    }
+    // hostId 空缺或房主会话已断线（关标签页未走离开流程）时由首个调用者接任——校验全部通过后才接任，失败不留副作用
+    const hostSess = room.hostId ? room.sessions.get(room.hostId) : undefined;
+    if (!room.hostId || !hostSess?.connected) room.hostId = session.id;
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以返回房间');
+    if (room.mode === 'blood') {
+      // 清掉断线的真人会话（token 一并失效）：对局已结束，断线者从大厅经「回到房间」重新加入即可
+      for (const s of [...room.sessions.values()]) {
+        if (!s.bot && !s.connected) this.removeSession(room, s);
+      }
+    }
+    room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
     this.broadcast(room);
   }
 
@@ -1651,7 +1734,9 @@ export class RoomManager {
   private tickRoom(room: Room, now: number): void {
     const g = room.game;
     let changed = false;
-    if (g && room.mode === 'blood') {
+    if (g && room.mode === 'mines') {
+      changed = mines.minesTick(g as MinesState, now); // 超时排名结算（缺此分支对局永不终局）
+    } else if (g && room.mode === 'blood') {
       changed = blood.bloodTick(g as BloodState, now);
       if (!changed) changed = this.runBots(room, g as BloodState, now);
     } else if (g) {
@@ -1687,7 +1772,13 @@ export class RoomManager {
     // 独立 try：毒房间的属性读取本身就可能抛错（round7 毒房间即如此），审计绝不能阻断解散
     try {
       if (room.game != null && room.gameStartedAt != null && !room.matchLogged) {
-        recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log, resolvedOnly: true });
+        recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: Date.now(),
+          summary: { resolved: false },
+          log: room.game.log,
+          resolvedOnly: true,
+        });
       }
     } catch (e) {
       console.error('[audit] 解散局审计记录失败:', e);
@@ -1839,8 +1930,13 @@ export class RoomManager {
   }
 
   broadcast(room: Room): void {
+    const bsIsGameover = (g: MinesState | GState | BloodState): boolean =>
+      'market' in g ? (g as BloodState).phase === 'gameover' : 'difficulty' in g ? (g as MinesState).phase === 'gameover' : false;
+
     const g = room.game;
-    this.maybeRecordFinal(room, g);
+    const isMinesGame = (x: unknown): x is MinesState =>
+      x != null && typeof x === 'object' && 'difficulty' in x && room.mode === 'mines';
+    if (!isMinesGame(g)) this.maybeRecordFinal(room, g);
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {
@@ -1853,10 +1949,37 @@ export class RoomManager {
           }
         }
         s.lastEventSeq = lastSeq;
-        if (g && room.mode === 'blood' && 'market' in g) {
+        if (g && room.mode === 'mines' && 'difficulty' in g) {
+          const ms = g as MinesState;
+          // 终局审计 end（matchLogged 哨兵每局一次；扫雷不进 matchlog/天梯，仅审计留痕）
+          if (ms.phase === 'gameover' && !room.matchLogged) {
+            room.matchLogged = true;
+            const durationMin =
+              room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+              winnerSeat: ms.players.find((p) => p.id === ms.winnerId)?.seat,
+              summary: { mode: 'mines', difficulty: ms.difficulty, ranking: ms.ranking },
+              log: ms.log,
+            });
+          }
+          // 观战者在终局自动回到房间等待页；玩家与观战中会话收对局视图
+          if (s.spectator && ms.phase === 'gameover') {
+            send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
+          } else {
+            send(s.ws, { t: 'state', view: mines.buildMinesView(ms, s.spectator === true, s.id, room.code, room.hostId) });
+          }
+        } else if (g && room.mode === 'blood' && 'market' in g) {
           // 首帧（新入房/重连）或落后超过尾部窗口 → 下发全量日志；其余帧只带尾部，
           // 增量由上面的 event 补齐 —— 避免每帧重传整局记录
           //（实测一局 4 人局日志 497 行 ≈ 29.5KB，占整条 state 的 84%）
+          // 血色观战者同理：终局自动回房间等待页
+          if (s.spectator && bsIsGameover(g)) {
+            send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
+            continue;
+          }
           const logFull = wasFresh || behind > LOG_TAIL_LINES;
           const view: BloodView = buildBloodView(room, g, s.id, { logFull, logTail: LOG_TAIL_LINES });
           send(s.ws, { t: 'state', view });
@@ -1968,7 +2091,13 @@ export class RoomManager {
     for (const room of this.rooms.values()) {
       try {
         if (room.game != null && room.gameStartedAt != null && !room.matchLogged) {
-          recordGameEnd({ key: auditKeyOf(room), endedAt: Date.now(), summary: { resolved: false }, log: room.game.log, resolvedOnly: true });
+          recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: Date.now(),
+          summary: { resolved: false },
+          log: room.game.log,
+          resolvedOnly: true,
+        });
         }
       } catch {
         /* 审计失败不阻断清空 */

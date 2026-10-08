@@ -5,6 +5,7 @@ import { Lobby } from './pages/Lobby';
 import { Room } from './pages/Room';
 import { Table } from './pages/Table';
 import { BloodTable } from './pages/BloodTable';
+import { MinesTable } from './pages/MinesTable';
 import type { AnyView } from './net/socket';
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
   let page;
   if (!view) page = <Lobby connected={status === 'open'} status={status} />;
   else if (view.kind === 'blood') page = <BloodTable view={view} />;
+  else if (view.kind === 'mines') page = <MinesTable view={view} />;
   else if (view.phase === 'waiting') page = <Room view={view} />;
   else page = <Table view={view} />;
 
