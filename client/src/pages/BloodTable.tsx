@@ -357,6 +357,10 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [mynameCatSel, setMynameCatSel] = useState(1);
   const [mynameText, setMynameText] = useState('');
   const [blufferDecl, setBlufferDecl] = useState<Record<string, { r: number; s: string }>>({});
+  // 每次进入宣告提示都从「照实」起步：上一轮的手改覆写不得跨回合残留
+  useEffect(() => {
+    if (view.prompt.k === 'blufferDeclare') setBlufferDecl({});
+  }, [view.prompt.k]);
   const [inspectorPick, setInspectorPick] = useState('');
   const [cursePick, setCursePick] = useState<string[]>([]);
   /** 芯片购买：{defId, slot} —— 点购买后立即弹出弃牌区选牌 */
@@ -775,7 +779,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       case 'facelessPick':
         return '无面人：从两张角色牌中选择 1 张获得其技能（或永久转化）';
       case 'blufferDeclare':
-        return '瞎掰王：为出牌区每张牌宣告点数与花色（随后依次询问质疑）';
+        return '瞎掰王：默认照实宣告一键完成；想撒谎再逐张改点数花色后按下方宣告（随后依次询问质疑）';
       case 'blufferChallenge':
         return '瞎掰王宣告完毕：你是否质疑？';
       case 'ceoGive':
@@ -2393,6 +2397,22 @@ export function BloodTable({ view }: { view: BloodView }) {
                     <div className="act-row">
                       <button
                         className="btn primary"
+                        title="全部按真实有效牌面宣告（诚实宣告占多数，无需逐张改）"
+                        onClick={() =>
+                          send({
+                            t: 'bBlufferDeclare',
+                            declared: (view.me.playCards ?? []).map((c) => ({
+                              id: c.id,
+                              r: declareDefault(c).r,
+                              s: declareDefault(c).s as BloodCardView['s'],
+                            })),
+                          })
+                        }
+                      >
+                        ✅ 照实宣告
+                      </button>
+                      <button
+                        className="btn"
                         onClick={() =>
                           send({
                             t: 'bBlufferDeclare',
@@ -2404,7 +2424,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                           })
                         }
                       >
-                        宣告完毕（进入质疑）
+                        按上方选择宣告（进入质疑）
                       </button>
                     </div>
                   </>
