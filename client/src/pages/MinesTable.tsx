@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MinesView } from '@shared/minesProtocol';
 import { net } from '../net/socket';
+import { ChatModal } from '../components/ChatModal';
 
 const NUM_COLORS = ['', '#1976d2', '#388e3c', '#d32f2f', '#7b1fa2', '#c2185b', '#0097a7', '#424242', '#616161'];
 
@@ -9,6 +10,7 @@ export function MinesTable({ view }: { view: MinesView }) {
   // 标记模式（手机友好；标记仅本地，不上传）
   const [flagMode, setFlagMode] = useState(false);
   const [flags, setFlags] = useState<Set<number>>(new Set());
+  const [chatOpen, setChatOpen] = useState(false);
   const flagsRef = useRef(flags);
   flagsRef.current = flags;
 
@@ -16,42 +18,14 @@ export function MinesTable({ view }: { view: MinesView }) {
   const spectating = !me;
   const myStatus = me?.status ?? 'playing';  // 对局结束清空本地标记
   useEffect(() => {
-    if (view.phase === 'gameover') setFlags(new Set());
+    if (view.phase === 'gameover') {
+      setFlags(new Set());
+      setFlagMode(false); // 新局从「翻开」起步（标签模式跨局残留会首点插旗）
+    }
   }, [view.phase]);
 
-  const cells = useMemo(() => {
-    // 观战者：合并全员已证实安全格；玩家：自己的揭开格
-    const byIndex = new Map<number, number>();
-    if (spectating) {
-      for (const p of view.players) {
-        for (const c of (p as { cells?: { i: number; n: number }[] }).cells ?? []) {
-          if (!byIndex.has(c.i)) byIndex.set(c.i, c.n);
-        }
-      }
-    }
-    return byIndex;
-  }, [spectating, view.players, view]);
-
-  const myCells = view.cells; // 玩家视角=自己的揭开格；观战者=服务端合并的全员安全格
-  const merged = myCells;
+  const merged = view.cells; // 玩家视角=自己的揭开格；观战者=服务端合并的全员安全格
   const revealedSet = useMemo(() => new Set(merged.map((c) => c.i)), [merged]);
-
-  const hit = (r: number, c: number): void => {
-    if (spectating || myStatus !== 'playing' || view.phase !== 'playing') return;
-    const i = r * view.cols + c;
-    if (revealedSet.has(i)) return;
-    if (flagMode) {
-      setFlags((s) => {
-        const next = new Set(s);
-        if (next.has(i)) next.delete(i);
-        else next.add(i);
-        return next;
-      });
-      return;
-    }
-    if (flagsRef.current.has(i)) return; // 已插旗的格子不直接揭开
-    net.send({ t: 'mReveal', r, c });
-  };
 
   const grid: React.ReactNode[] = [];
   for (let r = 0; r < view.rows; r++) {
@@ -121,6 +95,9 @@ export function MinesTable({ view }: { view: MinesView }) {
           房间码 <b>{view.code}</b>
         </span>
         <span className="spacer" />
+        <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
+          💬
+        </button>
         <button className="btn small ghost" onClick={() => net.leaveRoom()}>
           退出房间
         </button>
@@ -139,7 +116,7 @@ export function MinesTable({ view }: { view: MinesView }) {
         </span>
       </div>
 
-      {spectating && <div className="spectate-banner">🔭 观战中 —— 等待下一局开始时点击空座位加入</div>}
+      {spectating && <div className="spectate-banner">🔭 观战中 —— 下一局开始时自动加入对局</div>}
 
       {view.phase === 'gameover' && view.ranking.length > 0 && (
         <div className="panel" style={{ marginBottom: 12 }}>
@@ -189,7 +166,7 @@ export function MinesTable({ view }: { view: MinesView }) {
           </>
         )}
         <span className="hint">
-          已揭开 {merged.length}/{view.totalSafe} · 本地标记 {flags.size}
+          已揭开 {merged.filter((c) => c.n >= 0).length}/{view.totalSafe} · 本地标记 {flags.size}
         </span>
       </div>
 
@@ -211,6 +188,7 @@ export function MinesTable({ view }: { view: MinesView }) {
           </div>
         ))}
       </div>
+      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
     </div>
   );
 

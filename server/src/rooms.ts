@@ -1065,11 +1065,13 @@ export class RoomManager {
         if (bs.phase === 'crownBid' || bs.phase === 'pick' || bs.phase === 'setup' || bs.phase === 'gameover') {
           bs.players = bs.players.filter((p) => p.id !== session.id);
         }
-      } else {
+      } else if (room.mode !== 'mines') {
         const cg = room.game as GState;
         // 仅在安全时机调用（结算后/未在手牌中），直接移除
         cg.players = cg.players.filter((p) => p.id !== session.id);
       }
+      // 扫雷：ms.players 保持完整——离场者已由 mLeave 记出局状态，
+      // 删掉会让终局排名/进度面板丢失其记录（与引擎层口径一致：退出者留在排名）
     }
     room.pendingRemove.delete(session.id);
     if (room.hostId === session.id) {
@@ -1097,6 +1099,30 @@ export class RoomManager {
       if ((g as MinesState).phase === 'playing') mines.mLeave(g as MinesState, session.id, Date.now());
       this.removeSession(room, session);
       if (room.sessions.size === 0) {
+        // 末人离开=房间就地删除，不走 disposeRoom——审计 end 必须在此补写，
+        // 否则单人局中途退出（1~2 人改动后的常见路径）会在索引里永久悬挂「进行中」
+        try {
+          const ms = g as MinesState;
+          if (ms.phase === 'gameover' && !room.matchLogged) {
+            room.matchLogged = true;
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { mode: 'mines', difficulty: ms.difficulty, ranking: ms.ranking },
+              log: ms.log,
+            });
+          } else if (!room.matchLogged) {
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { resolved: false },
+              log: ms.log,
+              resolvedOnly: true,
+            });
+          }
+        } catch (e) {
+          console.error('[audit] 扫雷末人离开审计失败:', e);
+        }
         if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
         return;
       }
@@ -1946,6 +1972,21 @@ export class RoomManager {
     const isMinesGame = (x: unknown): x is MinesState =>
       x != null && typeof x === 'object' && 'difficulty' in x && room.mode === 'mines';
     if (!isMinesGame(g)) this.maybeRecordFinal(room, g);
+    // 扫雷终局审计：必须在会话循环外——全员断线时终局广播没有收件人，
+    // 循环内写会让真实排名永久丢失（disposeRoom 只能补 resolved:false）
+    if (isMinesGame(g) && g.phase === 'gameover' && !room.matchLogged) {
+      room.matchLogged = true;
+      const durationMin =
+        room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+      recordGameEnd({
+        key: auditKeyOf(room),
+        endedAt: Date.now(),
+        ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+        winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat,
+        summary: { mode: 'mines', difficulty: g.difficulty, ranking: g.ranking },
+        log: g.log,
+      });
+    }
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {
@@ -1960,21 +2001,8 @@ export class RoomManager {
         s.lastEventSeq = lastSeq;
         if (g && room.mode === 'mines' && 'difficulty' in g) {
           const ms = g as MinesState;
-          // 终局审计 end（matchLogged 哨兵每局一次；扫雷不进 matchlog/天梯，仅审计留痕）
-          if (ms.phase === 'gameover' && !room.matchLogged) {
-            room.matchLogged = true;
-            const durationMin =
-              room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
-            recordGameEnd({
-              key: auditKeyOf(room),
-              endedAt: Date.now(),
-              ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
-              winnerSeat: ms.players.find((p) => p.id === ms.winnerId)?.seat,
-              summary: { mode: 'mines', difficulty: ms.difficulty, ranking: ms.ranking },
-              log: ms.log,
-            });
-          }
           // 观战者在终局自动回到房间等待页；玩家与观战中会话收对局视图
+          //（终局审计已上提至循环外：全员断线的终局也要落真实排名）
           if (s.spectator && ms.phase === 'gameover') {
             send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
           } else {

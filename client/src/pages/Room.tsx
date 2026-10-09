@@ -53,7 +53,8 @@ export function Room({ view }: { view: TableView }) {
 
   // 邀请链接 = 当前访问地址 + 房间码参数（朋友打开后自动预填房间码）
   const inviteUrl = `${location.origin}/?room=${view.code}`;
-  const inviteText = `${inviteUrl} — 血色牌局房间码：${view.code}`;
+  const brand = view.mode === 'blood' ? '血色牌局' : view.mode === 'mines' ? '扫雷竞速' : '经典德州';
+  const inviteText = `${inviteUrl} — ${brand}房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
     let ok = false;
@@ -203,7 +204,7 @@ export function Room({ view }: { view: TableView }) {
             <button
               className="invite-url"
               title="点击复制地址+房间码"
-              onClick={() => copyInvite(`${inviteUrl} — 血色牌局房间码：${view.code}`)}
+              onClick={() => copyInvite(inviteText)}
             >
               {inviteUrl}
             </button>

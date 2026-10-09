@@ -59,7 +59,7 @@ describe('扫雷 · 生成', () => {
     expect(fallback.deadline).toBe(NOW + 180_000); // easy 预设 3 分钟
   });
 
-  it('全员棋盘相同：开场区一致', () => {
+  it('全员 revealed 初始为空（全覆盖口径）', () => {
     const gs = setup('easy');
     for (const p of gs.players) {
       expect(p.revealed).toEqual(gs.players[0].revealed);
