@@ -161,7 +161,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     if (!nameOk || !connected) return;
     if (r.phase === 'gameover') return;
     net.saveName(displayName);
-    if (r.phase === 'waiting') {
+    // 对局中的「上次房间」走加入而非观战：以玩家身份回到座位（血色坐等下一局、
+    // 扫雷坐等下一轮），否则重进自己的房间只能观战干等
+    if (r.phase === 'waiting' || lastRoom?.code === r.code) {
       net.send(joinMsg(r.code));
     } else {
       net.send({

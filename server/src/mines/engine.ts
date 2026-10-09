@@ -217,6 +217,13 @@ export function minesTick(state: MinesState, now: number): boolean {
   return true;
 }
 
+/** 全员断线就地终局（宽限期由 rooms 层控制）：防单人局/双人局挂机到超时 */
+export function minesForceEnd(state: MinesState, now: number): boolean {
+  if (state.phase !== 'playing') return false;
+  endGame(state, null, now);
+  return true;
+}
+
 /** 玩家中途退出：立即出局并结算（幽灵玩家不得参与排名/判胜） */
 export function mLeave(state: MinesState, playerId: string, now: number): void {
   const p = findPlayer(state, playerId);

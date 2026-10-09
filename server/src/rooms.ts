@@ -79,6 +79,8 @@ export interface Room {
   minesDifficulty: 'easy' | 'medium' | 'hard';
   /** 扫雷模式：时限秒数（0=按难度默认） */
   minesTimeSec: number;
+  /** 扫雷模式：全员断线起始时刻（宽限 30s 覆盖刷新重连，仍无人在线则就地终局） */
+  minesEmptySince: number;
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
@@ -974,6 +976,7 @@ export class RoomManager {
       targetTickets: 0,
       minesDifficulty: 'easy' as const,
       minesTimeSec: 0,
+      minesEmptySince: 0,
       sessions: new Map(),
       chatLog: [],
       game: null,
@@ -1770,7 +1773,16 @@ export class RoomManager {
     const g = room.game;
     let changed = false;
     if (g && room.mode === 'mines') {
-      changed = mines.minesTick(g as MinesState, now); // 超时排名结算（缺此分支对局永不终局）
+      // 全员（非观战会话）断线 30s 仍无人回来：就地终局。
+      // 宽限覆盖页面刷新的重连窗口；没有它，单人局关页后会挂机到时限，重进只能观战干等
+      const humansConnected = [...room.sessions.values()].some((s) => !s.spectator && s.connected);
+      if (!humansConnected && (g as MinesState).phase === 'playing') {
+        if (!room.minesEmptySince) room.minesEmptySince = now;
+        if (now - room.minesEmptySince >= 30_000) changed = mines.minesForceEnd(g as MinesState, now);
+      } else {
+        room.minesEmptySince = 0;
+        changed = mines.minesTick(g as MinesState, now); // 超时排名结算
+      }
     } else if (g && room.mode === 'blood') {
       changed = blood.bloodTick(g as BloodState, now);
       if (!changed) changed = this.runBots(room, g as BloodState, now);

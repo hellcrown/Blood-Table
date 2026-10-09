@@ -4,6 +4,7 @@ import {
   mReveal,
   mLeave,
   minesTick,
+  minesForceEnd,
   buildMinesView,
   type MinesState,
 } from '../src/mines/engine';
@@ -50,6 +51,16 @@ describe('扫雷 · 生成', () => {
         expect(p.revealed).toEqual([]);
       }
     }
+  });
+
+  it('全员断线就地终局：minesForceEnd 无视 deadline 立即排名结算', () => {
+    const gs = setup('easy');
+    // 未到 deadline 时 forceEnd 也应立即终局（宽限期逻辑在 rooms 层）
+    expect(minesTick(gs, NOW + 1000)).toBe(false); // deadline 未到，正常 tick 不动
+    expect(minesForceEnd(gs, NOW + 2000)).toBe(true);
+    expect(gs.phase).toBe('gameover');
+    expect(gs.winnerId).toBeNull();
+    expect(gs.ranking).toHaveLength(gs.players.length);
   });
 
   it('自定义时限：deadline 按房间的秒数生效；缺省按难度预设', () => {
