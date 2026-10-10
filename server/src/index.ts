@@ -16,6 +16,7 @@ import {
   cleanAccountName,
   isNameRegistered,
   verifyToken,
+  accountName,
 } from './auth';
 import { clearFeedback, initFeedbackStore, listFeedback, submitFeedback } from './feedback';
 import { clearMatches, initMatchStore, listMatches, matchCharLeaderboard, matchPlayerStats, matchStats } from './matchlog';
@@ -778,6 +779,57 @@ const server = http.createServer((req, res) => {
       });
     return;
   }
+  if (url.pathname === '/api/admin/chat' && req.method === 'GET') {
+    if (!isAdmin(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, messages: chatHub.listMessages() }));
+    return;
+  }
+  if (url.pathname === '/api/admin/chat/delete' && req.method === 'POST') {
+    void readBody(req)
+      .then((body) => {
+        if (!isAdmin(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '未登录或会话已过期' }));
+          return;
+        }
+        let parsed: { scope?: unknown; room?: unknown; id?: unknown } = {};
+        try {
+          const raw = JSON.parse(body) as typeof parsed;
+          if (raw != null && typeof raw === 'object') parsed = raw;
+        } catch {
+          /* 按空内容处理 */
+        }
+        const id = Math.floor(Number(parsed.id));
+        if (!Number.isInteger(id) || id <= 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, msg: '消息 id 无效' }));
+          return;
+        }
+        let ok = false;
+        if (parsed.scope === 'room') {
+          const roomCode = String(parsed.room ?? '').trim().toUpperCase().slice(0, 8);
+          ok = roomCode !== '' && manager.deleteRoomChat(roomCode, id);
+        } else {
+          ok = chatHub.deleteMessage(id);
+        }
+        if (ok) logAdminOp(req, 'chat.delete', { scope: parsed.scope ?? 'global', id });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, deleted: ok }));
+      })
+      .catch(() => {
+        try {
+          res.destroy();
+        } catch {
+          /* 忽略 */
+        }
+      });
+    return;
+  }
   if (url.pathname === '/api/admin/dau' && req.method === 'GET') {
     if (!isAdmin(req)) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -919,6 +971,10 @@ const chatHub = new ChatHub({
 });
 
 chatHub.initChatStore(path.resolve(process.cwd(), 'data', 'chat.jsonl'));
+// 发言删除授权：「开发者」注册账号（注册名受保护，匿名不可冒名）；
+// 管理员走 ADMIN_KEY 会话（见 /api/admin/chat/delete）
+manager.setChatModerator((accountId) => accountId != null && accountName(accountId) === '开发者');
+manager.setChatDeleteGlobal((id) => chatHub.deleteMessage(id));
 initDauStore(path.resolve(process.cwd(), 'data', 'dau.json'));
 initAuditStore(path.resolve(process.cwd(), 'data', 'audit'));
 initDianjiangStore(path.resolve(process.cwd(), 'data', 'dianjiang.json'));

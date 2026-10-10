@@ -86,6 +86,8 @@ export interface Room {
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
+  /** 房间内发言的稳定 id 序列（删除定位用） */
+  chatSeq?: number;
   game: GState | BloodState | MinesState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
@@ -444,6 +446,9 @@ export class RoomManager {
         return;
       case 'dianjiang':
         this.handleDianjiang(room, session, msg);
+        return;
+      case 'chatDelete':
+        this.handleChatDelete(room, session, msg);
         return;
       case 'start':
         this.handleStart(room, session);
@@ -1694,7 +1699,8 @@ export class RoomManager {
     if (!text) return;
     const ip = session.ws?.ip ?? '';
     if (!this.roomChatLimits.get(ip).allow()) return; // 超频静默丢弃（与全服聊天同口径：无回显即未发出）
-    const m: ChatMsg = { name: session.name, text, ts: Date.now(), ...(session.accountId ? { account: true } : {}) };
+    room.chatSeq = (room.chatSeq ?? 0) + 1;
+    const m: ChatMsg = { id: room.chatSeq, name: session.name, text, ts: Date.now(), ...(session.accountId ? { account: true } : {}) };
     room.chatLog.push(m);
     if (room.chatLog.length > ROOM_CHAT_MAX) room.chatLog.splice(0, room.chatLog.length - ROOM_CHAT_MAX);
     recordChat({
@@ -2138,6 +2144,58 @@ export class RoomManager {
   /** 注入管理员会话令牌校验（index.ts 持有 adminTokens 表） */
   setAdminTokenValidator(fn: (t: string) => boolean): void {
     this.adminTokenValidator = fn;
+  }
+
+  /* ---------------- 发言删除（管理员 / 「开发者」账号） ---------------- */
+
+  /** 「开发者」账号判定（index.ts 注入 accountName 口径；注入式便于测试） */
+  private chatModerator: ((accountId: string | undefined) => boolean) | null = null;
+  /** 全服发言删除委托（index.ts 注入 ChatHub.deleteMessage） */
+  private chatDeleteGlobal: ((id: number) => boolean) | null = null;
+
+  setChatModerator(fn: (accountId?: string) => boolean): void {
+    this.chatModerator = fn;
+  }
+
+  setChatDeleteGlobal(fn: (id: number) => boolean): void {
+    this.chatDeleteGlobal = fn;
+  }
+
+  /** 管理端删除一条房间发言：向本房会话广播 chatDeleted；未找到返回 false */
+  deleteRoomChat(roomCode: string, id: number): boolean {
+    const room = this.rooms.get(roomCode);
+    if (!room) return false;
+    const before = room.chatLog.length;
+    room.chatLog = room.chatLog.filter((m) => m.id !== id);
+    if (room.chatLog.length === before) return false;
+    for (const s of room.sessions.values()) {
+      send(s.ws, { t: 'chatDeleted', scope: 'room', id });
+    }
+    return true;
+  }
+
+  /** 删除一条发言：scope=room 删本房间 chatLog；scope=global 委托全服聊天枢纽 */
+  private handleChatDelete(room: Room, session: Session, msg: Extract<C2S, { t: 'chatDelete' }>): void {
+    if (!this.chatModerator?.(session.accountId)) {
+      throw new GameError('FORBIDDEN', '没有删除发言的权限');
+    }
+    const id = Math.floor(msg.id);
+    if (!Number.isInteger(id) || id <= 0) throw new GameError('BAD_MSG', '消息 id 无效');
+    if (msg.scope === 'room') {
+      const before = room.chatLog.length;
+      room.chatLog = room.chatLog.filter((m) => m.id !== id);
+      if (room.chatLog.length === before) return; // 已不存在（重复删除/他房消息）：静默
+      for (const s of room.sessions.values()) {
+        send(s.ws, { t: 'chatDeleted', scope: 'room', id });
+      }
+      return;
+    }
+    if (msg.scope === 'global') {
+      if (!this.chatDeleteGlobal?.(id)) return; // 未找到：静默
+      // chatDeleted 广播由聊天枢纽发全服
+      return;
+    }
+    throw new GameError('BAD_MSG', 'scope 无效');
   }
 
   /** join/spectate 消息附带的管理员令牌是否有效 */

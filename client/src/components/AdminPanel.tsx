@@ -214,6 +214,50 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [matchError, setMatchError] = useState('');
   const [dau, setDau] = useState<DauInfo | null>(null);
   const [dauError, setDauError] = useState('');
+  const [globalChat, setGlobalChat] = useState<import('@shared/protocol').ChatMsg[] | null>(null);
+  const [chatError, setChatError] = useState('');
+
+  const loadChat = useCallback(async (t: string) => {
+    try {
+      const r = await fetch('/api/admin/chat', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError('登录已过期，请重新输入密码');
+        return;
+      }
+      const data = (await r.json()) as { messages?: import('@shared/protocol').ChatMsg[] };
+      setGlobalChat(data.messages ?? []);
+      setChatError('');
+    } catch {
+      setChatError('加载聊天记录失败，请重试');
+    }
+  }, []);
+
+  const deleteChatMessage = useCallback(
+    async (t: string, id: number) => {
+      try {
+        const r = await fetch('/api/admin/chat/delete', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: 'global', id }),
+        });
+        if (r.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          setToken(null);
+          setError('登录已过期，请重新输入密码');
+          return;
+        }
+        const data = (await r.json()) as { deleted?: boolean };
+        if (data.deleted) setGlobalChat((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
+        else setChatError('该条不存在或已被删除');
+      } catch {
+        setChatError('删除失败，请重试');
+      }
+    },
+    [],
+  );
+
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<AuditDetail | null>(null);
   const [detailError, setDetailError] = useState('');
@@ -347,7 +391,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
     void loadFeedback(token);
     void loadMatches(token);
     void loadDau(token);
-  }, [token, loadFeedback, loadMatches, loadDau]);
+    void loadChat(token);
+  }, [token, loadFeedback, loadMatches, loadDau, loadChat]);
 
   const loadRooms = useCallback(async (t: string) => {
     try {
@@ -640,6 +685,44 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+            <div className="admin-feedback admin-stats">
+              <div className="admin-feedback-head">
+                <b>💬 全服聊天管理</b>
+                <span className="spacer" />
+                <button className="btn small" disabled={busy} onClick={() => token && void loadChat(token)}>
+                  刷新
+                </button>
+              </div>
+              {chatError && <p className="admin-error">{chatError}</p>}
+              {globalChat == null && <p className="hint">加载中…</p>}
+              {globalChat != null && globalChat.length === 0 && <p className="hint">全服聊天暂无发言（保留最近 80 条）</p>}
+              {globalChat != null && globalChat.length > 0 && (
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {globalChat
+                    .slice()
+                    .reverse()
+                    .map((m) => (
+                      <div key={m.id} className="chat-msg">
+                        <span className="chat-time">
+                          {new Date(m.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
+                        </span>
+                        <b className={m.account ? 'chat-name acct' : 'chat-name'}>{m.name}</b>
+                        <span className="chat-text">{m.text}</span>
+                        <button
+                          className="btn tiny ghost"
+                          style={{ marginLeft: 6 }}
+                          title="删除这条全服发言（在线玩家会同步移除）"
+                          onClick={() => {
+                            if (token && window.confirm(`删除 ${m.name} 的这条发言？`)) void deleteChatMessage(token, m.id!);
+                          }}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
                 </div>
               )}
             </div>

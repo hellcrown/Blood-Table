@@ -69,6 +69,8 @@ export interface SeatView {
 
 /** 全服聊天消息（实时广播与历史快照共用；account=true 表示昵称经登录验证） */
 export interface ChatMsg {
+  /** 稳定 id（删除发言用）：全服/房间各自单调；旧持久化行缺失时加载期补发 */
+  id?: number;
   name: string;
   text: string;
   ts: number;
@@ -199,6 +201,7 @@ export type C2S =
   | { t: 'roomChat'; text: string }
   | { t: 'roomChatHistory' }
   | { t: 'dianjiang'; charId: string | null }
+  | { t: 'chatDelete'; scope: 'room' | 'global'; id: number }
   | import('./bloodProtocol').BloodAction;
 
 /* ---------------- 服务端 → 客户端 ---------------- */
@@ -214,4 +217,5 @@ export type S2C =
   | { t: 'chatMsg'; name: string; text: string; ts: number; account?: boolean }
   | { t: 'chatLog'; msgs: ChatMsg[] }
   | { t: 'roomChatMsg'; name: string; text: string; ts: number; account?: boolean }
-  | { t: 'roomChatLog'; msgs: ChatMsg[] };
+  | { t: 'roomChatLog'; msgs: ChatMsg[] }
+  | { t: 'chatDeleted'; scope: 'room' | 'global'; id: number };

@@ -53,6 +53,24 @@ describe('ChatHub · 发言与历史', () => {
     expect(log[0]!.text).toBe('大家好');
   });
 
+  it('发言带稳定 id；deleteMessage 移除历史并广播 chatDeleted；未找到返回 false', () => {
+    const { hub, broadcasts } = makeHub();
+    hub.onRaw(fakeWs, '{"t":"chat","text":"第一条","name":"甲"}');
+    hub.onRaw(fakeWs, '{"t":"chat","text":"第二条","name":"甲"}');
+    const history = hub.listMessages();
+    expect(history.map((m) => m.id)).toEqual([1, 2]);
+    expect(hub.deleteMessage(999)).toBe(false); // 未找到
+    expect(hub.deleteMessage(1)).toBe(true);
+    expect(hub.listMessages().map((m) => m.text)).toEqual(['第二条']);
+    const del = broadcasts.find((b) => (b as { t: string }).t === 'chatDeleted') as { scope: string; id: number };
+    expect(del).toMatchObject({ scope: 'global', id: 1 });
+  });
+
+  it('chatDelete 消息放行到房间分发层（不被前缀拦截吞掉）', () => {
+    const { hub } = makeHub();
+    expect(hub.onRaw(fakeWs, '{"t":"chatDelete","scope":"global","id":1}')).toBe(false);
+  });
+
   it('登录令牌：昵称取账号名并带 account 标记（客户端发什么 name 都被覆盖）', () => {
     const { hub, broadcasts } = makeHub();
     hub.onRaw(fakeWs, '{"t":"chat","text":"在吗","name":"冒名者","auth":"token-A"}');

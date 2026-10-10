@@ -43,6 +43,8 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
   const fetchedRef = useRef<Record<Scope, boolean>>({ room: false, global: false });
   const logRef = useRef<HTMLDivElement | null>(null);
   useEscClose(onClose);
+  // 「开发者」账号可删除违规发言（管理员走管理面板）
+  const canDelete = net.account?.name === '开发者';
 
   useEffect(() => {
     const merge = (scope: Scope, list: ChatMsg[]): void => {
@@ -59,11 +61,15 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
     const offRoomLog = net.onRoomChatLog((list) => merge('room', list));
     const offMsg = net.onChatMsg((m) => setStore((prev) => ({ ...prev, global: append(prev.global, m) })));
     const offRoomMsg = net.onRoomChatMsg((m) => setStore((prev) => ({ ...prev, room: append(prev.room, m) })));
+    const offDeleted = net.onChatDeleted((scope, id) => {
+      setStore((prev) => ({ ...prev, [scope]: prev[scope].filter((m) => m.id !== id) }));
+    });
     return () => {
       offLog();
       offRoomLog();
       offMsg();
       offRoomMsg();
+      offDeleted();
     };
   }, []);
 
@@ -146,6 +152,15 @@ export function ChatModal({ onClose, roomScope = false }: { onClose: () => void;
               <span className="chat-time">{fmtChatTime(m.ts)}</span>
               <b className={m.account ? 'chat-name acct' : 'chat-name'}>{m.name}</b>
               <span className="chat-text">{m.text}</span>
+              {canDelete && m.id != null && (
+                <button
+                  className="btn tiny ghost chat-del"
+                  title="删除这条发言"
+                  onClick={() => net.send({ t: 'chatDelete', scope: tab, id: m.id! })}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
         </div>

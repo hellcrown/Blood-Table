@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createMinesGame,
   mReveal,
@@ -205,5 +205,61 @@ describe('扫雷 · 观战视图', () => {
     expect(b.status).toBe('out');
     expect(gs.phase).toBe('gameover');
     expect(gs.winnerId).toBe(c.id); // 胜利归真存活者，不归已退场者
+  });
+});
+
+
+describe('房间层删除发言（管理员/开发者账号）', () => {
+  it('moderator 删除房间发言：移除并广播 chatDeleted；非 moderator 拒绝；未找到静默', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 10, 12));
+    vi.resetModules();
+    const { RoomManager } = await import('../src/rooms');
+    const mgr = new RoomManager();
+    // 注入 moderator 与全局删除委托
+    (mgr as unknown as { setChatModerator: (f: (id?: string) => boolean) => void }).setChatModerator(
+      (id) => id === 'dev',
+    );
+    (mgr as unknown as { setChatDeleteGlobal: (f: (id: number) => boolean) => void }).setChatDeleteGlobal(
+      () => false,
+    );
+    const m = mgr as unknown as Record<string, (...a: unknown[]) => unknown>;
+
+    const sentA: unknown[] = [];
+    const sentB: unknown[] = [];
+    const wsA = { readyState: 1, OPEN: 1, send: (d: string) => sentA.push(JSON.parse(d)), on: () => {}, close: () => {}, ip: '5.5.5.1' };
+    const wsB = { readyState: 1, OPEN: 1, send: (d: string) => sentB.push(JSON.parse(d)), on: () => {}, close: () => {}, ip: '5.5.5.2' };
+    m.handleCreate(wsA, { t: 'create', name: '甲', maxPlayers: 2, mode: 'blood' });
+    const room = (mgr as unknown as { rooms: Map<string, { code: string; sessions: Map<string, { id: string }>; chatLog: { id: number }[] }> }).rooms
+      .values()
+      .next().value!;
+    if (!room) throw new Error('room missing');
+    m.handleJoin(wsB, { t: 'join', code: room.code, name: '乙' });
+    const host = [...room.sessions.values()][0];
+    const guest = [...room.sessions.values()][1];
+
+    // 各发两条（频控 300ms：用不同会话）
+    const d = (ws: unknown, sess: { id: string }, text: string) =>
+      m.handleRoomChat(room, sess, { t: 'roomChat', text });
+    d(wsA, host, 'm1');
+    d(wsB, guest, 'm2');
+    const ids = room.chatLog.map((c) => c.id);
+    expect(ids).toHaveLength(2);
+
+    // 非 moderator：拒绝（经实例调用保住 this）
+    expect(() => m.handleChatDelete(room, guest, { t: 'chatDelete', scope: 'room', id: ids[0] })).toThrow(/权限/);
+    // moderator 删 m1：广播 chatDeleted 给全房（host 绑定「开发者」账号）
+    (host as { accountId?: string }).accountId = 'dev';
+    m.handleChatDelete(room, host, { t: 'chatDelete', scope: 'room', id: ids[0] });
+    const delMsgs = [...sentA, ...sentB].filter((x) => (x as { t: string }).t === 'chatDeleted');
+    expect(delMsgs).toHaveLength(2); // 甲乙各收一条
+    expect(room.chatLog.map((c) => c.id)).toEqual([ids[1]]);
+    // 再删已删的：静默（无新广播）
+    const before = [...sentA, ...sentB].length;
+    m.handleChatDelete(room, host, { t: 'chatDelete', scope: 'room', id: ids[0] });
+    expect([...sentA, ...sentB].filter((x) => (x as { t: string }).t === 'chatDeleted')).toHaveLength(2);
+    expect([...sentA, ...sentB].length).toBe(before);
+    vi.useRealTimers();
+    vi.resetModules();
   });
 });

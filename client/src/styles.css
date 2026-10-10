@@ -395,6 +395,18 @@ select:focus {
   color: inherit;
 }
 
+.chat-msg .chat-del {
+  margin-left: 6px;
+  padding: 0 4px;
+  line-height: 1.2;
+  opacity: 0.55;
+}
+
+.chat-msg .chat-del:hover {
+  opacity: 1;
+  color: #d4483f;
+}
+
 .chat-input-row {
   display: flex;
   gap: 8px;

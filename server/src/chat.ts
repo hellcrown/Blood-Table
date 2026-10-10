@@ -42,6 +42,8 @@ export function cleanChatText(raw: unknown): string {
 export class ChatHub {
   private history: ChatMsg[] = [];
   private storePath: string | null = null;
+  /** 全服发言的稳定 id 序列（删除定位用；加载旧持久化行时补发） */
+  private idSeq = 0;
   /** 每 IP 10 秒 5 条；IpTable 闲置自清理由调用方周期 prune 或依赖其 lastHit 判定（此处消息稀疏，无需主动清理） */
   private limits = new IpTable(
     () => new SlidingWindow(10_000, 5),
@@ -77,6 +79,7 @@ export class ChatHub {
           try {
             const m = JSON.parse(t) as ChatMsg;
             if (typeof m?.name === 'string' && typeof m?.text === 'string' && typeof m?.ts === 'number') {
+              m.id = ++this.idSeq; // 旧持久化行无 id：加载期补发（删除定位用）
               msgs.push(m);
             }
           } catch {
@@ -106,15 +109,42 @@ export class ChatHub {
     }
   }
 
+  /** 全服发言列表（管理端查看） */
+  listMessages(): ChatMsg[] {
+    return this.history.slice();
+  }
+
+  /**
+   * 删除一条全服发言（管理员接口 / 「开发者」账号 WS 委托）：从历史移除、重写持久化文件、
+   * 向全服广播 chatDeleted 让在线客户端同步移除。未找到返回 false。
+   */
+  deleteMessage(id: number): boolean {
+    const idx = this.history.findIndex((m) => m.id === id);
+    if (idx < 0) return false;
+    this.history.splice(idx, 1);
+    if (this.storePath) {
+      try {
+        const lines = this.history.map((m) => JSON.stringify(m));
+        lines.push('');
+        fs.writeFileSync(this.storePath, lines.join('\n'));
+      } catch (e) {
+        console.error('[chat] 删除后重写聊天历史失败（已保留内存）:', e);
+      }
+    }
+    this.deps.broadcast({ t: 'chatDeleted', scope: 'global', id });
+    return true;
+  }
+
   /** 处理一条原始消息；返回 true 表示属于聊天（已消费），调用方应跳过房间分发层 */
   onRaw(ws: unknown, raw: string): boolean {
     if (!raw.startsWith('{"t":"chat')) return false;
-    let msg: { t?: unknown; text?: unknown; name?: unknown; auth?: unknown };
+    let msg: { t?: unknown; text?: unknown; name?: unknown; auth?: unknown; id?: unknown; scope?: unknown };
     try {
       msg = JSON.parse(raw) as typeof msg;
     } catch {
       return true; // 聊天前缀但解析失败：消费掉，不进房间层
     }
+    if (msg.t === 'chatDelete') return false; // 删除发言走房间分发层（rooms.ts 按 moderator 授权，global 委托回本枢纽）
     if (msg.t === 'chatHistory') {
       const hip = (ws as { ip?: string }).ip ?? '';
       if (this.historyLimits.get(hip).allow()) {
@@ -128,7 +158,7 @@ export class ChatHub {
     const ip = (ws as { ip?: string }).ip ?? '';
     if (!this.limits.get(ip).allow()) return true; // 超频静默丢弃
     const id = this.deps.resolveIdentity(ws, msg.name, msg.auth);
-    const m: ChatMsg = { name: id.name, text, ts: Date.now(), ...(id.account ? { account: true } : {}) };
+    const m: ChatMsg = { id: ++this.idSeq, name: id.name, text, ts: Date.now(), ...(id.account ? { account: true } : {}) };
     this.history.push(m);
     if (this.history.length > HISTORY_MAX) this.history.splice(0, this.history.length - HISTORY_MAX);
     this.persist(m);
