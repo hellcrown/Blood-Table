@@ -1874,6 +1874,7 @@ export class RoomManager {
         winnerSeat: g.final.winnerSeat,
         room: room.code,
         ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+        ...(g.final.resigned ? { resigned: true } : {}),
         settings: {
           // 引擎解析后的实际目标（resolveTargetTickets：自定义钳 8-30，缺省按 maxPlayers 24/20/16）。
           // 此前记 room 原始设置——开局人数少于座位数或旧值 1-7 时与对局实际 target 不一致，天梯结算口径随之扭曲

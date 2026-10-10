@@ -60,6 +60,8 @@ interface MatchRow {
   winnerSeat: number;
   room?: string;
   startedAt?: number;
+  /** 血色：本局以投降结束 */
+  resigned?: boolean;
   /** 操作审计关联（保留 2 天；无审计记录时无「详情」入口） */
   auditKey?: string;
   auditSameIp?: number[];
@@ -577,6 +579,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           {new Date(m.endedAt).toLocaleString('zh-CN', { hour12: false })}
                           {m.durationMin != null ? ` · ${m.durationMin} 分钟` : ''}
                           {` · ${m.mode === 'blood' ? '血色' : '德州'} ${m.seatCount} 人`}
+                          {m.resigned && ' · 投降'}
                           {m.auditSameIp && <b style={{ color: '#d4a017' }}> · ⚠️同IP</b>}
                         </span>
                         {m.auditKey && (
