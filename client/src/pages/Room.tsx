@@ -454,7 +454,7 @@ export function Room({ view }: { view: TableView }) {
           </div>
         </div>
 
-        {view.mode === 'blood' && (
+        {view.mode === 'blood' && !spectating && (
           <div className="settings-panel">
             <div className="box-title">🗡️ 点将卡{me?.dianjiangLeft != null ? `（今日剩余 ${me.dianjiangLeft} 局）` : ''}</div>
             {!net.account ? (
@@ -467,6 +467,9 @@ export function Room({ view }: { view: TableView }) {
                     <span>
                       本局指定【{BLOOD_CHAR_BY_ID.get(me.dianjiangPick)?.name ?? me.dianjiangPick}】
                       <span className="hint">（开局生效；「再来一场」算新的一局）</span>
+                      {(me.dianjiangLeft ?? 1) <= 0 && (
+                        <b style={{ color: '#d4a017' }}>⚠️ 今日次数已用完，本局不会生效</b>
+                      )}
                     </span>
                     <button className="btn small" onClick={() => net.send({ t: 'dianjiang', charId: null })}>
                       取消指定

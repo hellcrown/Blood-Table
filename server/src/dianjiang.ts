@@ -85,7 +85,11 @@ export function initDianjiangStore(filePath: string): void {
           .filter((d) => typeof d?.day === 'string' && d.uses != null && typeof d.uses === 'object')
           .map((d) => ({
             day: d.day,
-            uses: new Map(Object.entries(d.uses).filter(([, n]) => typeof n === 'number' && n > 0)),
+            uses: new Map(
+              Object.entries(d.uses)
+                .filter(([, n]) => typeof n === 'number' && n > 0)
+                .map(([k, n]) => [k, Math.min(Math.floor(n), DAILY_LIMIT)]), // 钳制：损坏数据不得让剩余次数为负
+            ),
           }));
       }
     }

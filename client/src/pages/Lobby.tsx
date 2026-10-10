@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { loadLastRoom, net, type ConnStatus } from '../net/socket';
 import type { PublicRoomInfo } from '@shared/protocol';
 import { AdminPanel } from '../components/AdminPanel';
@@ -153,6 +153,21 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     });
   };
 
+  /** 上次房间的 join 被拒（满员：座位仍被保留中）时自动降级为观战进入，别把回房的人挡在大厅 */
+  const pendingJoinRef = useRef<string | null>(null);
+  useEffect(() => {
+    return net.onError((code, msg) => {
+      const target = pendingJoinRef.current;
+      if (code !== 'ROOM_FULL' || !target) return;
+      pendingJoinRef.current = null;
+      void msg;
+      net.saveName(displayName);
+      net.send({ t: 'spectate', name: displayName, code: target });
+    });
+    // displayName 变化极少；订阅一次即可，处理时读最新值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** 公开房间列表点击：预填房间码并直接加入（对局中转观战、已结束仅预填）。
    *  匿名未填昵称/未连接时只预填（与加入按钮 disabled 口径一致）。 */
   const openPublicRoom = (r: PublicRoomInfo): void => {
@@ -164,6 +179,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     // 对局中的「上次房间」走加入而非观战：以玩家身份回到座位（血色坐等下一局、
     // 扫雷坐等下一轮），否则重进自己的房间只能观战干等
     if (r.phase === 'waiting' || lastRoom?.code === r.code) {
+      pendingJoinRef.current = r.code; // 满员被拒时降级观战（见 onError 订阅）
       net.send(joinMsg(r.code));
     } else {
       net.send({
@@ -180,6 +196,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     setCode(lastRoom.code);
     if (!nameOk || !connected) return;
     net.saveName(displayName);
+    pendingJoinRef.current = lastRoom.code; // 满员被拒时降级观战
     net.send(joinMsg(lastRoom.code));
   };
 

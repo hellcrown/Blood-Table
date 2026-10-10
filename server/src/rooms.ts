@@ -59,6 +59,8 @@ export interface Session {
   lastIp?: string;
   /** 点将卡：本局指定角色（等待房设置；开局生效并扣当日次数；仅注册账号有效） */
   dianjiangPick?: string;
+  /** 上次点将消息时间（频控用：成功设置/取消都推全房视图，防刷广播） */
+  lastDianjiang?: number;
 }
 
 export interface Room {
@@ -880,8 +882,6 @@ export class RoomManager {
     const code = String(msg.code ?? '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) throw new GameError('ROOM_NOT_FOUND', '房间不存在或已解散');
-    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
-    if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
     if (room.password && !this.isAdminMessage(msg)) {
       // 带密码房间：先查房间级锁定（防多 IP 分布式爆破），再按 IP 限速，最后校验密码
       if (this.roomPasswordLocked(code)) {
@@ -896,6 +896,29 @@ export class RoomManager {
         throw new GameError(err, '房间密码错误');
       }
     }
+    // 同账号断线接管优先于满员判定：幽灵座位本就占着名额，接管是「归位」不是「新增」。
+    // 放在满员检查之后会让 2 人满员房（血色断线保留座位）的本人重进吃 ROOM_FULL，
+    // 把「自己的房间走加入」的修复整个打回观战。
+    const acc = this.resolveAccount(msg.auth);
+    if (acc) {
+      const dupe = [...room.sessions.values()].find((s) => s.accountId === acc && !s.spectator && !s.connected);
+      if (dupe) {
+        this.detachBinding(ws);
+        dupe.connected = true;
+        room.pendingRemove.delete(dupe.id);
+        if (room.mode === 'blood' && room.game && 'market' in room.game) {
+          const bp = (room.game as BloodState).players.find((x) => x.id === dupe.id);
+          if (bp) bp.connected = true; // 与 addSession 接管同口径：复位引擎侧断线标记
+        }
+        recordAccountVisit(acc); // 日活：归位也是一次活跃
+        this.bind(ws, room, dupe);
+        this.sendHello(ws, dupe);
+        this.broadcast(room);
+        return;
+      }
+    }
+    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
     this.detachBinding(ws);
     const session = this.addSession(room, msg.name, false, this.resolveAccount(msg.auth));
     this.bind(ws, room, session);
@@ -1216,6 +1239,7 @@ export class RoomManager {
       room.game = mines.createMinesGame(room.minesDifficulty, players, now, room.minesTimeSec);
       room.matchLogged = false; // 终局审计 end 的哨兵（broadcast mines 分支置位）
       room.gameStartedAt = now;
+      room.minesEmptySince = 0;
       // 新一局：扫雷 logSeq 归零重排，日志增量游标归零（否则新局日志被客户端按已见去重）
       for (const s of room.sessions.values()) s.lastEventSeq = 0;
     } else if (room.mode === 'blood') {
@@ -1289,7 +1313,17 @@ export class RoomManager {
       if (stranded) throw new GameError('SEATS_OCCUPIED', '有玩家坐在更大号座位，无法缩小房间');
       room.maxPlayers = mp;
     }
-    if (msg.charExpansion != null) room.charExpansion = !!msg.charExpansion;
+    if (msg.charExpansion != null) {
+      room.charExpansion = !!msg.charExpansion;
+      // 池缩小（关拓展选将）时，出池的点将指定就地清空并随本拍广播——
+      // 否则开局静默失效，玩家面板却仍显示「本局指定【X】开局生效」
+      if (!room.charExpansion) {
+        const base = charPoolIds(false);
+        for (const s of room.sessions.values()) {
+          if (s.dianjiangPick && !base.includes(s.dianjiangPick)) s.dianjiangPick = undefined;
+        }
+      }
+    }
     if (msg.minesDifficulty != null) {
       // 扫雷难度：仅白名单枚举；对局进行中的拒绝由上方 IN_GAME 守卫覆盖（扫雷 game 非等待期）
       if (msg.minesDifficulty === 'easy' || msg.minesDifficulty === 'medium' || msg.minesDifficulty === 'hard') {
@@ -1493,6 +1527,7 @@ export class RoomManager {
     room.game = mines.createMinesGame(room.minesDifficulty, players, Date.now(), room.minesTimeSec);
     room.matchLogged = false;
     room.gameStartedAt = Date.now();
+    room.minesEmptySince = 0;
     this.drainNotified.delete(room.code); // 新一局重新预告（若在排水期）
     auditRoomStart(room); // 再来一局写新局的审计开局行
     for (const s of room.sessions.values()) s.lastEventSeq = 0;
@@ -1521,6 +1556,7 @@ export class RoomManager {
       }
     }
     room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
+    room.minesEmptySince = 0;
     this.broadcast(room);
   }
 
@@ -1691,6 +1727,12 @@ export class RoomManager {
     if (room.game) throw new GameError('IN_GAME', '对局进行中不能更改点将');
     if (session.spectator) throw new GameError('SPECTATING', '观战中不能使用点将卡');
     if (msg.charId == null) {
+      // 频控 300ms：成功操作都会向全房广播完整视图；被拒的尝试不计（不产生广播）
+      const now = Date.now();
+      if (session.lastDianjiang != null && now - session.lastDianjiang < 300) {
+        throw new GameError('RATE_LIMITED', '操作太频繁，休息一下');
+      }
+      session.lastDianjiang = now;
       session.dianjiangPick = undefined;
       this.broadcast(room);
       return;
@@ -1701,6 +1743,11 @@ export class RoomManager {
     if (dianjiangRemaining(session.accountId) <= 0) {
       throw new GameError('RATE_LIMITED', '今日点将次数已用完（每天 3 局），明天再来');
     }
+    const now = Date.now();
+    if (session.lastDianjiang != null && now - session.lastDianjiang < 300) {
+      throw new GameError('RATE_LIMITED', '操作太频繁，休息一下');
+    }
+    session.lastDianjiang = now;
     session.dianjiangPick = charId;
     this.broadcast(room);
   }
@@ -1775,7 +1822,12 @@ export class RoomManager {
     if (g && room.mode === 'mines') {
       // 全员（非观战会话）断线 30s 仍无人回来：就地终局。
       // 宽限覆盖页面刷新的重连窗口；没有它，单人局关页后会挂机到时限，重进只能观战干等
-      const humansConnected = [...room.sessions.values()].some((s) => !s.spectator && s.connected);
+      // 只计「局内玩家」：对局中 join 的占座会话不在 ms.players（只能观战等下一轮），
+      // 计入会取消遗弃宽限，让单人局关页后仍挂机满时限
+      const msPlayers = (g as MinesState).players;
+      const humansConnected = [...room.sessions.values()].some(
+        (s) => !s.spectator && s.connected && msPlayers.some((p) => p.id === s.id),
+      );
       if (!humansConnected && (g as MinesState).phase === 'playing') {
         if (!room.minesEmptySince) room.minesEmptySince = now;
         if (now - room.minesEmptySince >= 30_000) changed = mines.minesForceEnd(g as MinesState, now);
@@ -1988,17 +2040,22 @@ export class RoomManager {
     // 扫雷终局审计：必须在会话循环外——全员断线时终局广播没有收件人，
     // 循环内写会让真实排名永久丢失（disposeRoom 只能补 resolved:false）
     if (isMinesGame(g) && g.phase === 'gameover' && !room.matchLogged) {
-      room.matchLogged = true;
-      const durationMin =
-        room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
-      recordGameEnd({
-        key: auditKeyOf(room),
-        endedAt: Date.now(),
-        ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
-        winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat,
-        summary: { mode: 'mines', difficulty: g.difficulty, ranking: g.ranking },
-        log: g.log,
-      });
+      // 独立 try：审计失败不得阻断广播（否则本拍全部 state 不下发、tickFails 累计毒房回收时无任何审计）
+      try {
+        room.matchLogged = true;
+        const durationMin =
+          room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+        recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat,
+          summary: { mode: 'mines', difficulty: g.difficulty, ranking: g.ranking },
+          log: g.log,
+        });
+      } catch (e) {
+        console.error('[audit] 扫雷终局审计失败:', e);
+      }
     }
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {

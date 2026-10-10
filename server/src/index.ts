@@ -23,7 +23,7 @@ import { IpTable, SlidingWindow } from './net/limits';
 import { attachHeartbeat, startHeartbeat, type HeartSocket } from './net/heartbeat';
 import { dauSummary, flushDau, initDauStore, recordConnection } from './dau';
 import { findAudit, initAuditStore, loadAuditGame } from './audit';
-import { initDianjiangStore } from './dianjiang';
+import { flushDianjiang, initDianjiangStore } from './dianjiang';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
 import { CHANGELOG, LATEST } from '@shared/changelog';
@@ -928,6 +928,7 @@ for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, () => {
     try {
       flushDau();
+      flushDianjiang(); // 点将配额同口径：发版不丢最多 60s 的扣次
     } catch {
       /* 退出路径尽力而为 */
     }
