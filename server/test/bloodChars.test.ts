@@ -884,16 +884,14 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(p0.hand.some((c) => c.id === lens!.on) || p0.draw[p0.draw.length - 1].id === lens!.on).toBe(true);
   });
 
-  it('3人局捣蛋鬼：每个小回合结束时立即返还剩余换牌次数', () => {
+  
+  it('3人局捣蛋鬼：全员换牌结束后进行一次抽换（非每对手一轮）', () => {
     const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `玩家${i}`, seat: i }));
     const gs = createBloodGame(3, players, NOW, true);
-    // 捣蛋鬼清空个人牌堆模拟无牌堆；角色通过下方选将强制
     gs.players[0].draw = [];
     gs.players[0].setupHand = [];
     gs.players[0].setupRound = 2;
-    // 创建时随机分配的角色可能给任意玩家预排了黑客初始构筑流程，强制角色后需清除
     gs.startupQueue = gs.startupQueue.filter((e) => e.kind !== 'hackerSetup');
-    // 拓展池 3 人局现在同样经过选将阶段：设定选项并完成选择
     gs.players[0].charOptions = ['imp', 'dealer'];
     gs.players[1].charOptions = ['clerk', 'dealer'];
     gs.players[2].charOptions = ['clerk', 'dealer'];
@@ -901,7 +899,14 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     bPickChar(gs, 'p1', 'clerk', NOW);
     bPickChar(gs, 'p2', 'clerk', NOW);
     driveTo(gs, 'swap');
-    bSwapStop(gs, 'p1', NOW); // 对手1 停止 → 小回合1
+    // 对手1 停止：捣蛋鬼回合不开始（FAQ：等全部其他玩家结束）
+    bSwapStop(gs, 'p1', NOW);
+    expect(gs.secretPending?.kind).not.toBe('impDraw');
+    expect(gs.players[0].swapDone).toBe(false);
+    // 对手2 停止 → 全员结束，捣蛋鬼回合开始（仅一次）
+    bSwapStop(gs, 'p2', NOW);
+    expect(gs.secretPending?.kind).toBe('impDraw');
+    expect(gs.players[0].swapDone).toBe(false);
     let guard = 0;
     while (gs.players[0].hand.length < 6 && guard++ < 30) {
       if (gs.secretPending?.kind !== 'impDraw') break;
@@ -909,26 +914,12 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
       if (!t) break;
       bImpDraw(gs, 'p0', t.seat, NOW);
     }
+    // 捣蛋鬼停止：未用次数兑换，随后直接进入出牌阶段（不再有第二个小回合）
     const blood0 = gs.players[0].blood;
-    const refund1 = gs.players[0].swapLeft; // 特权证持有者小回合为 4 次，其余 3 次
-    bSwapStop(gs, 'p0', NOW); // 小回合1 结束 → 立即返还
+    const refund1 = gs.players[0].swapLeft;
+    bSwapStop(gs, 'p0', NOW);
     expect(gs.players[0].blood).toBe(blood0 + refund1);
     expect(gs.players[0].swapLeft).toBe(0);
-    // 对手2 停止 → 小回合2；抽满后停止同样返还，随后进入出牌阶段
-    bSwapStop(gs, 'p2', NOW);
-    guard = 0;
-    while (gs.phase === 'swap' && guard++ < 60) {
-      if (gs.secretPending?.kind === 'impDraw') {
-        const t = gs.players.find((o) => o.id !== 'p0' && o.draw.length > 0);
-        if (!t) break;
-        bImpDraw(gs, 'p0', t.seat, NOW);
-      } else if (!gs.players[0].swapDone) {
-        const b = gs.players[0].blood;
-        const r2 = gs.players[0].swapLeft;
-        bSwapStop(gs, 'p0', NOW);
-        expect(gs.players[0].blood).toBe(b + r2);
-      } else break;
-    }
     expect(gs.phase).toBe('play');
   });
 

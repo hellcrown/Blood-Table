@@ -928,18 +928,17 @@ function afterSwapEnded(gs: BloodState, p: BPlayer, now: number): void {
       pushLog(gs, 'action', `${pname(p)}【入殓师】本回合未执行特殊换牌：获得 2 血筹`);
     }
   }
-  // 捣蛋鬼的小回合结束：剩余换牌次数立即返还（3/4人局还有后续小回合，不能等阶段收尾）
+  // 捣蛋鬼回合结束：剩余换牌次数立即返还（FAQ 通用规则：未使用次数按 1:1 兑换）
   if (p.charId === 'imp' && !p.extraSwapProtected && p.swapLeft > 0) {
     p.blood += p.swapLeft;
     pushLog(gs, 'action', `${pname(p)} 未使用的换牌次数兑换 ${p.swapLeft} 血筹`);
     p.swapLeft = 0;
   }
-  // 捣蛋鬼：其他玩家换牌阶段结束时开始抽换小回合——每名玩家每回合只计一次。
-  // 额外换牌（将军/赌神）= 换牌次数 +1，不是多一整个换牌阶段：再次结束不给小回合
-  //（与下方结束队列的 swapEndPrompted 去重同口径；两角色的队列项均无条件入队，首末必置位）
-  const firstSwapEnd = !p.swapEndPrompted;
+  // 捣蛋鬼（FAQ 角色牌 22 答案 2）：等所有其他玩家全部结束换牌阶段后，
+  // 进行一次（且仅一次）抽牌+换牌序列。此处只标记待触发，实际开始由 checkSwapEnd
+  // 在「全部非捣蛋鬼 swapDone」后放行；额外换牌（将军/赌神）的再次结束不改变标记。
   const imp = gs.players.find((x) => x.charId === 'imp');
-  if (firstSwapEnd && imp && p.id !== imp.id) gs.impTurns += 1;
+  if (imp && p.id !== imp.id) gs.impTurns = 1;
   // 换牌结束的互动技能入队（每回合一次，额外换牌后的再次结束不重复触发）
   const ch = effChar(p);
   if (!p.swapEndPrompted) {
@@ -999,7 +998,10 @@ function checkSwapEnd(gs: BloodState, now: number): void {
     gs.deadline = now + BLOOD_TURN_MS;
     return;
   }
-  if (gs.impTurns > 0) {
+  // 捣蛋鬼回合：等全部非捣蛋鬼玩家 swapDone 才开始（FAQ 角色 22 答案 2：
+  // 「等其他玩家全部结束换牌阶段后」——不是每个对手结束各触发一轮）
+  const impP = gs.players.find((x) => x.charId === 'imp');
+  if (impP && gs.impTurns > 0 && gs.players.filter((x) => x !== impP).every((p) => p.swapDone)) {
     beginImpTurn(gs, now);
     return;
   }
@@ -1079,7 +1081,7 @@ function beginImpTurn(gs: BloodState, now: number): void {
     gs.impTurns = 0;
     return;
   }
-  gs.impTurns -= 1;
+  gs.impTurns = 0; // 全员结束后仅此一次
   imp.swapDone = false;
   // 餐车投毒对小回合同样生效（「技能无法被无效」指捣蛋鬼自己的技能，不是对投毒免疫）；
   // 此前 swapMalus 在 imp 身上永不消费，被投毒=白花 3 费
@@ -1091,7 +1093,7 @@ function beginImpTurn(gs: BloodState, now: number): void {
     pushLog(gs, 'action', `${pname(imp)} 因【餐车投毒】换牌次数 -${malus}（剩 ${imp.swapLeft} 次）`);
   }
   imp.lastAction = null;
-  pushLog(gs, 'action', `🃏 ${pname(imp)}【捣蛋鬼】开始抽牌与换牌（剩余小回合 ${gs.impTurns}）`);
+  pushLog(gs, 'action', `🃏 其他玩家均已结束换牌：${pname(imp)}【捣蛋鬼】开始抽牌与换牌`);
   tryImpDraw(gs, imp, now);
 }
 
