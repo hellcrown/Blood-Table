@@ -32,7 +32,7 @@ export interface RevealDecision {
 
 /** 防护屏障待反制的序列化效果 */
 export interface BarrierEffect {
-  t: 'violent' | 'pinpoint' | 'boxRob' | 'poison' | 'freeze' | 'amnesia' | 'signal' | 'demag';
+  t: 'violent' | 'pinpoint' | 'boxRob' | 'poison' | 'freeze' | 'amnesia' | 'signal' | 'demag' | 'stealPrivilege';
   by: string; // 发起者 playerId
   seat: string; // 受害者 playerId
   rank?: number; // pinpoint
@@ -71,6 +71,10 @@ export interface BPlayer {
   setupRound: number;
   setupHand: BCard[];
   /** 已选角色牌 id（选将完成前为 null） */
+  /** 结算期累计已获得的血筹（双生子·弟 -2 合计口径用） */
+  settleGained?: number;
+  /** 咖啡师：本回合触发资格已消耗（仅原价 ≥3 的购买消耗，独立于吉祥物 firstBuyUsed） */
+  baristaUsed?: boolean;
   charId: string | null;
   /** 选将阶段随机抽到的两张角色牌 id */
   charOptions: string[];

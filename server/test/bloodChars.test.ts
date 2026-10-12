@@ -723,7 +723,8 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     const logs = gs.log.map((l) => l.text ?? '').join('|');
     expect(logs).toContain('托管：删除自己抽牌堆顶的');
     expect(logs).toContain('（并重洗抽牌堆）'); // 修复前缺失：托管删牌不重洗、不触发洗衣房
-    expect(laundry.blood).toBe(before + 1);
+    // FAQ 角色 18 答案 4：重洗抽牌堆 ≠ 重洗牌库，洗衣房店主不触发（旧实现误 +1）
+    expect(laundry.blood).toBe(before);
   });
 
   it('皇叔：删牌每张仅1血筹', () => {
@@ -854,14 +855,16 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(p1.draw.length).toBeLessThanOrEqual(draw);
   });
 
-  it('双生子（弟）：结算阶段获得血筹-2（最低0）', () => {
+  it('双生子（弟）：结算阶段获得血筹按合计 -2（最低0）', () => {
     const gs = makeGame('clerk', 'twinB');
-    // 让乙夺魁较难控制，直接验证结算行 gainBlood 被削减：让乙必胜
     driveTo(gs, 'play');
     driveTo(gs, 'settle');
+    // FAQ 角色 27：结算阶段「本应获得的血筹合计」-2——名次行显示原始值，收尾一次性扣减
     const row = gs.result?.rows.find((r) => r.seat === 1);
     if (row && row.rank === 2) {
-      expect(row.gainBlood).toBe(Math.max(0, 4 - 2));
+      expect(row.gainBlood).toBe(4); // 名次奖励原值
+      const p1 = gs.players[1];
+      expect(p1.settleGained ?? 0).toBe(0); // 收尾已清账
     }
   });
 

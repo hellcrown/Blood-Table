@@ -56,14 +56,17 @@ describe('深查修复 · 血色引擎', () => {
     expect(gs.phase).not.toBe('reveal'); // 已推进
   });
 
-  it('复制芯片不能复制自己', () => {
+  it('复制芯片可复制自己另一张牌上的芯片（FAQ 015：包括自己）', () => {
     const gs = makeGame(['dealer', 'dealer']);
     gs.phase = 'reveal';
     const p0 = gs.players[0];
     p0.play = [{ id: 'cx', r: 5, s: 's' }];
     p0.chips = [{ id: 'cc1', def: 'copyChip', on: 'cx' }];
     gs.secretPending = { seat: 'p0', kind: 'revealDecide', decision: { t: 'copy', chipId: 'cc1', cardId: 'cx', defId: 'copyChip' } };
-    expect(() => bRevealChipTarget(gs, 'p0', 0, 'cx', 'copyChip', NOW)).toThrow(/不能复制自己/);
+    // 旧实现禁止自复制（担心效果结算两次）；FAQ 015 明文「包括自己」——按官方口径放开
+    bRevealChipTarget(gs, 'p0', 0, 'cx', 'copyChip', NOW);
+    const copied = p0.chips.find((ch) => ch.id === 'cc1');
+    expect(copied?.copiedFx?.k).toBe('copyChip'); // copiedFx 存源效果（copyChip 的效果对象）
   });
 
   it('finalRank 含弹簧临时修正（与大厨数点/定点爆破口径一致）', () => {

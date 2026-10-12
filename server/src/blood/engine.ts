@@ -59,11 +59,14 @@ function genderMatches(charId: string | null, want: 'm' | 'f'): boolean {
   return g === null || g === want;
 }
 
-/** 结算期血筹获得（双生子·弟：结算阶段获得血筹 -2，最低为 0） */
+/**
+ * 结算期血筹获得。双生子·弟按 FAQ：结算阶段「本应获得的血筹合计」-2（最低 0）——
+ * 因此这里对 twinB 全额发放并累计 settleGained，终局收尾一次性扣减（见 settle 区收尾）。
+ */
 function settleGainBlood(gs: BloodState, p: BPlayer, n: number): number {
   void gs;
-  const gain = Math.max(0, n - (effChar(p) === 'twinB' ? 2 : 0));
-  return gain;
+  if (effChar(p) === 'twinB') p.settleGained = (p.settleGained ?? 0) + n;
+  return n;
 }
 
 export function bloodCardText(c: BCard): string {
@@ -591,11 +594,22 @@ export function startDrawPhase(gs: BloodState, now: number): void {
     // 暂时失忆：本回合角色技能失效；餐车投毒：换牌次数 -N（最低 0）
     p.charOff = p.charOffNextRound;
     p.charOffNextRound = false;
+    // 江东之主技能恢复：FAQ 角色 47「一旦技能恢复，临时特权证立刻回到江东之主处」
+    if (p.charId === 'sunwu' && !p.charOff) {
+      const holder = gs.players.find((o) => o.privilege && o !== p);
+      if (holder) {
+        holder.privilege = false;
+        p.privilege = true;
+        gs.privilegeSeat = p.seat;
+        pushLog(gs, 'action', `${pname(p)}【江东之主】技能恢复：夺回【临时特权证】`);
+      }
+    }
     // 无面人：临时技能持续至本抽牌阶段开始前，至此过期
     p.tempChar = null;
     // 每回合角色标志重置
     p.streamerUsed = false;
     p.firstBuyUsed = false;
+    p.baristaUsed = false;
     p.boughtAny = false;
     p.skipBuyRemove = false;
     p.skipBuy = false;
@@ -652,25 +666,35 @@ function finishDrawPhase(gs: BloodState, now: number): void {
   for (const p of gs.players) {
     if (effChar(p) === 'imp') continue; // 捣蛋鬼没有个人牌堆，抽牌在其他玩家换牌结束后进行
     drawToCap(gs, p);
+    // 餐车投毒的 -2 与地下城主的掷骰按 FAQ 角色 44：掷 ≥3 时「其他修正再叠加」（投毒 -2 照扣）
+    const malus = p.swapMalus > 0 ? p.swapMalus : 0;
+    p.swapMalus = 0;
     let swapBase = p.privilege ? 4 : 3;
-    if (p.swapMalus > 0) {
-      const malus = p.swapMalus;
-      p.swapMalus = 0;
-      swapBase = Math.max(0, swapBase - malus);
-      pushLog(gs, 'action', `${pname(p)} 因【餐车投毒】本回合换牌次数 -${malus}（剩 ${swapBase} 次）`);
-    }
     if (effChar(p) === 'dungeon') {
-      // 地下城主：换牌阶段前自动掷骰（≥3 调整默认次数，特权证 +1 照常叠加；<3 获得点数血筹）
       const roll = randomInt(1, 7);
       if (roll >= 3) {
-        swapBase = roll + (p.privilege ? 1 : 0);
-        pushLog(gs, 'action', `${pname(p)}【地下城主】掷出 ${roll} 点：本回合换牌次数调整为 ${swapBase}`);
+        swapBase = Math.max(0, roll + (p.privilege ? 1 : 0) - malus);
+        pushLog(
+          gs,
+          'action',
+          `${pname(p)}【地下城主】掷出 ${roll} 点：本回合换牌次数调整为 ${swapBase}${malus ? `（含【餐车投毒】-${malus}）` : ''}`,
+        );
       } else {
         p.blood += roll;
-        pushLog(gs, 'action', `${pname(p)}【地下城主】掷出 ${roll} 点：获得 ${roll} 血筹（换牌次数仍为 ${swapBase}）`);
+        swapBase = Math.max(0, 3 - malus) + (p.privilege ? 1 : 0);
+        pushLog(
+          gs,
+          'action',
+          `${pname(p)}【地下城主】掷出 ${roll} 点：获得 ${roll} 血筹（换牌次数 ${swapBase}${malus ? `，含【餐车投毒】-${malus}` : ''}）`,
+        );
       }
+    } else {
+      if (malus > 0) {
+        swapBase = Math.max(0, swapBase - malus);
+        pushLog(gs, 'action', `${pname(p)} 因【餐车投毒】本回合换牌次数 -${malus}（剩 ${swapBase} 次）`);
+      }
+      if (effChar(p) === 'bartender') swapBase += 1;
     }
-    if (effChar(p) === 'bartender') swapBase += 1;
     p.swapLeft = swapBase;
     p.swapDrawnIds = []; // 新回合：塔罗师分步换牌的暂存抽牌清空
     // 换牌次数被投毒到 0：直接视为已完成换牌，不给「剩 0 次仍可换一组」的漏洞
@@ -789,7 +813,8 @@ export function bSwap(gs: BloodState, playerId: string, cardIds: string[], drawC
   }
   // 主播：一次弃置≥2张同最终点数（每回合一次）
   if (effChar(p) === 'streamer' && !p.streamerUsed && discardCards.length >= 2) {
-    const ranks = discardCards.map((c) => finalRank(p, c));
+    // FAQ 角色牌 30：Joker 在换牌阶段没有点数，不能与其他牌组成「相同点数」
+    const ranks = discardCards.filter((c) => c.s != null).map((c) => finalRank(p, c));
     if (new Set(ranks).size < ranks.length) {
       p.streamerUsed = true;
       p.blood += 3;
@@ -1125,9 +1150,13 @@ function allSuitsMatch(gs: BloodState, p: BPlayer, colors: 'black' | 'red'): boo
 function suitDiversity(gs: BloodState, p: BPlayer): number {
   const covered = new Set<string>();
   const flex: string[][] = [];
+  // 女仆「红桃=黑桃」为全局同一花色选择（FAQ 角色 25 答案 2）：她的红桃牌不能各选各的花色
+  const maid = effChar(p) === 'maid';
   for (const c of evalCardsFor(p, gs)) {
     if (c.suits.length === 1) covered.add(c.suits[0]);
-    else flex.push(c.suits);
+    else if (maid && c.suits.length === 2 && c.suits.includes('h') && c.suits.includes('s')) {
+      covered.add('hs'); // 全局同色：所有红桃=黑桃只能贡献同一种花色
+    } else flex.push(c.suits);
   }
   // 候选受限的灵活牌（红/黑芯片只有两候选、女仆合并、印章并集）不能当全万能花色：
   // 此前一律 +1 会把「3 张红芯片牌」数成 3 种花色（实际最多 2 种），画家白拿血筹
@@ -1342,11 +1371,20 @@ function barrierText(gs: BloodState, eff: BarrierEffect): string {
   const map: Record<BarrierEffect['t'], string> = {
     violent: '暴力删除', pinpoint: '定点爆破', boxRob: '黑厢抢夺', poison: '餐车投毒',
     freeze: '冻结车厢', amnesia: '暂时失忆', signal: '信号干扰器', demag: '消磁枪',
+    stealPrivilege: '鬼手探囊',
   };
   return `${by} 对 ${t} 使用【${map[eff.t]}】${eff.t === 'pinpoint' ? `（宣称 ${eff.rank} 点）` : ''}`;
 }
 
 /** 反制窗口结束：按选择结算（use=true 抵消；false 生效），并按来源推进 */
+/** 鬼手探囊的特权证转移结算（正常发动与屏障反制后生效共用） */
+function applyStealPrivilege(gs: BloodState, p: BPlayer, now: number): void {
+  for (const o of gs.players) o.privilege = false;
+  p.privilege = true;
+  gs.privilegeSeat = p.seat;
+  pushLog(gs, 'action', `【鬼手探囊】发动：${pname(p)} 夺得【临时特权证】`);
+}
+
 function resolveBarrier(gs: BloodState, use: boolean, now: number): void {
   const pend = gs.secretPending;
   if (!pend || pend.kind !== 'barrierAsk' || !pend.barrier) return;
@@ -1440,9 +1478,13 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
         const idx = randomInt(0, t.hand.length);
         const [c] = t.hand.splice(idx, 1);
         t.discard.push(c);
-        drawToCap(gs, t);
+        t.hand.push(...drawN(gs, t, 1)); // 卡面/FAQ：弃 1 抽 1（非抽至上限）
         pushLog(gs, 'action', `【信号干扰器】生效：${pname(t)} 随机弃置 ${bloodCardText(c)}，抽 1 张牌`);
       }
+      break;
+    }
+    case 'stealPrivilege': {
+      applyStealPrivilege(gs, by, now);
       break;
     }
     case 'demag': {
@@ -1543,7 +1585,7 @@ function advanceRevealDecision(gs: BloodState, now: number): void {
   gs.secretPending = { ...pend, kind: 'revealDecide', queue: rest.slice(1), decision: rest[0] };
 }
 
-/** 弹簧夹层：花费 X 血筹令该牌临时 ±X（2-14 钳制） */
+/** 弹簧夹层：花费 X 血筹令该牌临时 ±X（2-14 超出拒绝（非钳制，FAQ 023）） */
 export function bSpringUse(gs: BloodState, playerId: string, chipId: string, mod: number, now: number): void {
   void now;
   const pend = gs.secretPending;
@@ -1590,8 +1632,7 @@ export function bRevealChipTarget(
   if (!myChip || myChip.off) throw new BloodError('BAD_TARGET', '芯片不存在或已失效');
   const target = bySeat(gs, seat);
   if (!target) throw new BloodError('BAD_TARGET', '目标不存在');
-  // 复制自己的芯片会让同一效果结算两次（settleWin/revealGain 翻倍等），禁止
-  if (d.t === 'copy' && target.id === p.id) throw new BloodError('BAD_TARGET', '不能复制自己的芯片');
+  // FAQ 015：可复制任意一位玩家的芯片效果，「也包括自己」——不再禁止自复制
   // 只能作用于目标出牌区的芯片：宿主牌 id 可被枚举，不限区域等于探测暗置弃牌区/复制未上场芯片
   const targetChip = target.chips.find(
     (ch) => ch.on === cardId && ch.def === defId && !ch.off && target.play.some((card) => card.id === ch.on),
@@ -1987,7 +2028,9 @@ function settle(gs: BloodState, now: number): void {
     r.gainBlood = gainB;
     p.tickets += r.gainTickets;
     p.blood += gainB;
-    // 镀层触发：胜/败（含复制芯片的快照效果）
+    // 镀层触发：胜/败（含复制芯片的快照效果）。瞎掰王无人质疑时实际牌已弃置（FAQ 角色牌 39），
+    // 其牌上的芯片不触发任何效果
+    if (gs.bluffer != null && !gs.bluffer.challenged && gs.bluffer.seat === p.id) continue;
     for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
       const def = BLOOD_MARKET_BY_ID.get(ch.def);
       if (!def) continue;
@@ -2047,6 +2090,8 @@ function settle(gs: BloodState, now: number): void {
   // 拓展芯片结算：加密线路（魁首+车票，先于武士等按本回合车票结算的效果）
   for (const r of rows) {
     const p = bySeat(gs, r.seat)!;
+    // 瞎掰王无人质疑：实际牌已弃置，加密线路不触发（同上）
+    if (gs.bluffer != null && !gs.bluffer.challenged && gs.bluffer.seat === p.id) continue;
     for (const ch of p.chips.filter((cc) => p.play.some((card) => card.id === cc.on) && !cc.off)) {
       const def = BLOOD_MARKET_BY_ID.get(ch.def);
       if (!def) continue;
@@ -2127,6 +2172,8 @@ function settle(gs: BloodState, now: number): void {
         break;
       }
       case 'chef': {
+        // 瞎掰王无人质疑：实际牌已弃置（FAQ 角色牌 39），「打出 3」按无计
+        if (gs.bluffer != null && !gs.bluffer.challenged && gs.bluffer.seat === p.id) break;
         const threes = p.play.filter((c) => finalRank(p, c) === 3).length;
         if (threes > 0) {
           p.blood += settleGainBlood(gs, p, threes);
@@ -2172,6 +2219,15 @@ function settle(gs: BloodState, now: number): void {
         }
         break;
     }
+  }
+  // 双生子·弟收尾：本回合结算所得合计 -2（FAQ 角色牌 27：按合计扣减而非逐次）
+  for (const r of rows) {
+    const p = bySeat(gs, r.seat)!;
+    if (effChar(p) !== 'twinB' || !(p.settleGained ?? 0)) continue;
+    const debt = Math.min(2, p.settleGained ?? 0);
+    p.blood = Math.max(0, p.blood - debt);
+    p.settleGained = 0;
+    pushLog(gs, 'action', `${pname(p)}【双生子·弟】本回合结算血筹合计 -${debt}`);
   }
   for (const r of rows) {
     pushLog(
@@ -2246,8 +2302,10 @@ function settle(gs: BloodState, now: number): void {
     pushLog(gs, 'action', `【自毁芯片】发动：${pname(p)} 本回合打出的 ${moved.length} 张牌全部删除`);
   }
 
-  // 炸弹客：结算结束时，其他玩家随机删除 X 张本回合打出的牌，自己删除 X+1 张
-  if (gs.bomberX != null && gs.bomberX > 0) {
+  // 炸弹客：结算结束时，其他玩家随机删除 X 张本回合打出的牌，自己删除 X+1 张。
+  // FAQ 角色 59：宣告 X=0 时其他玩家删 0 张、炸弹客本人仍随机删 1 张；
+  // 超时未宣告不进入此处（bomberX 保持 null）
+  if (gs.bomberX != null && gs.bomberX >= 0) {
     for (const p of gs.players) {
       const n = effChar(p) === 'bomber' ? gs.bomberX + 1 : gs.bomberX;
       const ids = playedIdsByP.get(p.id)!;
@@ -2315,7 +2373,10 @@ function settle(gs: BloodState, now: number): void {
 
   // 对决展示确认门：所有玩家看完演示后（最后一人确认）统一进入购买，倒计时同步
   gs.phase = 'settle';
-  for (const p of gs.players) p.sdSeen = false;
+  for (const p of gs.players) {
+    p.sdSeen = false;
+    p.settleGained = 0; // 双生子·弟合计口径按回合重置
+  }
   // deadline = 演示完整播完（关键牌高亮收尾）+ 确认等待上限；客户端演示结束才开始显示倒计时
   const maxCards = Math.max(0, ...rows.map((r) => r.cards?.length ?? 0));
   const maxCores = Math.max(0, ...rows.map((r) => r.cores));
@@ -2595,8 +2656,12 @@ export function bBuy(
   p.blood -= cost;
   p.blood += bonusTaken;
   ms.bonus = 0;
-  const baristaFirst = effChar(p) === 'barista' && !p.firstBuyUsed && def.cost >= 3;
-  if (baristaFirst) p.baristaPending = true; // 咖啡师：免费获得牌堆顶一张（结算后发放）
+  // FAQ 角色 57：咖啡师按「第一次符合条件的购买」触发——先买原价 <3 的牌不消耗资格
+  const baristaFirst = effChar(p) === 'barista' && !p.baristaUsed && def.cost >= 3;
+  if (baristaFirst) {
+    p.baristaUsed = true;
+    p.baristaPending = true; // 咖啡师：免费获得牌堆顶一张（结算后发放）
+  }
   p.firstBuyUsed = true; // 首次购买已消耗（0血筹购入也算）
   p.boughtAny = true;
   gs.announce = { defId: def.id, buyerSeat: p.seat, at: Date.now() };
@@ -2627,6 +2692,7 @@ function processMarketDef(
   free: boolean,
   insertInto?: string,
   noAdvance = false,
+  now = Date.now(),
 ): void {
   void free;
   // 强化芯片（含触发类）：立即插入自己弃牌区的一张牌
@@ -2742,18 +2808,19 @@ function processMarketDef(
       return;
     }
     case 'stealPrivilege': {
-      // 鬼手探囊：夺得更衣室大权——临时特权证归你（江东之主持有期间不可夺）
+      // 鬼手探囊：夺得更衣室大权——临时特权证归你（江东之主持有期间不可夺）。
+      // FAQ 039：单独对持证者使用，持证者可用【防护屏障】抵消
       const holder = gs.players.find((o) => o.privilege);
       if (holder && effChar(holder) === 'sunwu') {
         gs.recycle.push(def.id);
         pushLog(gs, 'action', `【${def.name}】发动失败：${pname(holder)}【江东之主】的特权证不可被夺走`);
-      } else {
-        for (const o of gs.players) o.privilege = false;
-        p.privilege = true;
-        gs.privilegeSeat = p.seat;
-        gs.recycle.push(def.id);
-        pushLog(gs, 'action', `【${def.name}】发动：${pname(p)} 夺得【临时特权证】`);
+        afterMarketResolved(gs, p, noAdvance);
+        return;
       }
+      if (holder && tryBarrierAsk(gs, holder.id, p.id, { t: 'stealPrivilege', by: p.id, seat: holder.id, after: 'market' }, now)) {
+        return; // 进入屏障反制窗口
+      }
+      applyStealPrivilege(gs, p, now);
       afterMarketResolved(gs, p, noAdvance);
       return;
     }
@@ -3186,7 +3253,20 @@ export function bRemove(gs: BloodState, playerId: string, cardIds: string[], now
   if (p.blood < cost) throw new BloodError('NO_BLOOD', `血筹不足（需 ${cost}）`);
   p.blood -= cost;
   p.discard = p.discard.filter((c) => !set.has(c.id));
-  p.removed.push(...cards);
+  // FAQ 通用 256：删除他人（借来的）牌进原所有者的删牌区（捣蛋鬼弃牌区持有他人牌）
+  const byOwner = new Map<number, BCard[]>();
+  for (const c of cards) {
+    const owner = cardOwnerSeat(c.id) ?? p.seat;
+    const list = byOwner.get(owner) ?? [];
+    list.push(c);
+    byOwner.set(owner, list);
+  }
+  for (const [ownerSeat2, list] of byOwner) {
+    const owner = bySeat(gs, ownerSeat2);
+    if (owner) owner.removed.push(...list);
+    else p.removed.push(...list);
+  }
+  gainChefDeleteThrees(gs, p, cards); // 特级大厨：任意时候（含初始构筑外的删牌）删 3 得 4
   purgeChipsOn(gs, p, set);
   p.removeDone = true;
   p.lastAction = cards.length > 0 ? `删除 ${cards.length} 张` : '跳过删牌';
@@ -3703,8 +3783,7 @@ export function bloodTick(gs: BloodState, now: number): boolean {
           const c = p.draw.pop()!;
           p.removed.push(c);
           purgeChipsOn(gs, p, new Set([c.id]));
-          p.draw = shuffle(p.draw); // 删自抽牌堆：按卡面规则同样重洗（并触发洗衣房店主）
-          grantLaundryOnReshuffle(gs);
+          p.draw = shuffle(p.draw); // 删自抽牌堆：按卡面规则同样重洗（重洗抽牌堆≠重洗牌库，不触发洗衣房店主/磁力线圈）
           // 与玩家路径 bCleanerDel 同口径：大厨删 3 +1 血筹；删到皇叔第 54 张须判宿命胜利
           if (effChar(p) === 'chef' && finalRank(p, c) === 3) {
             p.blood += 4;
@@ -3781,7 +3860,7 @@ function resolveSwapEndOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
     }
     case 'bomberClaim':
       pushLog(gs, 'action', `${pname(p)}【炸弹客】宣告超时：本回合不发动`);
-      gs.bomberX = 0;
+      gs.bomberX = null; // null=未发动（区别于主动宣告 X=0：那会删自己 1 张）
       break;
     case 'curseTake':
       pushLog(gs, 'action', `${pname(p)}【咒术师】取回超时：藏牌保留在角色牌下`);
@@ -3937,7 +4016,7 @@ export function bSecretTarget(gs: BloodState, playerId: string, seat: number, no
         const idx = randomInt(0, t.hand.length);
         const [c] = t.hand.splice(idx, 1);
         t.discard.push(c);
-        drawToCap(gs, t);
+        t.hand.push(...drawN(gs, t, 1)); // 卡面/FAQ：弃 1 抽 1（非抽至上限）
         pushLog(gs, 'action', `【信号干扰器】${pname(t)} 随机弃置 ${bloodCardText(c)}，并抽 1 张牌`);
       }
       finish();
@@ -4658,7 +4737,9 @@ export function bSuccubusSteal(gs: BloodState, playerId: string, seat: number, n
   const p = gs.players.find((x) => x.id === playerId)!;
   const amount = pend.blood ?? 1;
   // 先校验后清挂起：非法提交不得吞掉整段交互（否则魅魔既拿不到抢夺也拿不到补偿，只能干等超时）
-  const t = seat < 0 ? null : bySeat(gs, seat);
+  // FAQ 角色 58：存在合法目标时必须尽可能抢夺，不允许「放弃后直接获得」
+  if (seat < 0) throw new BloodError('BAD_TARGET', '必须选择一位抢夺目标');
+  const t = bySeat(gs, seat);
   if (t) {
     if (t.id === playerId) throw new BloodError('BAD_TARGET', '目标无效');
     const want: 'm' | 'f' = p === (gs.players.find((x) => x.privilege) ?? gs.players[0]) ? 'm' : 'f';
@@ -5253,8 +5334,7 @@ export function bCleanerDel(gs: BloodState, playerId: string, seat: number, card
   }
   if (fromDraw) {
     t.draw = t.draw.filter((c) => c.id !== card.id);
-    t.draw = shuffle(t.draw); // 删除抽牌堆的牌后重洗抽牌堆
-    grantLaundryOnReshuffle(gs);
+    t.draw = shuffle(t.draw); // 删除抽牌堆的牌后重洗抽牌堆（重洗抽牌堆≠重洗牌库，不触发洗衣房店主/磁力线圈）
   } else {
     t.discard = t.discard.filter((c) => c.id !== card.id);
   }
