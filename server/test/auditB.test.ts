@@ -1,5 +1,4 @@
-/**
- * 全面审查（2026-10-03）批次 B 的回归测试：角色技能与黑市卡的实现缺陷。
+/** * 全面审查（2026-10-03）批次 B 的回归测试：角色技能与黑市卡的实现缺陷。
  *
  * B1 防护屏障：卡面「取消玩家即将单独对你使用的[秘密交易]或[备用道具]效果」+ 规则书
  * §5「之后可使用一次；用后背面朝上弃入回收站」——即**只有真正发动才消耗**。
@@ -11,6 +10,7 @@ import {
   bBuy,
   bDemagPick,
   bPinpoint,
+  bPinpointVictimPick,
   bRemoveDone,
   bSecretDelete,
   bSecretTarget,
@@ -63,9 +63,16 @@ describe('批次 B · 防护屏障只有真正发动才消耗（B1）', () => {
     gs.players[1].discard = gs.players[1].draw.splice(0, 3);
     gs.players[1].discard.forEach((c) => (c.r = 7)); // 让定点爆破有目标可删
     bBarrierDecide(gs, 'p1', false, NOW);
-    expect(gs.secretPending).toBeNull();
+    // 定点爆破生效：转交受害者自选（与主路径同口径），不再是内联随机删
+    expect(gs.secretPending?.kind).toBe('pinpointVictim');
+    expect(gs.secretPending?.seat).toBe('p1');
     expect(hasBarrier(gs)).toBe(true); // 修复前：已被提前回收
     expect(gs.recycle).not.toContain('barrier');
+    // 受害者选择后正常结算
+    const pick = gs.players[1].discard.find((c) => c.r === 7)!;
+    bPinpointVictimPick(gs, 'p1', pick.id, NOW);
+    expect(gs.players[1].removed.some((c) => c.id === pick.id)).toBe(true);
+    expect(gs.secretPending).toBeNull();
   });
 
   it('选择发动：屏障被消耗并进入回收站，效果被抵消', () => {

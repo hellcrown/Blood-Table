@@ -1093,6 +1093,13 @@ function beginImpTurn(gs: BloodState, now: number): void {
     pushLog(gs, 'action', `${pname(imp)} 因【餐车投毒】换牌次数 -${malus}（剩 ${imp.swapLeft} 次）`);
   }
   imp.lastAction = null;
+  // 被投毒到 0 次：与 finishDrawPhase 同口径直接视为完成，避免干等 60s 托管
+  if (imp.swapLeft <= 0) {
+    imp.swapDone = true;
+    afterSwapEnded(gs, imp, now);
+    checkSwapEnd(gs, now);
+    return;
+  }
   pushLog(gs, 'action', `🃏 其他玩家均已结束换牌：${pname(imp)}【捣蛋鬼】开始抽牌与换牌`);
   tryImpDraw(gs, imp, now);
 }
@@ -1437,11 +1444,11 @@ function applyBarrierEffect(gs: BloodState, eff: BarrierEffect, now: number): vo
       if (matches.length === 0) {
         pushLog(gs, 'action', `【定点爆破】${pname(t)} 弃牌堆没有 ${rank} 点的牌，落空`);
       } else {
-        const pick = matches[randomInt(0, matches.length)];
-        t.discard = t.discard.filter((c) => c.id !== pick.id);
-        t.removed.push(pick);
-        purgeChipsOn(gs, t, new Set([pick.id]));
-        pushLog(gs, 'action', `【定点爆破】生效：${pname(t)} 删除弃牌堆中的 ${bloodCardText(pick)}`);
+        // 卡面/FAQ 033：选择权在受害者（「该对手必须…删除一张该点数的牌」），
+        // 与主路径 bPinpointVictimPick 同口径；此前屏障反制路径代受害者随机挑
+        gs.secretPending = { seat: t.id, kind: 'pinpointVictim', rank, buyerId: eff.by, targetSeat: t.id };
+        pushLog(gs, 'action', `【定点爆破】${pname(t)} 须从弃牌堆选择一张 ${rank} 点的牌删除`);
+        return; // 受害者选择后由 bPinpointVictimPick 结算并推进
       }
       break;
     }
@@ -2117,7 +2124,7 @@ function settle(gs: BloodState, now: number): void {
       const actual = catName(row.cat);
       const guessed = catName(cat);
       if (row.cat === cat) {
-        guesser.blood += 3;
+        guesser.blood += settleGainBlood(gs, guesser, 3); // 双生子·弟合计口径
         const dec = Math.min(4, row.gainTickets);
         row.gainTickets -= dec;
         target.tickets -= dec;
@@ -2176,7 +2183,8 @@ function settle(gs: BloodState, now: number): void {
       case 'chef': {
         // 瞎掰王无人质疑：实际牌已弃置（FAQ 角色牌 39），「打出 3」按无计
         if (gs.bluffer != null && !gs.bluffer.challenged && gs.bluffer.seat === p.id) break;
-        const threes = p.play.filter((c) => finalRank(p, c) === 3).length;
+        // FAQ 角色 15 答案 3：JOKER 可视为任意点数，按当时视为 3 计入
+        const threes = p.play.filter((c) => finalRank(p, c) === 3 || c.s == null).length;
         if (threes > 0) {
           p.blood += settleGainBlood(gs, p, threes);
           pushLog(gs, 'action', `${pname(p)}【特级大厨】打出 ${threes} 张3：获得 ${threes} 血筹`);
@@ -2301,6 +2309,7 @@ function settle(gs: BloodState, now: number): void {
     p.discard = p.discard.filter((c) => !ids.includes(c.id));
     p.removed.push(...moved);
     purgeChipsOn(gs, p, new Set(ids));
+    gainChefDeleteThrees(gs, p, moved); // 特级大厨「任意时候删 3 得 4」（FAQ 角色 15 答案 2）
     pushLog(gs, 'action', `【自毁芯片】发动：${pname(p)} 本回合打出的 ${moved.length} 张牌全部删除`);
   }
 
@@ -2321,6 +2330,7 @@ function settle(gs: BloodState, now: number): void {
         deleted.push(c);
       }
       purgeChipsOn(gs, p, new Set(deleted.map((c) => c.id)));
+      gainChefDeleteThrees(gs, p, deleted); // 特级大厨「任意时候删 3 得 4」（FAQ 角色 15 答案 2）
       if (deleted.length > 0) {
         pushLog(gs, 'action', `💣 ${pname(p)}${effChar(p) === 'bomber' ? '【炸弹客】' : '（炸弹客宣告）'}随机删除本回合打出的牌：${deleted.map(bloodCardText).join(' ')}`);
       }
@@ -2819,6 +2829,8 @@ function processMarketDef(
         afterMarketResolved(gs, p, noAdvance);
         return;
       }
+      // 秘密交易结算即弃入回收站（金科玉律·7）：无论屏障是否抵消，这张牌都已消耗
+      gs.recycle.push(def.id);
       if (holder && tryBarrierAsk(gs, holder.id, p.id, { t: 'stealPrivilege', by: p.id, seat: holder.id, after: 'market' }, now)) {
         return; // 进入屏障反制窗口
       }
@@ -3912,7 +3924,7 @@ function resolveSettleOnTimeout(gs: BloodState, p: BPlayer, now: number): void {
       const t = targets[randomInt(0, targets.length)];
       const pay = Math.min(amount, t.blood);
       t.blood -= pay;
-      p.blood += pay;
+      p.blood += settleGainBlood(gs, p, pay);
       pushLog(gs, 'action', `${pname(p)}【魅魔】托管抢夺 ${pname(t)}：获得 ${pay} 血筹`);
     } else {
       p.blood += amount;
@@ -4248,6 +4260,7 @@ function resolvePendingOnTimeout(gs: BloodState, p: BPlayer, now: number): void 
         const pickCard = matches[randomInt(0, matches.length)];
         p.discard = p.discard.filter((c) => c.id !== pickCard.id);
         p.removed.push(pickCard);
+        purgeChipsOn(gs, p, new Set([pickCard.id])); // 与手动路径同口径：宿主牌删除时芯片同步清除
         pushLog(gs, 'action', `【定点爆破】托管：${pname(p)} 删除弃牌堆中的 ${bloodCardText(pickCard)}`);
       }
       const buyer = gs.players.find((x) => x.id === pend.buyerId)!;
@@ -4756,7 +4769,7 @@ export function bSuccubusSteal(gs: BloodState, playerId: string, seat: number, n
   }
   const pay = Math.min(amount, Math.max(0, t.blood));
   t.blood -= pay;
-  p.blood += pay;
+  p.blood += settleGainBlood(gs, p, pay); // 双生子·弟合计口径
   pushLog(gs, 'action', `${pname(p)}【魅魔】抢夺 ${pname(t)}：获得 ${pay} 血筹`);
   processSettleQueue(gs, now);
 }
