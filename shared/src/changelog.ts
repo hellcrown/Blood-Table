@@ -23,6 +23,13 @@ export interface ChangelogEntry extends ChangelogRef {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     date: '2026-10-14',
+    title: '芯片失效时长修正',
+    items: [
+      '消磁枪/屏蔽器的「失效」现在只持续到本回合对决结束：一进购买阶段芯片立即恢复——弃牌区里的牌会重新显示芯片角标，不再出现「看着空空却提示已有芯片」的迷惑窗口',
+    ],
+  },
+  {
+    date: '2026-10-14',
     title: '咒术师判定修正',
     items: [
       '咒术师的「5」现在按最终点数判定：被校准器等点数芯片改造后的 5 可以正常藏入与取回（原点数 5 被改小成 4 的牌则不再算 5）',

@@ -2486,6 +2486,16 @@ export function bShowdownDone(gs: BloodState, playerId: string, now: number): vo
 
 function startBuyPhase(gs: BloodState, now: number): void {
   const winner = gs.players.find((p) => p.privilege) ?? gs.players[0];
+  // 「本次对决失效/修正」到此为止（卡面时限=【对决】）：一进购买阶段即恢复——
+  // 弃牌区里的牌重新显示芯片角标、「一张牌一芯片」占位恢复可见。
+  // 结算删除判定（枪手/自毁/炸弹客/大厨按最终点数）发生在本函数之前，仍按失效口径计。
+  // 复制快照 copiedFx 不在此清：复制到的线圈要在本回合重整阶段的重洗置顶生效。
+  for (const p of gs.players) {
+    for (const ch of p.chips) {
+      delete ch.off;
+      delete ch.springMod;
+    }
+  }
   gs.phase = 'buy';
   for (const p of gs.players) {
     p.buyPassed = false;
@@ -3369,7 +3379,7 @@ function startReorg(gs: BloodState, now: number): void {
 
 /** 重整阶段全部完成 → 回合收尾（清洁工自选删牌）并进入下回合 */
 function finishReorg(gs: BloodState, now: number): void {
-  // 对决期芯片状态（失效/弹簧修正/复制快照）回合结束清除
+  // 复制快照回合结束清除（失效 off / 弹簧 springMod 已在 startBuyPhase 对决结束时提前清除，这里兜底）
   for (const p2 of gs.players) {
     for (const ch of p2.chips) {
       delete ch.off;

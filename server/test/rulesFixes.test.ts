@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { evalBloodHand, applyImitate, type EvalCard } from '@shared/bloodEval';
 import type { BloodState, BPlayer } from '../src/blood/types';
-import { bloodTick, createBloodGame as createBloodGameRaw, bCrownBid, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, bAgentAsk, bAgentDecide } from '../src/blood/engine';
+import { bloodTick, createBloodGame as createBloodGameRaw, bCrownBid, bPickChar, bPlay, bGamblerGuess, bRevealChipTarget, finalRank, bAgentAsk, bAgentDecide, bShowdownDone } from '../src/blood/engine';
+import { buildBloodView } from '../src/blood/view';
+import type { Room } from '../src/rooms';
 import { createGame, startHand, applyAction } from '../src/game/engine';
 import { RoomManager } from '../src/rooms';
 import { BloodError } from '../src/blood/engine';
@@ -302,5 +304,27 @@ describe('部署排水', () => {
     expect(notices()).toBe(2);
     mgr.setDraining(false);
     vi.useRealTimers();
+  });
+});
+
+describe('芯片失效时长 · 仅对决阶段（进入购买阶段即恢复）', () => {
+  it('被消磁的芯片一进购买阶段就恢复：off 清除、弃牌区牌重新下发芯片角标', () => {
+    const gs = makeGame(['dealer', 'clerk']);
+    gs.phase = 'settle';
+    gs.secretPending = null;
+    const p0 = gs.players[0];
+    const card = { id: 'c-demoted', r: 4, s: 's' as const };
+    p0.discard.push(card);
+    p0.chips.push({ id: 'ch-demag', def: 'calib1', on: card.id, off: true });
+    gs.players[1].sdSeen = true; // p1 已确认；p0 由下方确认动作置位（预置 true 会让 bShowdownDone 早退）
+    // 恢复前：结算阶段内仍按失效口径（占位且无角标）
+    const room0 = { code: 'off-t', mode: 'blood', maxPlayers: 2, sessions: new Map() } as unknown as Room;
+    expect(buildBloodView(room0, gs, p0.id).me.discard.find((c) => c.id === card.id)?.chipIds).toEqual([]);
+    bShowdownDone(gs, 'p0', NOW); // 全员已确认 → startBuyPhase
+    expect(gs.phase).toBe('buy');
+    expect(p0.chips[0].off).toBeUndefined();
+    expect(p0.chips[0].springMod).toBeUndefined();
+    const room = { code: 'off-t', mode: 'blood', maxPlayers: 2, sessions: new Map() } as unknown as Room;
+    expect(buildBloodView(room, gs, p0.id).me.discard.find((c) => c.id === card.id)?.chipIds).toContain('calib1');
   });
 });
