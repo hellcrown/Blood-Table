@@ -398,7 +398,8 @@ function charBonus(p: BPlayer, cards: BCard[], ev: { pips: number }): number {
     b += Math.min(4, suits.size) * 0.05;
   }
   if (ch === 'screenwriter' && ev.pips === 50) b += 0.5;
-  if (ch === 'chef') b += cards.filter((c) => c.r === 3).length * 0.08;
+  // 大厨的 3 触发按最终点数结算（引擎同口径），评分不能只看原始点数
+  if (ch === 'chef') b += cards.filter((c) => c.s != null && blood.finalRank(p, c) === 3).length * 0.08;
   if (ch === 'princess' && p.princessDark === false) {
     b += cards.every((c) => c.s === 'h' || c.s === 'd') ? 0.4 : 0;
   }
