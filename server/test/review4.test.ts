@@ -124,26 +124,29 @@ describe('M4：hackerSetup 挂起未决时 bSetup 拒绝', () => {
 });
 
 describe('M5：走私客标记购买补位后重新定位', () => {
-  it('买空非标记栏位导致右推后，标记跟随被标记的牌（defId 定位）', () => {
+  it('买空非标记栏位导致右推后，标记跟随被标记的牌（uid 物理身份定位）', () => {
     const gs = makeGame();
     gs.phase = 'buy';
     gs.turnSeat = 0;
     gs.supply.push('dealerLic'); // 补位来源
+    // 栏位必须带物理身份 uid：引擎优先按 uid 重定位；无 uid 走 defId 兜底会被
+    // 「补位翻出牌库自带的那张同 def」随机干扰（荷官证整副 1 张，约 6-8% 落进补位窗口，
+    // 排到测试推入那张的左边 → findIndex 跟错牌。既有 CI 偶发红即此，与引擎无关）
     gs.market = [
-      { def: 'dealerLic', bonus: 0 }, // slot0 ← 标记这张
-      { def: 'demag', bonus: 0 },     // slot1 ← 买这张（道具立即结算触发补位）
-      { def: null, bonus: 0 },
-      { def: null, bonus: 0 },
-      { def: null, bonus: 0 },
+      { def: 'dealerLic', bonus: 0, uid: 101 }, // slot0 ← 标记这张
+      { def: 'demag', bonus: 0, uid: 102 },     // slot1 ← 买这张（道具立即结算触发补位）
+      { def: null, bonus: 0, uid: 103 },
+      { def: null, bonus: 0, uid: 104 },
+      { def: null, bonus: 0, uid: 105 },
     ];
-    gs.smugglerMark = { slot: 0, by: 'p1', defId: 'dealerLic' };
+    gs.smugglerMark = { slot: 0, by: 'p1', defId: 'dealerLic', uid: 101 };
     const p0 = gs.players[0]!;
     p0.blood = 50;
     for (const p of gs.players) p.buyPassed = false;
     bBuy(gs, 'p0', 1, undefined, NOW);
-    // demag 被买空补位：补位会连续填满空栏，被标记的 dealerLic 整体右移——
-    // 标记必须始终指向 dealerLic 现所在栏位（此前停在旧 slot0，会让他人在新栏位误付过路费）
-    const dlSlot = gs.market.findIndex((m) => m.def === 'dealerLic');
+    // demag 被买空补位：补位会连续填满空栏，被标记的 dealerLic（uid 101）整体右移——
+    // 标记必须始终指向被标记那张牌现所在栏位（此前停在旧 slot0，会让他人在新栏位误付过路费）
+    const dlSlot = gs.market.findIndex((m) => m.uid === 101);
     expect(dlSlot).toBeGreaterThan(0); // 确实发生了右移
     expect(gs.smugglerMark?.slot).toBe(dlSlot);
   });
@@ -154,13 +157,15 @@ describe('M5：走私客标记购买补位后重新定位', () => {
     gs.turnSeat = 0;
     gs.supply.push('calib1'); // 补位来源：与被标记的 dealerLic 不同 def，防同 id 误定位
     gs.market = [
-      { def: 'calib1', bonus: 0 },
-      { def: 'dealerLic', bonus: 0 }, // ← 标记这张，且它就是被买走的
-      { def: null, bonus: 0 },
-      { def: null, bonus: 0 },
-      { def: null, bonus: 0 },
+      { def: 'calib1', bonus: 0, uid: 201 },
+      { def: 'dealerLic', bonus: 0, uid: 202 }, // ← 标记这张，且它就是被买走的
+      { def: null, bonus: 0, uid: 203 },
+      { def: null, bonus: 0, uid: 204 },
+      { def: null, bonus: 0, uid: 205 },
     ];
-    gs.smugglerMark = { slot: 1, by: 'p1', defId: 'dealerLic' };
+    // uid 定位：被标记牌离场后 uid 查无此牌 → 标记必须作废
+    //（defId 兜底会偶发跟住补位翻出的另一张荷官证，见上一用例注释）
+    gs.smugglerMark = { slot: 1, by: 'p1', defId: 'dealerLic', uid: 202 };
     const p0 = gs.players[0]!;
     p0.blood = 50;
     // p0 非走私客：先付 2 过路费再购买（标记生效口径保持）
