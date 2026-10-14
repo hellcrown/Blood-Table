@@ -996,9 +996,9 @@ export function botAct(brain: BotBrain, gs: BloodState, playerId: string, now: n
 /* ---- 换牌决策：保留最优 5 张，弃孤立弱牌 ---- */
 function actSwap(brain: BotBrain, gs: BloodState, p: BPlayer, now: number): boolean {
   const ch = blood.effChar(p);
-  // 咒术师：有【5】先藏（抽1+1血筹）
+  // 咒术师：有【5】先藏（抽1+1血筹）——与引擎同口径：按最终点数判定（含芯片修正）
   if (ch === 'curse') {
-    const five = p.hand.find((c) => c.r === 5 && c.s != null);
+    const five = p.hand.find((c) => c.s != null && blood.finalRank(p, c) === 5);
     if (five) {
       blood.bCurseHide(gs, p.id, five.id, now);
       return true;

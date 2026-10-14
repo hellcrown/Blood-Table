@@ -1491,7 +1491,8 @@ export function BloodTable({ view }: { view: BloodView }) {
                     )}
                     {view.phase === 'swap' && myCharId === 'curse' &&
                       view.me.hand
-                        .filter((c) => c.r === 5 && c.s != null)
+                        // 「5」按最终点数判定（服务端 effR 含校准器/限流阀等芯片修正），与引擎口径一致
+                        .filter((c) => (c.effR ?? c.r) === 5 && c.s != null)
                         .map((c) => (
                           <button
                             key={c.id}
@@ -1502,7 +1503,7 @@ export function BloodTable({ view }: { view: BloodView }) {
                               setSelSwap((l) => l.filter((x) => x !== c.id)); // 牌已离手：从换牌选择中剔除
                             }}
                           >
-                            ✨ 藏入{cardLabel(c)}（抽1张+1🩸）
+                            ✨ 藏入{effLabel(c)}（抽1张+1🩸）
                           </button>
                         ))}
 

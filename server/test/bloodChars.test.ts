@@ -54,6 +54,8 @@ import {
 } from '../src/blood/engine';
 import { BLOOD_MARKET_BY_ID } from '@shared/bloodCards';
 import type { BCard, BloodPhase, BloodState, BPlayer } from '../src/blood/types';
+import { buildBloodView } from '../src/blood/view';
+import type { Room } from '../src/rooms';
 
 const NOW = 1000;
 
@@ -576,6 +578,32 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
       expect(p0.curseStash.length).toBe(1);
       expect(p0.blood).toBe(blood + 1);
     }
+  });
+
+  it('咒术师：「5」按最终点数判定——4+校准器+1 可藏，5+限流阀-1 不可藏', () => {
+    const gs = makeGame('curse', 'clerk');
+    driveTo(gs, 'swap');
+    const p0 = gs.players[0];
+    // 确定式布牌：从自己牌区取两张花色牌直接改点数（初始构筑会删牌，按点数找牌可能落空）
+    const pool = [...p0.draw, ...p0.hand].filter((c) => c.s != null);
+    const four = pool[0];
+    const five = pool[1];
+    four.r = 4;
+    five.r = 5;
+    p0.hand = [four, five];
+    p0.draw = pool.slice(2);
+    p0.discard = [];
+    p0.chips.push({ id: 'ch-test-cal', def: 'calib1', on: four.id }); // 4 → 最终点数 5
+    p0.chips.push({ id: 'ch-test-lim', def: 'limiter1', on: five.id }); // 5 → 最终点数 4
+    const blood = p0.blood;
+    // 视图口径先验（藏牌前，牌还在手）：客户端按钮按 effR 过滤，改造后的 5 必须以 effR=5 下发
+    const room = { code: 'curse-eff', mode: 'blood', maxPlayers: 2, sessions: new Map() } as unknown as Room;
+    expect(buildBloodView(room, gs, p0.id).me.hand.find((c) => c.id === four.id)?.effR).toBe(5);
+    bCurseHide(gs, p0.id, four.id, NOW); // 改造后的 5：可藏
+    expect(p0.curseStash.length).toBe(1);
+    expect(p0.blood).toBe(blood + 1);
+    expect(() => bCurseHide(gs, p0.id, five.id, NOW)).toThrow(/只能藏入/); // 被改小成 4 的原 5：不可藏
+    expect(p0.curseStash.length).toBe(1);
   });
 
   it('入殓师：特殊换牌置角色牌上，结束时置入弃牌区', () => {

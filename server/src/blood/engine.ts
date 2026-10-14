@@ -4870,7 +4870,9 @@ export function bCurseHide(gs: BloodState, playerId: string, cardId: string, now
   // 卡面「【换牌阶段】可随时」：换牌次数用尽/被投毒归零（swapDone 自动置位）后仍在本阶段内，可继续藏
   const card = p.hand.find((c) => c.id === cardId);
   if (!card) throw new BloodError('BAD_CARD', '手牌不存在');
-  if (card.r !== 5 || card.s == null) throw new BloodError('BAD_CARD', '只能藏入【5】');
+  // 「5」按最终点数判定（含校准器/限流阀/复制/弹簧修正），与特级大厨【3】、主播同点数同口径；
+  // 王牌（s==null）finalRank 恒为 0，天然不可藏
+  if (finalRank(p, card) !== 5) throw new BloodError('BAD_CARD', '只能藏入【5】');
   p.hand = p.hand.filter((c) => c.id !== cardId);
   p.curseStash.push(card);
   const drawn = drawN(gs, p, 1);

@@ -22,6 +22,13 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-14',
+    title: '咒术师判定修正',
+    items: [
+      '咒术师的「5」现在按最终点数判定：被校准器等点数芯片改造后的 5 可以正常藏入与取回（原点数 5 被改小成 4 的牌则不再算 5）',
+    ],
+  },
+  {
     date: '2026-10-10',
     title: '规则修正（对照官方FAQ全面校对）',
     items: [
