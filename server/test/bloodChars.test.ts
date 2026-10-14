@@ -469,7 +469,10 @@ describe('血色引擎 · 拓展角色自动化（按卡面）', () => {
     expect(gs.secretPending?.kind).toBe('blufferDeclare');
     const p0 = gs.players[0];
     const declared = p0.play.map((c) => ({ id: c.id, r: c.r === 0 ? 5 : c.r, s: c.s ?? ('s' as const) }));
-    declared[0].r = declared[0].r === 14 ? 5 : 14; // 篡改一张制造不一致
+    // 篡改一张「非王」牌制造不一致：王的候选点数是全集、与任何宣告都一致，
+    // 改王不会触发质疑成功（既有 CI 随机翻车源——bestFive 恰好把王排在首位时本用例必挂）
+    const t = p0.play.findIndex((c) => c.s != null);
+    declared[t].r = declared[t].r === 14 ? 5 : 14;
     bBlufferDeclare(gs, p0.id, declared, NOW);
     expect(gs.bluffer?.challenged).toBe(false);
     expect(gs.secretPending?.kind).toBe('blufferChallenge');
