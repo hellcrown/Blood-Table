@@ -53,7 +53,8 @@ export function Room({ view }: { view: TableView }) {
 
   // 邀请链接 = 当前访问地址 + 房间码参数（朋友打开后自动预填房间码）
   const inviteUrl = `${location.origin}/?room=${view.code}`;
-  const brand = view.mode === 'blood' ? '血色牌局' : view.mode === 'mines' ? '扫雷竞速' : '经典德州';
+  const brand =
+    view.mode === 'blood' ? '血色牌局' : view.mode === 'mines' ? '扫雷竞速' : view.mode === 'tactics' ? '血色猎场' : '经典德州';
   const inviteText = `${inviteUrl} — ${brand}房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
@@ -145,6 +146,8 @@ export function Room({ view }: { view: TableView }) {
     targetTickets?: number;
     minesDifficulty?: 'easy' | 'medium' | 'hard';
     minesTimeSec?: number;
+    tacticsMapSize?: 'small' | 'medium' | 'large';
+    tacticsTurnSec?: number;
     password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -274,7 +277,13 @@ export function Room({ view }: { view: TableView }) {
 
         <div className="settings-panel">
           <div className="box-title">
-            {view.mode === 'blood' ? '血色牌局 · 对局规则' : view.mode === 'mines' ? '扫雷竞速 · 对局规则' : '房间设置（德州扑克）'}
+            {view.mode === 'blood'
+              ? '血色牌局 · 对局规则'
+              : view.mode === 'mines'
+                ? '扫雷竞速 · 对局规则'
+                : view.mode === 'tactics'
+                  ? '血色猎场 · 对局规则'
+                  : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
           {view.mode === 'mines' ? (
@@ -310,6 +319,41 @@ export function Room({ view }: { view: TableView }) {
                 </select>
                 <span className="hint">倒计时归零按当前进度排名</span>
               </div>
+            </div>
+          ) : view.mode === 'tactics' ? (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">地图尺寸：</span>
+                <select
+                  value={view.tacticsMapSize ?? 'medium'}
+                  disabled={!isHost}
+                  onChange={(e) =>
+                    update({ tacticsMapSize: e.target.value as 'small' | 'medium' | 'large' })
+                  }
+                >
+                  <option value="small">小图 11×11</option>
+                  <option value="medium">中图 15×15</option>
+                  <option value="large">大图 19×19</option>
+                </select>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">回合时限：</span>
+                <select
+                  value={view.tacticsTurnSec ?? 0}
+                  disabled={!isHost}
+                  onChange={(e) => update({ tacticsTurnSec: Number(e.target.value) })}
+                >
+                  <option value={0}>默认（60 秒）</option>
+                  <option value={30}>30 秒</option>
+                  <option value={60}>60 秒</option>
+                  <option value={90}>90 秒</option>
+                </select>
+                <span className="hint">超时自动结束回合</span>
+              </div>
+              <p className="hint">
+                每人 4 行动点/回合 · 移动一格/攻击/技能各耗 1 点 · 墙挡脚不挡手 · 击杀野怪与对手 ·
+                最后存活者获胜
+              </p>
             </div>
           ) : view.mode === 'blood' ? (
             <p className="hint">

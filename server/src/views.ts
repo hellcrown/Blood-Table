@@ -19,6 +19,8 @@ export function buildView(room: Room, viewerId: string | null, asWaiting = false
     expansion: room.expansion,
     minesDifficulty: room.minesDifficulty,
     minesTimeSec: room.minesTimeSec,
+    tacticsMapSize: room.tacticsMapSize,
+    tacticsTurnSec: room.tacticsTurnSec,
     serverTime: now,
   };
 

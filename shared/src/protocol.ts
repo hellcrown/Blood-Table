@@ -128,6 +128,10 @@ export interface TableView {
   minesDifficulty?: 'easy' | 'medium' | 'hard';
   /** 扫雷模式：时限秒数（0=按难度默认：初级 3 分/中级 6 分/高级 10 分） */
   minesTimeSec?: number;
+  /** 血色猎场：地图尺寸（默认 medium） */
+  tacticsMapSize?: 'small' | 'medium' | 'large';
+  /** 血色猎场：回合时限秒数（0=默认 60s） */
+  tacticsTurnSec?: number;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   players: SeatView[];
@@ -147,7 +151,7 @@ export interface TableView {
 
 /* ---------------- 客户端 → 服务端 ---------------- */
 
-export type GameMode = 'classic' | 'blood' | 'mines';
+export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics';
 
 export interface PlayerActionFold {
   k: 'fold';
@@ -182,10 +186,15 @@ export type C2S =
   | { t: 'backToRoom' }
   | { t: 'mReveal'; r: number; c: number }
   | { t: 'mRematch' }
+  | { t: 'tMove'; to: { r: number; c: number } }
+  | { t: 'tAttack'; r: number; c: number }
+  | { t: 'tSkill'; skill: number; r?: number; c?: number }
+  | { t: 'tEndTurn' }
+  | { t: 'tRematch' }
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
@@ -208,7 +217,7 @@ export type C2S =
 
 export type S2C =
   | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
-  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView }
+  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView }
   | { t: 'event'; line: LogLine }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }
