@@ -4510,13 +4510,16 @@ body {
   display: flex;
   flex-direction: column;
 }
-/* 名字不按全局 .r-name 的 84px 定宽截断：按内容自适应，放不下折行显示 */
+/* 名字不按全局 .r-name 的 84px 定宽截断：按内容自适应，放不下折行显示（绝不出省略号） */
 .tac-side .result-row {
   flex-wrap: wrap;
 }
 .tac-side .result-row .r-name {
   width: auto;
   max-width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 .tac-side .panel {
   margin-top: 12px;
@@ -4524,11 +4527,26 @@ body {
 .tac-side .panel:first-child {
   margin-top: 0;
 }
+/* 猎人状态两行排版：昵称一行，血条+行动点整行铺在其下 */
 .tac-row {
+  display: block;
+}
+.tac-line1 {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
+}
+.tac-statline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.tac-turn {
+  margin-left: auto;
+  color: var(--gold);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .tac-dot {
   width: 10px;
@@ -4538,9 +4556,8 @@ body {
   flex: none;
 }
 .tac-hpbar {
-  flex: 1 1 110px;
-  min-width: 80px;
-  max-width: 220px;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 8px;
   background: rgba(0, 0, 0, 0.45);
   border-radius: 4px;

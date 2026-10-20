@@ -300,20 +300,24 @@ export function TacticsTable({ view }: { view: TacticsView }) {
             <div className="box-title">猎人状态</div>
             {view.players.map((p) => (
               <div key={p.id} className="result-row tac-row">
-                <span className="tac-dot" style={{ background: SEAT_COLORS[p.seat % SEAT_COLORS.length] }} />
-                <span className="r-name">
-                  {p.name}
-                  {p.id === net.playerId && <em>（你）</em>}
-                  {!p.alive && <em> 💀</em>}
-                  {!p.connected && <em> ⚠掉线</em>}
-                </span>
-                <span className="tac-hpbar">
-                  <span style={{ width: `${Math.max(0, (p.hp / p.maxHp) * 100)}%` }} />
-                </span>
-                <span className="tac-nums">
-                  {'♥'.repeat(Math.max(0, Math.min(5, Math.ceil(p.hp / 2))))} {p.hp}/{p.maxHp} · AP {p.ap}/{p.maxAp}
-                  {myTurnView(p, view) && ' ◀行动中'}
-                </span>
+                <div className="tac-line1">
+                  <span className="tac-dot" style={{ background: SEAT_COLORS[p.seat % SEAT_COLORS.length] }} />
+                  <span className="r-name">
+                    {p.name}
+                    {p.id === net.playerId && <em>（你）</em>}
+                    {!p.alive && <em> 💀</em>}
+                    {!p.connected && <em> ⚠掉线</em>}
+                  </span>
+                  {myTurnView(p, view) && <span className="tac-turn">◀ 行动中</span>}
+                </div>
+                <div className="tac-statline">
+                  <span className="tac-hpbar">
+                    <span style={{ width: `${Math.max(0, (p.hp / p.maxHp) * 100)}%` }} />
+                  </span>
+                  <span className="tac-nums">
+                    {'♥'.repeat(Math.max(0, Math.min(5, Math.ceil(p.hp / 2))))} {p.hp}/{p.maxHp} · AP {p.ap}/{p.maxAp}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
