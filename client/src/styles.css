@@ -4399,9 +4399,10 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 .tac-board {
-  /* 格子随屏幕自适应：棋盘 + 下方行动按钮保证一屏放下（桌面宽度项给右栏留 500px） */
+  /* 格子随屏幕自适应；手机端下限 14px 保证棋盘完整放进屏宽——
+     不产生横向滚动容器（它会劫持触屏滑动，导致页面竖向滚不动） */
   --tac-cell: max(
-    22px,
+    14px,
     min(
       40px,
       calc((100vw - 46px) / var(--tac-cols)),
@@ -4417,6 +4418,7 @@ body {
   touch-action: manipulation;
 }
 .tac-cell {
+  position: relative;
   width: var(--tac-cell);
   height: var(--tac-cell);
   background: #3a2229;
@@ -4452,6 +4454,40 @@ body {
 }
 .tac-cell.atkable:hover {
   background: #722f3b;
+}
+.tac-dmg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffb0a0;
+  font-size: calc(var(--tac-cell) * 0.34);
+  font-weight: 800;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 4px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  z-index: 1;
+}
+.tac-help {
+  width: min(560px, calc(100vw - 40px));
+}
+.tac-help-body {
+  max-height: 62vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.tac-help-body p {
+  margin: 0;
+}
+.tac-help-body ul {
+  margin: 0;
+  padding-left: 20px;
 }
 .tac-piece {
   position: absolute;

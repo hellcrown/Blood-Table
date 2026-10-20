@@ -103,14 +103,15 @@ describe('TacticsTable · 血色猎场对局页', () => {
     expect(sendSpy).toHaveBeenCalledWith({ t: 'tMove', to: { r: 2, c: 3 } });
   });
 
-  it('攻击模式：切按钮后点射程内目标发 tAttack', () => {
+  it('攻击模式：切按钮后点射程内目标发 tAttack，目标格显示伤害角标', () => {
     const sendSpy = vi.spyOn(net, 'send');
     const view = tacView();
     view.monsters = [{ id: 'm1', type: 'leech', hp: 3, maxHp: 3, r: 2, c: 3 }];
     const { container } = render(<TacticsTable view={view} />);
     expect(container.querySelector('.tac-cell.atkable')).toBeNull(); // 移动模式下不高亮攻击目标
-    fireEvent.click(screen.getByRole('button', { name: '⚔ 攻击' }));
+    fireEvent.click(screen.getByRole('button', { name: /⚔ 攻击/ }));
     expect(container.querySelector('.tac-cell.atkable')).not.toBeNull();
+    expect(container.querySelector('.tac-dmg')?.textContent).toBe('-2'); // 角标=普攻伤害
     fireEvent.click(cellAt(container, 2, 3));
     expect(sendSpy).toHaveBeenCalledWith({ t: 'tAttack', r: 2, c: 3 });
   });
@@ -126,13 +127,14 @@ describe('TacticsTable · 血色猎场对局页', () => {
     expect(sendSpy).not.toHaveBeenCalled(); // 打击技能进选点模式而非直接发
   });
 
-  it('打击技能进入选点模式：点目标发 tSkill（带技能序号与坐标）', () => {
+  it('打击技能进入选点模式：点目标发 tSkill（带技能序号与坐标），角标显示技能伤害', () => {
     const sendSpy = vi.spyOn(net, 'send');
     const view = tacView();
     view.players[1]!.r = 2;
     view.players[1]!.c = 3;
     const { container } = render(<TacticsTable view={view} />);
     fireEvent.click(screen.getByRole('button', { name: /重击/ }));
+    expect(container.querySelector('.tac-dmg')?.textContent).toBe('-4'); // 角标=重击伤害
     fireEvent.click(cellAt(container, 2, 3));
     expect(sendSpy).toHaveBeenCalledWith({ t: 'tSkill', skill: 0, r: 2, c: 3 });
   });

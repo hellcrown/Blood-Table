@@ -5,11 +5,12 @@
  * 打击技进入点选模式）；可达格与射程高亮用 @shared/tacticsGrid 与服务端同源计算，口径不会漂移。
  */
 import { useEffect, useMemo, useState } from 'react';
-import type { TacticsView } from '@shared/tacticsProtocol';
+import type { MonsterType, TacticsView } from '@shared/tacticsProtocol';
 import { TACTICS_CHARACTERS, TACTICS_MONSTERS } from '@shared/tacticsProtocol';
 import { manhattan, movementRange } from '@shared/tacticsGrid';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { useEscClose } from '../components/useOverlayClose';
 
 const MAP_LABEL = { small: '小图 11×11', medium: '中图 15×15', large: '大图 19×19' } as const;
 const MONSTER_ICON = { leech: '🪱', crossbow: '🏹', golem: '🗿' } as const;
@@ -32,6 +33,8 @@ export function TacticsTable({ view }: { view: TacticsView }) {
   const [mode, setMode] = useState<Mode>('move');
   const [skillIdx, setSkillIdx] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  useEscClose(() => setHelpOpen(false), helpOpen);
 
   const me = view.players.find((p) => p.id === net.playerId);
   const spectating = !me;
@@ -114,6 +117,8 @@ export function TacticsTable({ view }: { view: TacticsView }) {
 
   const aliveCount = view.players.filter((p) => p.alive).length;
   const actor = view.players.find((p) => p.id === view.currentId);
+  const activeSkill = mode === 'skill' ? charDef.skills[skillIdx] : undefined;
+  const activeDmg = mode === 'attack' ? charDef.atk : activeSkill?.kind === 'strike' ? activeSkill.power : 0;
 
   /* ---------------- 棋盘 ---------------- */
   const cells: React.ReactNode[] = [];
@@ -122,7 +127,8 @@ export function TacticsTable({ view }: { view: TacticsView }) {
       const i = r * view.cols + c;
       const isWall = view.grid[i] === 1;
       const canReach = mode === 'move' && reachable.has(i);
-      const canHit = (mode === 'attack' || (mode === 'skill' && charDef.skills[skillIdx]?.kind === 'strike')) && attackable.has(i);
+      const canHit =
+        (mode === 'attack' || (mode === 'skill' && charDef.skills[skillIdx]?.kind === 'strike')) && attackable.has(i);
       let cls = 'tac-cell' + ((r + c) % 2 === 1 ? ' alt' : '');
       if (isWall) cls += ' wall';
       if (canReach) cls += ' reach';
@@ -133,7 +139,9 @@ export function TacticsTable({ view }: { view: TacticsView }) {
           className={cls}
           onClick={() => onCellClick(r, c)}
           title={isWall ? '岩壁：不可通行（距离与射程按可穿越计算）' : undefined}
-        />,
+        >
+          {canHit && <b className="tac-dmg">-{activeDmg}</b>}
+        </div>,
       );
     }
   }
@@ -179,10 +187,12 @@ export function TacticsTable({ view }: { view: TacticsView }) {
       ? `等待 ${actor?.name ?? '…'} 行动`
       : '对局已结束'
     : mode === 'move'
-      ? '点高亮格移动（每格 1 AP）'
+      ? '🚶 点高亮格移动 · 每格 1 AP'
       : mode === 'attack'
-        ? '点射程内目标发起攻击（1 AP）'
-        : `点目标发动【${charDef.skills[skillIdx]?.name ?? ''}】`;
+        ? `⚔ 普攻：伤害 ${charDef.atk} · 射程 ${charDef.atkRange} · 耗 1 AP —— 点射程内目标`
+        : activeSkill?.kind === 'strike'
+          ? `✦ ${activeSkill.name}：伤害 ${activeSkill.power} · 射程 ${activeSkill.range} · 耗 1 AP · 冷却 ${activeSkill.cooldown} 回合`
+          : `✚ ${activeSkill?.name ?? ''}：回复 ${activeSkill?.power ?? 0} · 耗 1 AP · 冷却 ${activeSkill?.cooldown ?? 0} 回合`;
 
   return (
     <div className="tac-page">
@@ -192,6 +202,9 @@ export function TacticsTable({ view }: { view: TacticsView }) {
           房间码 <b>{view.code}</b>
         </span>
         <span className="spacer" />
+        <button className="btn tiny ghost" onClick={() => setHelpOpen(true)} title="玩法速查：伤害/射程/冷却/野怪">
+          ❔
+        </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
@@ -268,8 +281,12 @@ export function TacticsTable({ view }: { view: TacticsView }) {
             <button className={`btn ${mode === 'move' ? 'primary' : ''}`} onClick={() => setMode('move')}>
               🚶 移动
             </button>
-            <button className={`btn ${mode === 'attack' ? 'primary' : ''}`} onClick={() => setMode('attack')}>
-              ⚔ 攻击
+            <button
+              className={`btn ${mode === 'attack' ? 'primary' : ''}`}
+              title={`伤害 ${charDef.atk} · 射程 ${charDef.atkRange} · 耗 1 AP`}
+              onClick={() => setMode('attack')}
+            >
+              ⚔ 攻击·伤{charDef.atk}
             </button>
             {charDef.skills.map((skill, idx) => {
               const cd = me?.cooldowns[idx] ?? 0;
@@ -279,9 +296,15 @@ export function TacticsTable({ view }: { view: TacticsView }) {
                   className={`btn ${mode === 'skill' && skillIdx === idx ? 'primary' : ''}`}
                   disabled={cd > 0}
                   onClick={() => onSkillButton(idx)}
-                  title={skill.kind === 'strike' ? `伤害 ${skill.power} · 冷却 ${skill.cooldown} 回合` : `回复 ${skill.power} HP · 冷却 ${skill.cooldown} 回合`}
+                  title={
+                    skill.kind === 'strike'
+                      ? `伤害 ${skill.power} · 射程 ${skill.range} · 耗 1 AP · 冷却 ${skill.cooldown} 回合`
+                      : `回复 ${skill.power} HP · 耗 1 AP · 冷却 ${skill.cooldown} 回合`
+                  }
                 >
-                  {skill.kind === 'strike' ? '✦' : '✚'} {skill.name}
+                  {skill.kind === 'strike' ? '✦' : '✚'} {skill.name}·
+                  {skill.kind === 'strike' ? '伤' : '回'}
+                  {skill.power}
                   {cd > 0 ? `（冷却${cd}）` : ''}
                 </button>
               );
@@ -353,6 +376,54 @@ export function TacticsTable({ view }: { view: TacticsView }) {
         </div>
       </div>
 
+      {helpOpen && (
+        <div className="overlay" onClick={() => setHelpOpen(false)}>
+          <div className="panel tac-help" onClick={(e) => e.stopPropagation()}>
+            <div className="box-title">血色猎场 · 玩法速查</div>
+            <div className="tac-help-body">
+              <p>
+                <b>行动</b>：每回合 {charDef.ap} AP；移动一格 / 攻击 / 技能各耗 1 AP；AP 用完或超时自动结束回合
+              </p>
+              <p>
+                🚶 <b>移动</b>：每格 1 AP；墙、野怪、猎人都不可穿越
+              </p>
+              <p>
+                ⚔ <b>普攻</b>：伤害 {charDef.atk} · 射程 {charDef.atkRange}
+              </p>
+              {charDef.skills.map((s) => (
+                <p key={s.id}>
+                  {s.kind === 'strike' ? '✦' : '✚'} <b>{s.name}</b>：
+                  {s.kind === 'strike' ? `伤害 ${s.power} · 射程 ${s.range}` : `回复 ${s.power}`} · 冷却 {s.cooldown}{' '}
+                  个自己回合
+                </p>
+              ))}
+              <p>
+                <b>口径</b>：距离与射程一律按最短路径格数——墙挡脚不挡手，隔墙贴脸可打；同一行动内每只野怪至多反应一次
+              </p>
+              <p>
+                <b>野怪</b>（静态守卫：走进射程被拦截 · 打它没打死会被反击）
+              </p>
+              <ul>
+                {(Object.entries(TACTICS_MONSTERS) as [MonsterType, (typeof TACTICS_MONSTERS)[MonsterType]][]).map(
+                  ([type, m]) => (
+                    <li key={m.name}>
+                      {MONSTER_ICON[type]} {m.name}：HP {m.hp} · 攻 {m.atk} · 射程 {m.range}
+                    </li>
+                  ),
+                )}
+              </ul>
+              <p>
+                <b>胜负</b>：HP≤0 立即淘汰，最后存活者获胜；对局中退出/掉线视为淘汰
+              </p>
+            </div>
+            <div className="panel-actions">
+              <button className="btn primary" onClick={() => setHelpOpen(false)}>
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
     </div>
   );
