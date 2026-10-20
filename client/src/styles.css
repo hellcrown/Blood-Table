@@ -4385,15 +4385,29 @@ body {
 /* ---------- 血色猎场（格子战棋） ---------- */
 .tac-page {
   padding: 10px 12px calc(40px + var(--sab));
-  max-width: 980px;
+  max-width: 1280px;
   margin: 0 auto;
+}
+.tac-legend {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
 }
 .tac-board-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 .tac-board {
-  --tac-cell: 40px;
+  /* 格子随屏幕自适应：棋盘 + 下方行动按钮保证一屏放下（桌面宽度项给右栏留 500px） */
+  --tac-cell: max(
+    22px,
+    min(
+      40px,
+      calc((100vw - 46px) / var(--tac-cols)),
+      calc((100vh - 250px) / var(--tac-rows))
+    )
+  );
   position: relative;
   display: grid;
   grid-template-columns: repeat(var(--tac-cols), var(--tac-cell));
@@ -4408,11 +4422,20 @@ body {
   background: #3a2229;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
+.tac-cell.alt {
+  background: #341d24;
+}
 .tac-cell.wall {
-  background: #150c10;
+  /* 立体石块：受光棱 + 斜纹凿面 + 落影，与可走地面一眼区分 */
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.055) 0 4px, rgba(255, 255, 255, 0) 4px 9px),
+    linear-gradient(180deg, #55414f 0%, #251722 100%);
   box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.6),
-    inset 0 0 8px rgba(0, 0, 0, 0.9);
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 2px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px #140b10;
+  border-radius: 3px;
 }
 .tac-cell.reach {
   cursor: pointer;
@@ -4450,7 +4473,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: calc(var(--tac-cell) * 0.36);
   font-weight: 700;
   color: #fff;
   border: 2px solid rgba(0, 0, 0, 0.45);
@@ -4458,7 +4481,7 @@ body {
 }
 .tac-piece.monster .tac-disc {
   background: #3b3245;
-  font-size: 15px;
+  font-size: calc(var(--tac-cell) * 0.4);
 }
 .tac-piece.cur .tac-disc {
   border-color: var(--gold);
@@ -4486,6 +4509,12 @@ body {
 .tac-side {
   display: flex;
   flex-direction: column;
+}
+.tac-side .panel {
+  margin-top: 12px;
+}
+.tac-side .panel:first-child {
+  margin-top: 0;
 }
 .tac-row {
   display: flex;
@@ -4533,14 +4562,36 @@ body {
 .tac-log-line.k-sys {
   color: var(--text-dim);
 }
-@media (max-width: 720px) {
+@media (max-width: 959px) {
+  .tac-layout {
+    display: block; /* 窄屏：棋盘 → 行动 → 面板纵向堆叠 */
+  }
+}
+@media (min-width: 960px) {
+  /* 桌面端双栏：棋盘在左、行动按钮贴其下；猎人/野怪/战报面板移到右侧，全部一屏可见 */
+  .tac-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .tac-board-col {
+    flex: 0 0 auto;
+  }
   .tac-board {
-    --tac-cell: 30px;
+    --tac-cell: max(
+      22px,
+      min(
+        40px,
+        calc((100vw - 500px) / var(--tac-cols)),
+        calc((100vh - 250px) / var(--tac-rows))
+      )
+    );
   }
-  .tac-piece .tac-disc {
-    font-size: 11px;
-  }
-  .tac-piece.monster .tac-disc {
-    font-size: 12px;
+  .tac-side {
+    flex: 1 1 300px;
+    min-width: 280px;
+    max-width: 460px;
+    max-height: calc(100vh - 250px);
+    overflow-y: auto;
   }
 }

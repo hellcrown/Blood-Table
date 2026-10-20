@@ -22,6 +22,14 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-10-20',
+    title: '血色猎场：桌面布局与岩壁优化',
+    items: [
+      '桌面端改为「棋盘在左、猎人/野怪/战报在右」的双栏布局：棋盘按屏幕高度自适应缩放，行动按钮始终在一屏之内，不再被挤出屏幕点不到',
+      '岩壁重画为带高光与凿纹的立体石块，普通地面加浅色棋盘格便于数格；棋盘上方新增图例：岩壁＝不可通行、距离与射程可隔墙计算',
+    ],
+  },
+  {
     date: '2026-10-19',
     title: '新玩法「血色猎场」：格子战棋',
     items: [

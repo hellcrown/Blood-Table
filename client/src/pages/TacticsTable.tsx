@@ -123,7 +123,7 @@ export function TacticsTable({ view }: { view: TacticsView }) {
       const isWall = view.grid[i] === 1;
       const canReach = mode === 'move' && reachable.has(i);
       const canHit = (mode === 'attack' || (mode === 'skill' && charDef.skills[skillIdx]?.kind === 'strike')) && attackable.has(i);
-      let cls = 'tac-cell';
+      let cls = 'tac-cell' + ((r + c) % 2 === 1 ? ' alt' : '');
       if (isWall) cls += ' wall';
       if (canReach) cls += ' reach';
       if (canHit) cls += ' atkable';
@@ -132,7 +132,7 @@ export function TacticsTable({ view }: { view: TacticsView }) {
           key={i}
           className={cls}
           onClick={() => onCellClick(r, c)}
-          title={isWall ? '岩壁（挡脚不挡手：可隔墙攻击距离1的目标）' : undefined}
+          title={isWall ? '岩壁：不可通行（距离与射程按可穿越计算）' : undefined}
         />,
       );
     }
@@ -217,6 +217,8 @@ export function TacticsTable({ view }: { view: TacticsView }) {
         </span>
       </div>
 
+      <div className="tac-legend">🧱 岩壁＝不可通行（距离与射程可隔墙计算） · 圆片＝猎人（金圈＝行动中） · 🪱🏹🗿＝野怪</div>
+
       {spectating && <div className="spectate-banner">🔭 观战中</div>}
       {!spectating && me && !me.alive && view.phase === 'playing' && (
         <div className="spectate-banner">💀 你已被淘汰 —— 观战中，等待对局结束</div>
@@ -248,14 +250,19 @@ export function TacticsTable({ view }: { view: TacticsView }) {
         </div>
       )}
 
-      <div className="tac-board-wrap">
-        <div className={`tac-board cols-${view.cols}`} style={{ ['--tac-cols' as string]: view.cols } as React.CSSProperties}>
-          {cells}
-          {pieces}
-        </div>
-      </div>
+      <div className="tac-layout">
+        <div className="tac-board-col">
+          <div className="tac-board-wrap">
+            <div
+              className="tac-board"
+              style={{ ['--tac-cols' as string]: view.cols, ['--tac-rows' as string]: view.rows } as React.CSSProperties}
+            >
+              {cells}
+              {pieces}
+            </div>
+          </div>
 
-      <div className="act-row" style={{ marginTop: 10 }}>
+          <div className="act-row" style={{ marginTop: 10 }}>
         {myTurn && (
           <>
             <button className={`btn ${mode === 'move' ? 'primary' : ''}`} onClick={() => setMode('move')}>
@@ -285,57 +292,59 @@ export function TacticsTable({ view }: { view: TacticsView }) {
           </>
         )}
         <span className="hint">{hint}</span>
-      </div>
-
-      <div className="tac-side">
-        <div className="panel" style={{ marginTop: 12 }}>
-          <div className="box-title">猎人状态</div>
-          {view.players.map((p) => (
-            <div key={p.id} className="result-row tac-row">
-              <span className="tac-dot" style={{ background: SEAT_COLORS[p.seat % SEAT_COLORS.length] }} />
-              <span className="r-name">
-                {p.name}
-                {p.id === net.playerId && <em>（你）</em>}
-                {!p.alive && <em> 💀</em>}
-                {!p.connected && <em> ⚠掉线</em>}
-              </span>
-              <span className="tac-hpbar">
-                <span style={{ width: `${Math.max(0, (p.hp / p.maxHp) * 100)}%` }} />
-              </span>
-              <span className="tac-nums">
-                {'♥'.repeat(Math.max(0, Math.min(5, Math.ceil(p.hp / 2))))} {p.hp}/{p.maxHp} · AP {p.ap}/{p.maxAp}
-                {myTurnView(p, view) && ' ◀行动中'}
-              </span>
-            </div>
-          ))}
+          </div>
         </div>
 
-        <div className="panel" style={{ marginTop: 12 }}>
-          <div className="box-title">野怪</div>
-          {view.monsters.length === 0 && <p className="hint">猎场已被清空</p>}
-          {view.monsters.map((m) => {
-            const def = TACTICS_MONSTERS[m.type];
-            return (
-              <div key={m.id} className="result-row">
+        <div className="tac-side">
+          <div className="panel">
+            <div className="box-title">猎人状态</div>
+            {view.players.map((p) => (
+              <div key={p.id} className="result-row tac-row">
+                <span className="tac-dot" style={{ background: SEAT_COLORS[p.seat % SEAT_COLORS.length] }} />
                 <span className="r-name">
-                  {MONSTER_ICON[m.type]} {def.name}
+                  {p.name}
+                  {p.id === net.playerId && <em>（你）</em>}
+                  {!p.alive && <em> 💀</em>}
+                  {!p.connected && <em> ⚠掉线</em>}
                 </span>
-                <span className="r-hand">
-                  HP {m.hp}/{m.maxHp} · 攻 {def.atk} · 射程 {def.range}
+                <span className="tac-hpbar">
+                  <span style={{ width: `${Math.max(0, (p.hp / p.maxHp) * 100)}%` }} />
                 </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="panel" style={{ marginTop: 12 }}>
-          <div className="box-title">战报</div>
-          <div className="tac-log">
-            {view.log.slice(-14).reverse().map((l) => (
-              <div key={l.seq} className={`tac-log-line k-${l.kind}`}>
-                {l.text}
+                <span className="tac-nums">
+                  {'♥'.repeat(Math.max(0, Math.min(5, Math.ceil(p.hp / 2))))} {p.hp}/{p.maxHp} · AP {p.ap}/{p.maxAp}
+                  {myTurnView(p, view) && ' ◀行动中'}
+                </span>
               </div>
             ))}
+          </div>
+
+          <div className="panel">
+            <div className="box-title">野怪</div>
+            {view.monsters.length === 0 && <p className="hint">猎场已被清空</p>}
+            {view.monsters.map((m) => {
+              const def = TACTICS_MONSTERS[m.type];
+              return (
+                <div key={m.id} className="result-row">
+                  <span className="r-name">
+                    {MONSTER_ICON[m.type]} {def.name}
+                  </span>
+                  <span className="r-hand">
+                    HP {m.hp}/{m.maxHp} · 攻 {def.atk} · 射程 {def.range}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="panel">
+            <div className="box-title">战报</div>
+            <div className="tac-log">
+              {view.log.slice(-14).reverse().map((l) => (
+                <div key={l.seq} className={`tac-log-line k-${l.kind}`}>
+                  {l.text}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
