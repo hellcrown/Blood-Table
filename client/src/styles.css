@@ -4510,6 +4510,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* 名字不按全局 .r-name 的 84px 定宽截断：按内容自适应，放不下折行显示 */
+.tac-side .result-row {
+  flex-wrap: wrap;
+}
+.tac-side .result-row .r-name {
+  width: auto;
+  max-width: 100%;
+}
 .tac-side .panel {
   margin-top: 12px;
 }

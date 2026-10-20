@@ -260,7 +260,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                 <option value="blood">血色牌局（卡片对决）</option>
                 <option value="classic">经典德州扑克</option>
                 <option value="mines">扫雷竞速</option>
-                <option value="tactics">血色猎场（格子战棋）</option>
+                <option value="tactics">血色猎场</option>
               </select>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
