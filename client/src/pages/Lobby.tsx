@@ -21,7 +21,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[] | null>(null);
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
-  const [mode, setMode] = useState<'blood' | 'classic' | 'mines' | 'tactics'>('blood');
+  const [mode, setMode] = useState<'blood' | 'classic' | 'mines' | 'tactics' | 'converge'>('blood');
   const [createPw, setCreatePw] = useState('');
   const [joinPw, setJoinPw] = useState('');
   const [pwForCode, setPwForCode] = useState<string | null>(null);
@@ -126,7 +126,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
     net.send({
       t: 'create',
       name: displayName,
-      maxPlayers: mode === 'mines' ? 2 : maxPlayers, // 扫雷固定 1~2 人
+      maxPlayers: mode === 'mines' || mode === 'converge' ? 2 : maxPlayers, // 扫雷 1~2 人；心有灵犀固定 2 人
       mode,
       ...(createPw.trim() ? { password: createPw.trim() } : {}),
     });
@@ -256,11 +256,15 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
           <div className="create-box">
             <div className="box-title">创建房间</div>
             <div className="row">
-              <select value={mode} onChange={(e) => setMode(e.target.value as 'blood' | 'classic' | 'mines' | 'tactics')}>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as 'blood' | 'classic' | 'mines' | 'tactics' | 'converge')}
+              >
                 <option value="blood">血色牌局（卡片对决）</option>
                 <option value="classic">经典德州扑克</option>
                 <option value="mines">扫雷竞速</option>
                 <option value="tactics">血色猎场</option>
+                <option value="converge">心有灵犀（双人对词）</option>
               </select>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
@@ -275,6 +279,8 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
             <div className="row" style={{ marginTop: 10 }}>
               {mode === 'mines' ? (
                 <span className="hint" style={{ alignSelf: 'center' }}>1~2 人竞速（各自独立棋盘）</span>
+              ) : mode === 'converge' ? (
+                <span className="hint" style={{ alignSelf: 'center' }}>2 人对局（另有观战位）</span>
               ) : (
                 <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
                   <option value={2}>2 人局</option>
@@ -370,7 +376,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                     }
                   >
                     <b className="room-code">{r.code}</b>
-                    <span className="room-mode">{r.mode === 'blood' ? '血色牌局' : r.mode === 'mines' ? '扫雷竞速' : r.mode === 'tactics' ? '血色猎场' : '经典德扑'}</span>
+                    <span className="room-mode">{r.mode === 'blood' ? '血色牌局' : r.mode === 'mines' ? '扫雷竞速' : r.mode === 'tactics' ? '血色猎场' : r.mode === 'converge' ? '心有灵犀' : '经典德扑'}</span>
                     <span className={`tag room-st ${status.cls}`}>{status.label}</span>
                     <span className="room-players">
                       {r.players}/{r.maxPlayers} 人

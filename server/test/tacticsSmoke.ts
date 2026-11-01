@@ -130,7 +130,7 @@ async function main(): Promise<void> {
   await a.connect();
   await b.connect();
   a.send({ t: 'create', name: '甲', maxPlayers: 2, mode: 'tactics' });
-  await a.waitView((v) => v.kind === 'tactics' || v.phase === 'waiting');
+  await a.waitView((v) => v.kind === 'tactics' || (v as { phase?: string }).phase === 'waiting');
   const code = (a.view as unknown as { code: string }).code;
   b.send({ t: 'join', name: '乙', code });
   await b.waitView((v) => (v as { phase?: string }).phase === 'waiting');

@@ -4656,3 +4656,101 @@ body {
     overflow-y: auto;
   }
 }
+
+/* ===== 心有灵犀（双人填词趋同） ===== */
+.converge-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 16px 24px;
+}
+/* 输入行：文本框吃满剩余宽度；按钮不收缩（iOS 聚焦放大由全局 16px 字号兜住） */
+.cv-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cv-input {
+  flex: 1;
+  min-width: 0;
+}
+.cv-input-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.cv-hint {
+  display: block;
+  margin-top: 6px;
+}
+/* 终局面板 */
+.cv-over {
+  margin-bottom: 12px;
+}
+.cv-over h3 {
+  margin: 0 0 6px;
+  color: var(--gold);
+}
+.cv-over-line {
+  margin: 0 0 10px;
+}
+/* 相遇之路：每轮一行 = 轮号 + 双列对照（照参考玩法的左右药丸版式） */
+.cv-history {
+  margin-top: 12px;
+}
+.cv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cv-row:last-child {
+  border-bottom: none;
+}
+.cv-n {
+  flex: 0 0 44px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.cv-duo {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.cv-pill {
+  min-width: 0;
+  overflow-wrap: anywhere; /* 长答案折行展示，绝不横向滚出容器（390 视口教训） */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  text-align: center;
+  font-size: 14px;
+}
+.cv-pill i {
+  font-style: normal;
+  color: var(--gold-dim);
+  font-size: 11px;
+  margin-left: 4px;
+}
+.cv-x {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+/* 相遇轮：金框金底高亮 */
+.cv-row.cv-same .cv-pill {
+  background: rgba(216, 169, 78, 0.16);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+.cv-row.cv-same .cv-x {
+  color: var(--gold);
+}
+.cv-empty {
+  display: block;
+  padding: 10px 0;
+}

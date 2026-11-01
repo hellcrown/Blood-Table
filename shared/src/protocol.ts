@@ -151,7 +151,7 @@ export interface TableView {
 
 /* ---------------- 客户端 → 服务端 ---------------- */
 
-export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics';
+export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics' | 'converge';
 
 export interface PlayerActionFold {
   k: 'fold';
@@ -186,6 +186,9 @@ export type C2S =
   | { t: 'backToRoom' }
   | { t: 'mReveal'; r: number; c: number }
   | { t: 'mRematch' }
+  | { t: 'cSubmit'; text: string }
+  | { t: 'cRematch' }
+  | { t: 'cAbort' }
   | { t: 'tMove'; to: { r: number; c: number } }
   | { t: 'tAttack'; r: number; c: number }
   | { t: 'tSkill'; skill: number; r?: number; c?: number }
@@ -217,7 +220,7 @@ export type C2S =
 
 export type S2C =
   | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
-  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView }
+  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView | import('./convergeProtocol').ConvergeView }
   | { t: 'event'; line: LogLine }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }

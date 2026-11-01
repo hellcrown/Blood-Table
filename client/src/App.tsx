@@ -7,6 +7,7 @@ import { Table } from './pages/Table';
 import { BloodTable } from './pages/BloodTable';
 import { MinesTable } from './pages/MinesTable';
 import { TacticsTable } from './pages/TacticsTable';
+import { ConvergeTable } from './pages/ConvergeTable';
 import type { AnyView } from './net/socket';
 
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
   else if (view.kind === 'blood') page = <BloodTable view={view} />;
   else if (view.kind === 'mines') page = <MinesTable view={view} />;
   else if (view.kind === 'tactics') page = <TacticsTable view={view} />;
+  else if (view.kind === 'converge') page = <ConvergeTable view={view} />;
   else if (view.phase === 'waiting') page = <Room view={view} />;
   else page = <Table view={view} />;
 

@@ -12,6 +12,8 @@ import * as mines from './mines/engine';
 import type { TacticsMapSize, TacticsState } from '@shared/tacticsProtocol';
 import { TACTICS_TURN_SEC_MAX, TACTICS_TURN_SEC_MIN } from '@shared/tacticsProtocol';
 import * as tactics from './tactics/engine';
+import type { ConvergeState } from '@shared/convergeProtocol';
+import * as converge from './converge/engine';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
@@ -92,12 +94,14 @@ export interface Room {
   tacticsTurnSec: number;
   /** 血色猎场：全员断线起始时刻（宽限 30s，同扫雷口径） */
   tacticsEmptySince: number;
+  /** 心有灵犀：全员断线起始时刻（宽限 30s，同扫雷口径） */
+  convergeEmptySince: number;
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
   /** 房间内发言的稳定 id 序列（删除定位用） */
   chatSeq?: number;
-  game: GState | BloodState | MinesState | TacticsState | null;
+  game: GState | BloodState | MinesState | TacticsState | ConvergeState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
   /** 房间密码（可选；设置后加入/观战须携带） */
@@ -490,6 +494,15 @@ export class RoomManager {
         return;
       case 'mRematch':
         this.handleMRematch(room, session);
+        return;
+      case 'cSubmit':
+        this.handleCSubmit(room, session, msg);
+        return;
+      case 'cRematch':
+        this.handleCRematch(room, session);
+        return;
+      case 'cAbort':
+        this.handleCAbort(room, session);
         return;
       case 'tMove':
         this.handleTMove(room, session, msg);
@@ -896,8 +909,17 @@ export class RoomManager {
     }
     this.detachBinding(ws);
     const mode: GameMode =
-      msg.mode === 'blood' ? 'blood' : msg.mode === 'mines' ? 'mines' : msg.mode === 'tactics' ? 'tactics' : 'classic';
-    const room = this.createRoom(mode === 'mines' ? 2 : msg.maxPlayers, mode, ip); // 扫雷固定 1~2 人
+      msg.mode === 'blood'
+        ? 'blood'
+        : msg.mode === 'mines'
+          ? 'mines'
+          : msg.mode === 'tactics'
+            ? 'tactics'
+            : msg.mode === 'converge'
+              ? 'converge'
+              : 'classic';
+    // 心有灵犀固定 2 人（双人趋同无单人局），同扫雷口径钳容量
+    const room = this.createRoom(mode === 'mines' || mode === 'converge' ? 2 : msg.maxPlayers, mode, ip);
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
     if (pw) room.password = pw;
     const session = this.addSession(room, msg.name, false, this.resolveAccount(msg.auth));
@@ -1035,6 +1057,7 @@ export class RoomManager {
       tacticsMapSize: 'medium' as const,
       tacticsTurnSec: 0,
       tacticsEmptySince: 0,
+      convergeEmptySince: 0,
       sessions: new Map(),
       chatLog: [],
       game: null,
@@ -1126,6 +1149,10 @@ export class RoomManager {
         if (bs.phase === 'crownBid' || bs.phase === 'pick' || bs.phase === 'setup' || bs.phase === 'gameover') {
           bs.players = bs.players.filter((p) => p.id !== session.id);
         }
+      } else if (room.mode === 'converge') {
+        // 心有灵犀：state.players 保持完整（已揭示历史与终局结果需要）；进行中被移除
+        //（踢出/主动离开等一切路径）统一按「离场未相遇」终局——双人局少一人无法继续
+        converge.cLeave(room.game as ConvergeState, session.id, Date.now());
       } else if (room.mode !== 'mines' && room.mode !== 'tactics') {
         const cg = room.game as GState;
         // 仅在安全时机调用（结算后/未在手牌中），直接移除
@@ -1217,6 +1244,39 @@ export class RoomManager {
           }
         } catch (e) {
           console.error('[audit] 战棋末人离开审计失败:', e);
+        }
+        if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+        return;
+      }
+      this.broadcast(room);
+      return;
+    }
+    // 心有灵犀：进行中离场立即作未相遇终局（双人局少一人无法继续），随后移除会话
+    if (room.mode === 'converge' && g && 'rounds' in g) {
+      this.removeSession(room, session); // cLeave 在 removeSession 内统一触发（踢人等其他移除路径同口径）
+      if (room.sessions.size === 0) {
+        // 末人离开=房间就地删除，审计 end 必须在此补写（同扫雷口径）
+        try {
+          const cs = g as ConvergeState;
+          if (cs.phase === 'gameover' && !room.matchLogged) {
+            room.matchLogged = true;
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { mode: 'converge', ...(cs.result ?? { matched: false, rounds: cs.rounds.length }) },
+              log: cs.log,
+            });
+          } else if (!room.matchLogged) {
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { resolved: false },
+              log: cs.log,
+              resolvedOnly: true,
+            });
+          }
+        } catch (e) {
+          console.error('[audit] 心有灵犀末人离开审计失败:', e);
         }
         if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
         return;
@@ -1321,6 +1381,20 @@ export class RoomManager {
       room.matchLogged = false; // 终局审计 end 的哨兵（broadcast tactics 分支置位）
       room.gameStartedAt = now;
       room.tacticsEmptySince = 0;
+      // 新一局：logSeq 归零重排，日志增量游标归零（同扫雷口径）
+      for (const s of room.sessions.values()) s.lastEventSeq = 0;
+      this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
+      if (this.draining) this.notifyDrain(room);
+    } else if (room.mode === 'converge') {
+      if (room.game) return;
+      const players = [...room.sessions.values()]
+        .filter((s) => !s.spectator)
+        .sort((a, b) => a.seat - b.seat)
+        .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+      room.game = converge.createConvergeGame(players, now);
+      room.matchLogged = false; // 终局审计 end 的哨兵（broadcast converge 分支置位）
+      room.gameStartedAt = now;
+      room.convergeEmptySince = 0;
       // 新一局：logSeq 归零重排，日志增量游标归零（同扫雷口径）
       for (const s of room.sessions.values()) s.lastEventSeq = 0;
       this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
@@ -1632,6 +1706,44 @@ export class RoomManager {
     this.broadcast(room);
   }
 
+  /* ---------------- 心有灵犀（双人填词趋同） ---------------- */
+
+  private handleCSubmit(room: Room, session: Session, msg: Extract<C2S, { t: 'cSubmit' }>): void {
+    auditPlayerAct(room, session, msg.t, msg);
+    if (session.spectator) throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
+    const g = room.game;
+    if (room.mode !== 'converge' || !g || !('rounds' in g) || g.phase !== 'playing') return;
+    converge.cSubmit(g as ConvergeState, session.id, msg.text, Date.now());
+    this.broadcast(room);
+  }
+
+  private handleCAbort(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以终止本局');
+    const g = room.game;
+    if (room.mode !== 'converge' || !g || !('rounds' in g) || (g as ConvergeState).phase !== 'playing') return;
+    converge.convergeAbort(g as ConvergeState, Date.now());
+    this.broadcast(room);
+  }
+
+  private handleCRematch(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一局');
+    const g = room.game;
+    if (room.mode !== 'converge' || !g || !('rounds' in g) || (g as ConvergeState).phase !== 'gameover') return;
+    const players = [...room.sessions.values()]
+      .filter((s) => !s.spectator)
+      .sort((a, b) => a.seat - b.seat)
+      .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+    if (players.length < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家'); // 与 handleStart 同口径
+    room.game = converge.createConvergeGame(players, Date.now());
+    room.matchLogged = false;
+    room.gameStartedAt = Date.now();
+    room.convergeEmptySince = 0;
+    this.drainNotified.delete(room.code); // 新一局重新预告（若在排水期）
+    auditRoomStart(room); // 再来一局写新局的审计开局行
+    for (const s of room.sessions.values()) s.lastEventSeq = 0;
+    this.broadcast(room);
+  }
+
   /* ---------------- 血色猎场（战棋） ---------------- */
 
   /** 战棋动作公共守卫：非本模式/未开局返回 null（静默忽略，与扫雷同口径）；观战者显式报错 */
@@ -1719,6 +1831,7 @@ export class RoomManager {
     room.game = null; // 回到房间等待页：可加减人/改设置后重新开局
     room.minesEmptySince = 0;
     room.tacticsEmptySince = 0;
+    room.convergeEmptySince = 0;
     this.broadcast(room);
   }
 
@@ -2011,6 +2124,18 @@ export class RoomManager {
         room.tacticsEmptySince = 0;
         changed = tactics.tacticsTick(g as TacticsState, now); // 回合超时自动结束
       }
+    } else if (g && room.mode === 'converge') {
+      // 全员（非观战会话）断线 30s 仍无人回来：就地终局（口径同扫雷）；不限时，无 tick 结算
+      const cPlayers = (g as ConvergeState).players;
+      const humansConnected = [...room.sessions.values()].some(
+        (s) => !s.spectator && s.connected && cPlayers.some((p) => p.id === s.id),
+      );
+      if (!humansConnected && (g as ConvergeState).phase === 'playing') {
+        if (!room.convergeEmptySince) room.convergeEmptySince = now;
+        if (now - room.convergeEmptySince >= 30_000) changed = converge.convergeForceEnd(g as ConvergeState, now);
+      } else {
+        room.convergeEmptySince = 0;
+      }
     } else if (g && room.mode === 'blood') {
       changed = blood.bloodTick(g as BloodState, now);
       if (!changed) changed = this.runBots(room, g as BloodState, now);
@@ -2085,7 +2210,7 @@ export class RoomManager {
 
   /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次）；血色局同时结算天梯积分。
    *  战棋/扫雷无 final 字段，进函数即被首行守卫跳过（战绩 matchlog 二期再扩）。 */
-  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | null): void {
+  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | ConvergeState | null): void {
     if (!g || room.matchLogged || !('final' in g) || !g.final) return;
     room.matchLogged = true;
     const now = Date.now();
@@ -2254,6 +2379,28 @@ export class RoomManager {
         console.error('[audit] 战棋终局审计失败:', e);
       }
     }
+    const isConvergeGame = (x: unknown): x is ConvergeState =>
+      x != null && typeof x === 'object' && 'rounds' in x && room.mode === 'converge';
+    if (isConvergeGame(g) && g.phase === 'gameover' && !room.matchLogged) {
+      // 心有灵犀终局审计：口径同扫雷——循环外（全员断线的终局也要落真实结果）；独立 try 不阻断广播
+      try {
+        room.matchLogged = true;
+        const durationMin =
+          room.gameStartedAt != null ? Math.round(((Date.now() - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+        recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          summary: {
+            mode: 'converge',
+            ...(g.result ?? { matched: false, rounds: g.rounds.length, reason: 'unknown' }),
+          },
+          log: g.log,
+        });
+      } catch (e) {
+        console.error('[audit] 心有灵犀终局审计失败:', e);
+      }
+    }
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {
@@ -2283,6 +2430,14 @@ export class RoomManager {
           } else {
             const connectedIds = new Set([...room.sessions.values()].filter((x) => x.connected).map((x) => x.id));
             send(s.ws, { t: 'state', view: tactics.buildTacticsView(ts, s.id, room.code, room.hostId, connectedIds) });
+          }
+        } else if (g && room.mode === 'converge' && 'rounds' in g) {
+          const cs = g as ConvergeState;
+          // 观战者在终局自动回到房间等待页（口径同扫雷）；玩家与观战会话收对局视图
+          if (s.spectator && cs.phase === 'gameover') {
+            send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
+          } else {
+            send(s.ws, { t: 'state', view: converge.buildConvergeView(cs, s.id, room.code, room.hostId) });
           }
         } else if (g && room.mode === 'blood' && 'market' in g) {
           // 首帧（新入房/重连）或落后超过尾部窗口 → 下发全量日志；其余帧只带尾部，

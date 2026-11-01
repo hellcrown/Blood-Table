@@ -54,7 +54,15 @@ export function Room({ view }: { view: TableView }) {
   // 邀请链接 = 当前访问地址 + 房间码参数（朋友打开后自动预填房间码）
   const inviteUrl = `${location.origin}/?room=${view.code}`;
   const brand =
-    view.mode === 'blood' ? '血色牌局' : view.mode === 'mines' ? '扫雷竞速' : view.mode === 'tactics' ? '血色猎场' : '经典德州';
+    view.mode === 'blood'
+      ? '血色牌局'
+      : view.mode === 'mines'
+        ? '扫雷竞速'
+        : view.mode === 'tactics'
+          ? '血色猎场'
+          : view.mode === 'converge'
+            ? '心有灵犀'
+            : '经典德州';
   const inviteText = `${inviteUrl} — ${brand}房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
@@ -283,7 +291,9 @@ export function Room({ view }: { view: TableView }) {
                 ? '扫雷竞速 · 对局规则'
                 : view.mode === 'tactics'
                   ? '血色猎场 · 对局规则'
-                  : '房间设置（德州扑克）'}
+                  : view.mode === 'converge'
+                    ? '心有灵犀 · 玩法'
+                    : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
           {view.mode === 'mines' ? (
@@ -355,6 +365,11 @@ export function Room({ view }: { view: TableView }) {
                 最后存活者获胜
               </p>
             </div>
+          ) : view.mode === 'converge' ? (
+            <p className="hint">
+              两人不交流，每轮各写一个词或一句话 · 两边都提交后同时亮牌 · 想到同一个答案即相遇 ·
+              判同忽略全角/半角、大小写与空格 · 不限时
+            </p>
           ) : view.mode === 'blood' ? (
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·
