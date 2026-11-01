@@ -116,6 +116,8 @@ async function main(): Promise<void> {
   await s.waitView((v) => v.players.every((p) => p.id !== s.playerId), '观战视图不含自己座位');
   b.send({ t: 'cSubmit', text: '雪' });
   await s.waitView((v) => v.kind !== 'converge', '观战者终局自动回等待页');
+  // 玩家与观战者是独立连接：观战者的帧先到不代表甲的帧已处理，必须显式等甲的终局帧
+  await a.waitView((v) => v.phase === 'gameover', '甲看到第 2 局终局');
   assert(a.view?.result?.matched === true, '第 2 局 1 轮相遇');
 
   // 离场终局
