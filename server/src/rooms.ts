@@ -12,6 +12,7 @@ import * as mines from './mines/engine';
 import type { TacticsMapSize, TacticsState } from '@shared/tacticsProtocol';
 import { TACTICS_TURN_SEC_MAX, TACTICS_TURN_SEC_MIN } from '@shared/tacticsProtocol';
 import * as tactics from './tactics/engine';
+import { tacticsBotDecide } from './tactics/botAI';
 import type { ConvergeState } from '@shared/convergeProtocol';
 import * as converge from './converge/engine';
 import { GameError, RESULT_MS, type GState } from './game/types';
@@ -1400,6 +1401,10 @@ export class RoomManager {
       room.matchLogged = false; // 终局审计 end 的哨兵（broadcast tactics 分支置位）
       room.gameStartedAt = now;
       room.tacticsEmptySince = 0;
+      // bot 节拍：开局重排（addBot 时的错开沿用，这里兜底重错开防同 tick 对齐）
+      for (const s of room.sessions.values()) {
+        if (s.bot) room.botNextAct.set(s.id, now + randomInt(300, 1500));
+      }
       // 新一局：logSeq 归零重排，日志增量游标归零（同扫雷口径）
       for (const s of room.sessions.values()) s.lastEventSeq = 0;
       this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
@@ -1559,7 +1564,9 @@ export class RoomManager {
 
   private handleAddBot(room: Room, session: Session): void {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以添加机器人');
-    if (room.mode !== 'blood') throw new GameError('BAD_MODE', '机器人仅支持血色模式');
+    if (room.mode !== 'blood' && room.mode !== 'tactics') {
+      throw new GameError('BAD_MODE', '机器人仅支持血色牌局与血色猎场');
+    }
     if (room.game) throw new GameError('IN_GAME', '对局进行中不能添加机器人');
     const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
     if (seated >= room.maxPlayers) throw new GameError('ROOM_FULL', '房间已满员');
@@ -1578,7 +1585,7 @@ export class RoomManager {
       bot: true,
     };
     room.sessions.set(bot.id, bot);
-    room.botBrains.set(bot.id, createBrain());
+    if (room.mode === 'blood') room.botBrains.set(bot.id, createBrain()); // 战棋 bot 无跨回合记忆，不需要 Brain
     room.botNextAct.set(bot.id, Date.now() + randomInt(300, 1500)); // 随机错开节拍，避免多 bot 房同 tick 碰撞放大卡顿
     this.broadcast(room);
   }
@@ -1820,6 +1827,10 @@ export class RoomManager {
     room.matchLogged = false;
     room.gameStartedAt = Date.now();
     room.tacticsEmptySince = 0;
+    // bot 节拍：新一局重错开（同 handleStart 口径）
+    for (const s of room.sessions.values()) {
+      if (s.bot) room.botNextAct.set(s.id, Date.now() + randomInt(300, 1500));
+    }
     this.drainNotified.delete(room.code); // 新一局重新预告（若在排水期）
     auditRoomStart(room); // 再来一局写新局的审计开局行
     for (const s of room.sessions.values()) s.lastEventSeq = 0;
@@ -1899,6 +1910,41 @@ export class RoomManager {
       if (acted) return true;
     }
     return false;
+  }
+
+  /** 战棋 bot 调度：轮到 bot 时按决策器行动（0.4~1.2s 思考节拍）；全 bot 房上限口径同血色。
+   *  指纹对比防呆：决策与引擎校验口径若有漂移导致动作被静默忽略，退避 1.6s 重试（慢循环不刷屏）。 */
+  private runTacticsBots(room: Room, ts: TacticsState, now: number): boolean {
+    if (ts.phase !== 'playing') return false;
+    const bots = [...room.sessions.values()].filter((s) => s.bot);
+    if (bots.length === 0) return false;
+    // 全 bot 房数量上限：超出后 bot 静止（房间将在空房回收中解散）
+    if (bots.length === room.sessions.size && this.allBotRoomCount() > MAX_ALLBOT_ROOMS) return false;
+    const bot = bots.find((s) => s.id === ts.currentId);
+    if (!bot) return false; // 轮到真人
+    if (now < (room.botNextAct.get(bot.id) ?? 0)) return false;
+    const fingerprint = () =>
+      JSON.stringify([
+        ts.currentId,
+        ts.turnNumber,
+        ts.players.map((p) => [p.r, p.c, p.hp, p.ap]),
+        ts.monsters.map((m) => [m.r, m.c, m.hp]),
+      ]);
+    const before = fingerprint();
+    try {
+      const act = tacticsBotDecide(ts, bot.id);
+      if (act.kind === 'move') tactics.tMove(ts, bot.id, act.r, act.c, now);
+      else if (act.kind === 'attack') tactics.tAttack(ts, bot.id, act.r, act.c, now);
+      else if (act.kind === 'skill') tactics.tSkill(ts, bot.id, act.skillIdx, act.r, act.c, now);
+      else tactics.tEndTurn(ts, bot.id, now);
+    } catch (e) {
+      // 决策异常回退：直接结束回合，绝不软锁（留痕便于发现 bot 决策 bug）
+      console.warn('[bot] 战棋决策异常（回退结束回合）:', e instanceof Error ? e.message : e);
+      tactics.tEndTurn(ts, bot.id, now);
+    }
+    const changed = fingerprint() !== before;
+    room.botNextAct.set(bot.id, now + (changed ? 400 + randomInt(0, 800) : 1600));
+    return true;
   }
 
   private handleSit(room: Room, session: Session, msg: Extract<C2S, { t: 'sit' }>): void {
@@ -2138,7 +2184,8 @@ export class RoomManager {
         changed = mines.minesTick(g as MinesState, now); // 超时排名结算
       }
     } else if (g && room.mode === 'tactics') {
-      // 全员（非观战会话）断线 30s 仍无人回来：就地终局（口径同扫雷）
+      // 全员（非观战会话）断线 30s 仍无人回来：就地终局（口径同扫雷）。
+      // bot 会话恒 connected=true 计入「有人」——人类跑路后 bot 会自己打到终局，房间不会挂着
       const tPlayers = (g as TacticsState).players;
       const humansConnected = [...room.sessions.values()].some(
         (s) => !s.spectator && s.connected && tPlayers.some((p) => p.id === s.id),
@@ -2150,6 +2197,8 @@ export class RoomManager {
         room.tacticsEmptySince = 0;
         changed = tactics.tacticsTick(g as TacticsState, now); // 回合超时自动结束
       }
+      // bot 调度（超时跳过与本拍 bot 行动可同拍发生，前后者仅在未变时补跑）
+      if (!changed) changed = this.runTacticsBots(room, g as TacticsState, now);
     } else if (g && room.mode === 'converge') {
       // 全员（非观战会话）断线 30s 仍无人回来：就地终局（口径同扫雷）；不限时，无 tick 结算
       const cPlayers = (g as ConvergeState).players;

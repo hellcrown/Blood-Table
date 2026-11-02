@@ -93,6 +93,8 @@ interface Handlers {
   handleLeave(r: Room, s: Session): void;
   handleTRematch(r: Room, s: Session): void;
   handleSettings(r: Room, s: Session, m: { t: 'settings'; tacticsMapSize?: string; tacticsTurnSec?: number }): void;
+  handleAddBot(r: Room, s: Session): void;
+  handleStart(r: Room, s: Session): void;
   tickRoom(r: Room, now: number): void;
 }
 const H = (mgr: RoomManager): Handlers => mgr as unknown as Handlers;
@@ -211,6 +213,33 @@ describe('血色猎场 · RoomManager 接线', () => {
     expect(view.mode).toBe('tactics');
     expect(view.tacticsMapSize).toBe('large');
     expect(view.tacticsTurnSec).toBe(90);
+  });
+
+  it('人机对局：加 bot 开局后由 tick 驱动打到终局（血色模式拒绝口径不变）', () => {
+    const { mgr, room, conns } = setup(1, 'BT1');
+    room.game = null; // 回到等待期（setup 默认造了一局）
+    H(mgr).handleAddBot(room, conns[0].s); // 战棋房允许加 bot
+    expect([...room.sessions.values()].filter((s) => s.bot).length).toBe(1);
+    H(mgr).handleStart(room, conns[0].s); // 1 真人 + 1 bot = 2 人可开局
+    const gs = room.game as unknown as TacticsState;
+    expect(gs.phase).toBe('playing');
+    expect(gs.players.length).toBe(2);
+    // 驱动 tick：bot 行动 + 真人回合超时跳过，直到终局（600ms/拍，上限 3000 拍防挂死）
+    const base = Date.now();
+    let guard = 0;
+    const phase = (): string => (room.game as unknown as TacticsState).phase;
+    while (phase() === 'playing' && guard++ < 3000) {
+      H(mgr).tickRoom(room, base + guard * 600);
+    }
+    expect(phase()).toBe('gameover');
+    expect((room.game as unknown as TacticsState).ranking.length).toBe(2);
+    expect(room.matchLogged).toBe(true); // 终局审计恰好一份
+  });
+
+  it('血色模式外的 BAD_MODE 文案更新（经典房仍拒绝加 bot）', () => {
+    const { mgr, room, conns } = setup();
+    room.mode = 'classic';
+    expect(() => H(mgr).handleAddBot(room, conns[0].s)).toThrowError(/血色牌局与血色猎场/);
   });
 });
 

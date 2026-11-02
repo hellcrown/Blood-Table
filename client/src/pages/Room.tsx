@@ -565,7 +565,7 @@ export function Room({ view }: { view: TableView }) {
           ) : (
             <span className="hint">等待房主开始游戏…</span>
           )}
-          {isHost && view.mode === 'blood' && view.phase === 'waiting' && (
+          {(view.mode === 'blood' || view.mode === 'tactics') && isHost && view.phase === 'waiting' && (
             <>
               {view.players.length < view.maxPlayers && (
                 <button className="btn" onClick={() => net.send({ t: 'addBot' })} title="添加一个机器人玩家（AI 补位）">
