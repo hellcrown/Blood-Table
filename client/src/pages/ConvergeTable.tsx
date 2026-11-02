@@ -10,12 +10,14 @@ import type { ConvergeView } from '@shared/convergeProtocol';
 import { CONVERGE_TEXT_MAX } from '@shared/convergeProtocol';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { useEscClose } from '../components/useOverlayClose';
 import { playSfx } from '../audio/sound';
 
 /** 心有灵犀 · 对局页 */
 export function ConvergeTable({ view }: { view: ConvergeView }) {
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   useEscClose(() => setHelpOpen(false), helpOpen);
 
@@ -55,6 +57,9 @@ export function ConvergeTable({ view }: { view: ConvergeView }) {
         <span className="spacer" />
         <button className="btn tiny ghost" onClick={() => setHelpOpen(true)} title="玩法速查">
           ❔
+        </button>
+        <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+          📜
         </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
@@ -215,6 +220,7 @@ export function ConvergeTable({ view }: { view: ConvergeView }) {
         </div>
       )}
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 }

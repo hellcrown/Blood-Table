@@ -3,6 +3,7 @@ import type { RoomSettings, SeatView, TableView } from '@shared/protocol';
 import { charPoolIds, BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { CharPortrait } from '../components/CharCard';
 
 /** 兜底复制：textarea + execCommand，http 局域网（非安全上下文）下也能用 */
@@ -39,6 +40,7 @@ export function Room({ view }: { view: TableView }) {
   const pwDirtyRef = useRef(false); // 本轮 focus 后是否实际编辑过（防 blur 误清已设密码/Enter 后二次提交）
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [djPickerOpen, setDjPickerOpen] = useState(false);
 
   // 服务端设置的三个数值：只在**数值真的变化**时同步草稿。
@@ -184,6 +186,9 @@ export function Room({ view }: { view: TableView }) {
             <button className="btn small" onClick={() => copyInvite()}>
               {copyMsg ?? '复制邀请'}
             </button>
+        <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+          📜
+        </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
@@ -585,6 +590,7 @@ export function Room({ view }: { view: TableView }) {
         {me && !isHost && <p className="hint">你是 {me.name}，座位号 {me.seat + 1}</p>}
       </div>
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
       {djPickerOpen && (
         <div className="overlay" onClick={() => setDjPickerOpen(false)}>
           <div className="panel" onClick={(e) => e.stopPropagation()}>

@@ -10,6 +10,7 @@ import { TACTICS_CHARACTERS, TACTICS_MONSTERS } from '@shared/tacticsProtocol';
 import { manhattan, movementRange } from '@shared/tacticsGrid';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { useEscClose } from '../components/useOverlayClose';
 
 const MAP_LABEL = { small: '小图 11×11', medium: '中图 15×15', large: '大图 19×19' } as const;
@@ -33,6 +34,7 @@ export function TacticsTable({ view }: { view: TacticsView }) {
   const [mode, setMode] = useState<Mode>('move');
   const [skillIdx, setSkillIdx] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   useEscClose(() => setHelpOpen(false), helpOpen);
 
@@ -204,6 +206,9 @@ export function TacticsTable({ view }: { view: TacticsView }) {
         <span className="spacer" />
         <button className="btn tiny ghost" onClick={() => setHelpOpen(true)} title="玩法速查：伤害/射程/冷却/野怪">
           ❔
+        </button>
+        <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+          📜
         </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
@@ -425,6 +430,7 @@ export function TacticsTable({ view }: { view: TacticsView }) {
         </div>
       )}
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 

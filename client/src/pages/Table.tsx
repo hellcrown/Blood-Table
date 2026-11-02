@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { TableView } from '@shared/protocol';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { CardView } from '../components/Card';
 import { Seat, seatPos } from '../components/Seat';
 import { ActionBar } from '../components/ActionBar';
@@ -12,6 +13,7 @@ const COMMUNITY_SLOTS = 5;
 
 export function Table({ view }: { view: TableView }) {
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const me = view.players.find((p) => p.id === net.playerId) ?? null;
 
   // 服务器时间偏移，用于行动倒计时
@@ -34,6 +36,9 @@ export function Table({ view }: { view: TableView }) {
         <span>
           房间 <b>{view.code}</b> · 第 {view.handNumber || '-'} 手 · {phaseText(view.phase)}
         </span>
+        <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+          📜
+        </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
@@ -88,6 +93,7 @@ export function Table({ view }: { view: TableView }) {
       {view.phase === 'result' && <ResultOverlay view={view} />}
       {view.phase === 'gameover' && <GameOverOverlay view={view} />}
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 }

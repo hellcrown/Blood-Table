@@ -20,6 +20,7 @@ type ChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
 type RoomChatMsgListener = (m: import('@shared/protocol').ChatMsg) => void;
 type RoomChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
 type ChatDeletedListener = (scope: 'room' | 'global', id: number) => void;
+type RoomMatchLogListener = (entries: import('@shared/protocol').RoomMatchEntry[]) => void;
 
 export interface AccountInfo {
   id: string;
@@ -85,6 +86,7 @@ class Net {
   private roomChatMsgListeners = new Set<RoomChatMsgListener>();
   private roomChatLogListeners = new Set<RoomChatLogListener>();
   private chatDeletedListeners = new Set<ChatDeletedListener>();
+  private roomMatchLogListeners = new Set<RoomMatchLogListener>();
   private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
@@ -230,6 +232,8 @@ class Net {
         this.roomChatLogListeners.forEach((l) => l(msg.msgs));
       } else if (msg.t === 'chatDeleted') {
         this.chatDeletedListeners.forEach((l) => l(msg.scope, msg.id));
+      } else if (msg.t === 'roomMatchLog') {
+        this.roomMatchLogListeners.forEach((l) => l(msg.entries));
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -493,6 +497,12 @@ class Net {
   onChatDeleted(l: ChatDeletedListener): () => void {
     this.chatDeletedListeners.add(l);
     return () => this.chatDeletedListeners.delete(l);
+  }
+
+  /** 房间对局记录快照（打开记录窗时拉取一次；新局在前） */
+  onRoomMatchLog(l: RoomMatchLogListener): () => void {
+    this.roomMatchLogListeners.add(l);
+    return () => this.roomMatchLogListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {

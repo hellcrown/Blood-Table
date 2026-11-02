@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MinesView } from '@shared/minesProtocol';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 
 const NUM_COLORS = ['', '#1976d2', '#388e3c', '#d32f2f', '#7b1fa2', '#c2185b', '#0097a7', '#424242', '#616161'];
 
@@ -11,6 +12,7 @@ export function MinesTable({ view }: { view: MinesView }) {
   const [flagMode, setFlagMode] = useState(false);
   const [flags, setFlags] = useState<Set<number>>(new Set());
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const flagsRef = useRef(flags);
   flagsRef.current = flags;
 
@@ -95,6 +97,9 @@ export function MinesTable({ view }: { view: MinesView }) {
           房间码 <b>{view.code}</b>
         </span>
         <span className="spacer" />
+        <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+          📜
+        </button>
         <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
           💬
         </button>
@@ -189,6 +194,7 @@ export function MinesTable({ view }: { view: MinesView }) {
         ))}
       </div>
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 

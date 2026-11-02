@@ -302,6 +302,16 @@ select:focus {
   white-space: nowrap;
 }
 
+/* 窄屏：房主名放不下时整段换到第二行完整显示（原 40% 上限在 390 宽会截掉长昵称） */
+@media (max-width: 640px) {
+  .room-row {
+    flex-wrap: wrap;
+  }
+  .room-host {
+    max-width: 100%;
+  }
+}
+
 /* 聊天入口未读角标 */
 .chat-entry {
   position: relative;
@@ -414,6 +424,7 @@ select:focus {
 
 .chat-input-row input {
   flex: 1;
+  min-width: 0;
 }
 
 .rejoin-banner {
@@ -970,6 +981,15 @@ select:focus {
   text-overflow: ellipsis;
 }
 
+/* 房间等待页座位卡（.seat-cell 是 min-height 可长高）：长昵称+（你）折行显示不截字；
+   经典牌桌座位（.seat，绝对定位在牌桌上）保持单行省略，避免座位变高互相遮挡 */
+.seat-cell .seat-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: unset;
+}
+
 .seat-name em {
   font-style: normal;
   color: var(--gold);
@@ -1174,6 +1194,11 @@ select:focus {
   margin-bottom: 16px;
 }
 
+/* 短名仍按 84px 列对齐（经典德扑结算的名字列/牌列跨行对齐），长名撑宽并折行 */
+.result-list .r-name {
+  min-width: 84px;
+}
+
 .result-row {
   display: flex;
   align-items: center;
@@ -1181,6 +1206,7 @@ select:focus {
   padding: 7px 10px;
   border-radius: 10px;
   background: var(--panel-2);
+  flex-wrap: wrap; /* 长名字+（你）放不下时折行，绝不出省略号（原 84px 定宽截断，390 视口教训） */
 }
 
 .result-row.winner {
@@ -1192,12 +1218,17 @@ select:focus {
   opacity: 0.55;
 }
 
+/* 名字按内容自适应、放不下折行（原 84px 定宽 + ellipsis 在手机端截断长昵称；
+   经典德扑结算列表的列对齐由上方 .result-list .r-name 的 min-width 保住） */
 .r-name {
-  width: 84px;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .r-cards {
@@ -4546,17 +4577,7 @@ body {
   display: flex;
   flex-direction: column;
 }
-/* 名字不按全局 .r-name 的 84px 定宽截断：按内容自适应，放不下折行显示（绝不出省略号） */
-.tac-side .result-row {
-  flex-wrap: wrap;
-}
-.tac-side .result-row .r-name {
-  width: auto;
-  max-width: 100%;
-  white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
-}
+/* 名字自适应折行已全局化到 .result-row/.r-name（原 84px 定宽截断），此处旧豁免已删除 */
 .tac-side .panel {
   margin-top: 12px;
 }
@@ -4753,4 +4774,14 @@ body {
 .cv-empty {
   display: block;
   padding: 10px 0;
+}
+
+/* ===== 房间对局记录（📜 弹窗） ===== */
+/* .log-entry 提供卡片底；轮次对照复用全局 .cv-row/.cv-duo/.cv-pill（与相遇之路同款） */
+.rh-entry {
+  margin-bottom: 10px;
+}
+.rh-cv-names {
+  display: block;
+  margin: 2px 0 4px;
 }

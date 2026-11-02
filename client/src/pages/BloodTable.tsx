@@ -9,6 +9,7 @@ import type { BloodCardView, BloodView } from '@shared/bloodProtocol';
 import { net } from '../net/socket';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { ChatModal } from '../components/ChatModal';
+import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { CodexModal } from '../components/CodexModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
@@ -369,6 +370,7 @@ export function BloodTable({ view }: { view: BloodView }) {
   const [insertConfirm, setInsertConfirm] = useState<{ cardId: string; defId: string; buySlot?: number } | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 鲜花/鸡蛋互动：选中的互动类型（再点对方面板发送） */
@@ -1037,6 +1039,9 @@ export function BloodTable({ view }: { view: BloodView }) {
             )}
             <button className="btn tiny ghost" style={{ marginLeft: 8 }} onClick={() => setFeedbackOpen(true)}>
               📨 反馈
+            </button>
+            <button className="btn tiny ghost" onClick={() => setHistoryOpen(true)} title="对局记录：本房间打完的每一局">
+              📜
             </button>
             <button className="btn tiny ghost" onClick={() => setChatOpen(true)} title="聊天：房间成员 / 全服在线玩家">
               💬
@@ -3156,6 +3161,7 @@ export function BloodTable({ view }: { view: BloodView }) {
       {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {chatOpen && <ChatModal onClose={() => setChatOpen(false)} roomScope />}
+      {historyOpen && <RoomHistoryModal onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 }

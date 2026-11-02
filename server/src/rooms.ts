@@ -1,6 +1,6 @@
 import { randomBytes, randomInt, createHash, timingSafeEqual } from 'node:crypto';
 import type { RawData, WebSocket } from 'ws';
-import type { C2S, ChatMsg, GameMode, PublicRoomInfo, S2C, Suit } from '@shared/protocol';
+import type { C2S, ChatMsg, GameMode, PublicRoomInfo, RoomMatchEntry, S2C, Suit } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
 import * as engine from './game/engine';
 import * as blood from './blood/engine';
@@ -22,7 +22,7 @@ import { cleanChatText } from './chat';
 import { recordAccountVisit } from './dau';
 import { recordAction, recordChat, recordGameEnd, recordGameStart } from './audit';
 import { dianjiangRemaining, recordDianjiangUse } from './dianjiang';
-import { charPoolIds } from '@shared/bloodChars';
+import { charPoolIds, BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
 import { buildView } from './views';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -35,6 +35,7 @@ const MAX_JOIN_PER_MIN = 30;
 const BOT_BUY_PAUSE_MS = 5000; // 机器人购买后停顿：让玩家看清宣告与市场变化，再进行下一次购买
 const MAX_SPECTATORS = 10; // 单房间观战人数上限
 const ROOM_CHAT_MAX = 80; // 房间内对话历史上限：随房间存亡（销毁即清空），不落盘
+const MATCH_HISTORY_MAX = 20; // 房间对局记录上限：随房间存亡（销毁即清空），不落盘
 
 declare module 'ws' {
   interface WebSocket {
@@ -99,6 +100,8 @@ export interface Room {
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
+  /** 房间对局记录（每局终局落一份摘要，心有灵犀含完整轮次；仅内存随房销毁，与 chatLog 同语义） */
+  matchHistory: RoomMatchEntry[];
   /** 房间内发言的稳定 id 序列（删除定位用） */
   chatSeq?: number;
   game: GState | BloodState | MinesState | TacticsState | ConvergeState | null;
@@ -263,6 +266,12 @@ function auditRoomStart(room: Room): void {
   });
 }
 
+/** 房间对局记录：终局时落一份摘要进 Room.matchHistory（超上限丢最旧）；仅内存随房存亡，不落盘 */
+function pushRoomMatchHistory(room: Room, entry: RoomMatchEntry): void {
+  room.matchHistory.push(entry);
+  if (room.matchHistory.length > MATCH_HISTORY_MAX) room.matchHistory.shift();
+}
+
 export class RoomManager {
   private rooms = new Map<string, Room>();
   /** 部署排水：true 时向进行中对局广播一次更新公告（deploy.sh 重启前等待房间清空） */
@@ -297,6 +306,11 @@ export class RoomManager {
     () => new SlidingWindow(60_000, 6),
     (w, now) => w.idle(now),
   );
+  /** 房间对局记录限流：6 次/分/IP（20 条上限，防循环拉取） */
+  private roomMatchHistLimits = new IpTable(
+    () => new SlidingWindow(60_000, 6),
+    (w, now) => w.idle(now),
+  );
   /** 管理员会话令牌校验器（index.ts 注入，指向 adminTokens 表）：持有有效令牌的 join/spectate 免密码 */
   private adminTokenValidator: ((t: string) => boolean) | null = null;
 
@@ -325,6 +339,7 @@ export class RoomManager {
       this.roomListLimit.prune();
       this.roomChatLimits.prune();
       this.roomChatHistLimits.prune();
+      this.roomMatchHistLimits.prune();
       // pwJoins 曾漏在清理之外（访问过密码房的 IP 永久留一条），现已补齐同口径 prune
       this.pwJoins.prune();
       const now = Date.now();
@@ -458,6 +473,9 @@ export class RoomManager {
         return;
       case 'roomChatHistory':
         this.handleRoomChatHistory(room, session);
+        return;
+      case 'roomMatchHistory':
+        this.handleRoomMatchHistory(room, session);
         return;
       case 'dianjiang':
         this.handleDianjiang(room, session, msg);
@@ -1060,6 +1078,7 @@ export class RoomManager {
       convergeEmptySince: 0,
       sessions: new Map(),
       chatLog: [],
+      matchHistory: [],
       game: null,
       pendingRemove: new Set(),
       emptySince: 0,
@@ -1994,6 +2013,13 @@ export class RoomManager {
     send(session.ws, { t: 'roomChatLog', msgs: room.chatLog.slice() });
   }
 
+  /** 房间对局记录快照（新局在前）；房绑定在 dispatch 层已保证——离开房间即不可看，观战者同样可看 */
+  private handleRoomMatchHistory(room: Room, session: Session): void {
+    const ip = session.ws?.ip ?? '';
+    if (!this.roomMatchHistLimits.get(ip).allow()) return;
+    send(session.ws, { t: 'roomMatchLog', entries: room.matchHistory.slice().reverse() });
+  }
+
   /**
    * 点将卡：等待房指定/取消本局角色。仅注册账号、仅血色房等待期、角色须在当前房间池内。
    * 开局时生效并扣当日次数（见 collectForcedChars）；次数用完再设置直接拒绝，明示而非静默失效。
@@ -2281,6 +2307,27 @@ export class RoomManager {
         }),
       };
     }
+    // 房间对局记录：与 matchLogged 同频每局一份（backToRoom 清 room.game 后仍可回看）
+    pushRoomMatchHistory(room, {
+      mode: entry.mode,
+      startedAt: room.gameStartedAt ?? entry.endedAt,
+      endedAt: entry.endedAt,
+      ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+      seatCount: entry.seatCount,
+      title:
+        entry.mode === 'blood'
+          ? `血色牌局 · 目标 ${entry.settings?.targetTickets ?? '?'}🎫${entry.resigned ? ' · 投降局' : ''}`
+          : `经典德州扑克 · ${entry.seatCount} 人`,
+      ...(entry.winnerSeat != null && entry.winnerSeat >= 0 ? { winnerSeat: entry.winnerSeat } : {}),
+      ranks: entry.players.map((p) => ({
+        seat: p.seat,
+        name: p.name,
+        text:
+          p.tickets != null
+            ? `${p.tickets}🎫 ${p.blood ?? 0}🩸${p.charId ? ` · ${BLOOD_CHAR_BY_ID.get(p.charId)?.name ?? p.charId}` : ''}`
+            : `${p.chips ?? 0} 筹码`,
+      })),
+    });
     try {
       recordMatch(entry);
     } catch (e) {
@@ -2355,6 +2402,22 @@ export class RoomManager {
           summary: { mode: 'mines', difficulty: g.difficulty, ranking: g.ranking },
           log: g.log,
         });
+        // 房间对局记录（口径同 matchLogged 哨兵：每局一份）
+        pushRoomMatchHistory(room, {
+          mode: 'mines',
+          startedAt: room.gameStartedAt ?? Date.now(),
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          seatCount: g.players.length,
+          title: `扫雷竞速 · ${g.difficulty === 'easy' ? '初级' : g.difficulty === 'medium' ? '中级' : '高级'}`,
+          ...(g.winnerId ? { winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat } : {}),
+          ranks: g.ranking.map((r) => ({
+            seat: r.seat,
+            name: r.name,
+            // out 同时覆盖踩雷与中途离开（mLeave 记 out），用中性「出局」不臆断原因
+            text: `${r.status === 'done' ? '通关' : r.status === 'out' ? '出局' : '存活'} · 已揭 ${r.revealed} 格`,
+          })),
+        });
       } catch (e) {
         console.error('[audit] 扫雷终局审计失败:', e);
       }
@@ -2374,6 +2437,21 @@ export class RoomManager {
           winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat,
           summary: { mode: 'tactics', mapSize: g.mapSize, ranking: g.ranking },
           log: g.log,
+        });
+        // 房间对局记录（口径同 matchLogged 哨兵：每局一份）
+        pushRoomMatchHistory(room, {
+          mode: 'tactics',
+          startedAt: room.gameStartedAt ?? Date.now(),
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          seatCount: g.players.length,
+          title: `血色猎场 · ${g.mapSize === 'small' ? '小图' : g.mapSize === 'medium' ? '中图' : '大图'} · ${g.turnNumber} 回合`,
+          ...(g.winnerId ? { winnerSeat: g.players.find((p) => p.id === g.winnerId)?.seat } : {}),
+          ranks: g.ranking.map((r) => ({
+            seat: r.seat,
+            name: r.name,
+            text: r.alive ? `存活 · HP ${r.hp}` : '阵亡',
+          })),
         });
       } catch (e) {
         console.error('[audit] 战棋终局审计失败:', e);
@@ -2396,6 +2474,24 @@ export class RoomManager {
             ...(g.result ?? { matched: false, rounds: g.rounds.length, reason: 'unknown' }),
           },
           log: g.log,
+        });
+        // 房间对局记录：带完整轮次对照（「相遇之路」回看）
+        const res = g.result;
+        pushRoomMatchHistory(room, {
+          mode: 'converge',
+          startedAt: room.gameStartedAt ?? Date.now(),
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          seatCount: g.players.length,
+          title: res?.matched
+            ? `心有灵犀 · 用 ${res.rounds} 轮相遇「${res.word}」`
+            : `心有灵犀 · 未相遇（${res?.reason === 'abort' ? '房主终止' : res?.reason === 'leave' ? '有人离开' : '全员断线超时'}）`,
+          ranks: g.players.map((p) => ({
+            seat: p.seat,
+            name: p.name,
+            text: res?.matched ? '相遇 🧠' : '未相遇',
+          })),
+          ...(res ? { converge: { result: res, rounds: g.rounds } } : {}),
         });
       } catch (e) {
         console.error('[audit] 心有灵犀终局审计失败:', e);

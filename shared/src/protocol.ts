@@ -177,6 +177,37 @@ export type PlayerAction =
   | PlayerActionRaise
   | PlayerActionAllIn;
 
+/** 房间对局记录 · 名次行（text 为服务端拼好的展示摘要，如「已揭 81 格 · 通关」；converge 无名次概念时为参与者行） */
+export interface RoomMatchRankRow {
+  seat: number;
+  name: string;
+  text: string;
+}
+
+/**
+ * 房间对局记录 · 单局条目（终局时由服务端从各引擎终局态拼好，随 Room 存亡、不落盘）。
+ * 展示文案（title/ranks[].text）在服务端生成，客户端 dumb 渲染；
+ * 心有灵犀额外携带完整轮次历史（converge 字段），供「相遇之路」回看。
+ */
+export interface RoomMatchEntry {
+  mode: GameMode;
+  startedAt: number;
+  endedAt: number;
+  /** 局时长（分钟，<0.1 省略） */
+  durationMin?: number;
+  seatCount: number;
+  /** 一句话摘要，如「心有灵犀 · 用 2 轮相遇「6」」/「扫雷竞速 · 初级 · 3 人」 */
+  title: string;
+  /** 胜者座位（无胜者/合作局省略） */
+  winnerSeat?: number;
+  ranks: RoomMatchRankRow[];
+  /** 心有灵犀专属：完整轮次对照与终局结果 */
+  converge?: {
+    result: import('./convergeProtocol').ConvergeResult;
+    rounds: import('./convergeProtocol').ConvergeRound[];
+  };
+}
+
 export type C2S =
   | { t: 'create'; name: string; maxPlayers: number; mode?: GameMode; password?: string; auth?: string }
   | { t: 'join'; name: string; code: string; password?: string; auth?: string; adminToken?: string }
@@ -212,6 +243,7 @@ export type C2S =
   | { t: 'chatHistory' }
   | { t: 'roomChat'; text: string }
   | { t: 'roomChatHistory' }
+  | { t: 'roomMatchHistory' }
   | { t: 'dianjiang'; charId: string | null }
   | { t: 'chatDelete'; scope: 'room' | 'global'; id: number }
   | import('./bloodProtocol').BloodAction;
@@ -230,4 +262,5 @@ export type S2C =
   | { t: 'chatLog'; msgs: ChatMsg[] }
   | { t: 'roomChatMsg'; name: string; text: string; ts: number; account?: boolean }
   | { t: 'roomChatLog'; msgs: ChatMsg[] }
+  | { t: 'roomMatchLog'; entries: RoomMatchEntry[] }
   | { t: 'chatDeleted'; scope: 'room' | 'global'; id: number };
