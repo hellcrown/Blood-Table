@@ -1244,7 +1244,9 @@ select:focus {
 }
 
 .r-hand {
-  flex: 1;
+  /* 基准按内容（auto 而非 flex:1 的 0%）：名字自适应变长后，放不下时整段换到下一行，
+     而不是被挤成一字一列（390 实测：长昵称行的「✍️ 还在想…」曾被压到 31px 宽三行竖排） */
+  flex: 1 1 auto;
   color: var(--gold);
   font-size: 13px;
 }
@@ -3381,6 +3383,17 @@ body {
 
 .charpick-toggle .hint {
   white-space: normal; /* 提示文字可以换行（否则 4 列网格被撑爆、目标票数被裁） */
+}
+
+/* 目标票数：数字框定宽（8-30 两位数足够），列窄时提示整段落到下一行——
+   原 .settings-grid input 的 width:100% 在横排里把「按人数默认」挤成 22px 一字一列竖排（390 实测） */
+.charpick-toggle.tickets-toggle {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.charpick-toggle.tickets-toggle input[type='number'] {
+  width: 64px;
+  flex: 0 0 auto;
 }
 
 .charpick-toggle input[type='checkbox'] {
