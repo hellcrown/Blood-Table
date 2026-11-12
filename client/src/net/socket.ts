@@ -1,9 +1,11 @@
 import type { C2S, LogLine, S2C } from '@shared/protocol';
 import type { BloodView } from '@shared/bloodProtocol';
+import type { DrawOp } from '@shared/drawProtocol';
 import { mergeBloodLog as mergeLogs } from './bloodLog';
+import { DrawBoard } from './drawBoard';
 
 export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
-export type AnyView = import('@shared/protocol').TableView | BloodView | import('@shared/minesProtocol').MinesView | import('@shared/tacticsProtocol').TacticsView | import('@shared/convergeProtocol').ConvergeView;
+export type AnyView = import('@shared/protocol').TableView | BloodView | import('@shared/minesProtocol').MinesView | import('@shared/tacticsProtocol').TacticsView | import('@shared/convergeProtocol').ConvergeView | import('@shared/drawProtocol').DrawView;
 
 type ViewListener = (v: AnyView | null) => void;
 type ErrorListener = (code: string, msg: string) => void;
@@ -21,6 +23,9 @@ type RoomChatMsgListener = (m: import('@shared/protocol').ChatMsg) => void;
 type RoomChatLogListener = (msgs: import('@shared/protocol').ChatMsg[]) => void;
 type ChatDeletedListener = (scope: 'room' | 'global', id: number) => void;
 type RoomMatchLogListener = (entries: import('@shared/protocol').RoomMatchEntry[]) => void;
+/** 你画我猜画面变化：snap=整幅替换（重绘）；ops=远端增量（补画尾段，撤销/清空则重绘） */
+export type DrawEvent = { kind: 'snap' } | { kind: 'ops'; ops: DrawOp[] };
+type DrawListener = (e: DrawEvent) => void;
 
 export interface AccountInfo {
   id: string;
@@ -87,6 +92,12 @@ class Net {
   private roomChatLogListeners = new Set<RoomChatLogListener>();
   private chatDeletedListeners = new Set<ChatDeletedListener>();
   private roomMatchLogListeners = new Set<RoomMatchLogListener>();
+  private drawListeners = new Set<DrawListener>();
+  /**
+   * 你画我猜画面：常驻在连接单例里——服务端广播时快照先于视图到达，那一刻对局页还没挂载，
+   * 只靠页面订阅会丢掉进房首帧画面；页面挂载时直接读这里的现成画面再订阅后续变化。
+   */
+  readonly drawBoard = new DrawBoard();
   private accountListeners = new Set<AccountListener>();
   private reconnectTimer: number | null = null;
   private reconnectDelay = 800;
@@ -234,6 +245,16 @@ class Net {
         this.chatDeletedListeners.forEach((l) => l(msg.scope, msg.id));
       } else if (msg.t === 'roomMatchLog') {
         this.roomMatchLogListeners.forEach((l) => l(msg.entries));
+      } else if (msg.t === 'dSnap') {
+        if (ws === this.leavingWs) return; // 已退房：迟到画面不得污染下一个房间
+        this.drawBoard.replace(msg.turn, msg.rev, msg.strokes);
+        this.drawListeners.forEach((l) => l({ kind: 'snap' }));
+      } else if (msg.t === 'dOps') {
+        if (ws === this.leavingWs) return;
+        // 同回合且修订号连续才应用；对不上（理论上不会发生）丢弃，服务端下次广播会补快照
+        if (this.drawBoard.applyRemote(msg.turn, msg.rev, msg.ops)) {
+          this.drawListeners.forEach((l) => l({ kind: 'ops', ops: msg.ops }));
+        }
       } else if (msg.t === 'error') {
         if (msg.code === 'TOKEN_INVALID' || msg.code === 'ROOM_CLOSED' || msg.code === 'KICKED') {
           // 会话/房间失效或被请离：回到大厅（必须清视图，否则卡死在旧牌桌）
@@ -503,6 +524,12 @@ class Net {
   onRoomMatchLog(l: RoomMatchLogListener): () => void {
     this.roomMatchLogListeners.add(l);
     return () => this.roomMatchLogListeners.delete(l);
+  }
+
+  /** 你画我猜画面变化（快照/远端增量）；当前画面直接读 net.drawBoard */
+  onDraw(l: DrawListener): () => void {
+    this.drawListeners.add(l);
+    return () => this.drawListeners.delete(l);
   }
 
   private setStatus(s: ConnStatus): void {

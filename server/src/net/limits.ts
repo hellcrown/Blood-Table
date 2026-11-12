@@ -37,6 +37,7 @@ export class SlidingWindow {
 export class TokenBucket {
   private tokens: number;
   private last = Date.now();
+  /** 连续丢弃计数：成功取到令牌即清零（此前只增不减，长连接上偶发超速会慢慢累积到被断线） */
   private dropped = 0;
 
   constructor(
@@ -54,6 +55,7 @@ export class TokenBucket {
       return false;
     }
     this.tokens -= 1;
+    this.dropped = 0;
     return true;
   }
 

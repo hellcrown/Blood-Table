@@ -160,4 +160,57 @@ describe('ConvergeTable · 心有灵犀对局页', () => {
     fireEvent.click(screen.getByRole('button', { name: '终止本局' }));
     expect(sendSpy).toHaveBeenCalledWith({ t: 'cAbort' });
   });
+
+  it('历史滚动区：轮数推进/终局时 scrollTo 到最新一轮；0 轮不滚；后台态直接跳到底（太久看不到新词的兜底）', () => {
+    // jsdom 无布局，无法真滚：桩掉原型方法只观察调用参数（scrollTo 在 jsdom 可能未实现，手动桩 + 手动还原）
+    const calls: unknown[][] = [];
+    const scrollToStub = function (this: unknown, ...args: unknown[]) {
+      calls.push(args);
+    } as unknown as typeof HTMLElement.prototype.scrollTo;
+    const orig = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', { value: scrollToStub, configurable: true, writable: true });
+    // 可见性桩：实例自有属性遮住原型 getter，finally 删掉即还原
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    const round1 = { n: 1, same: false, entries: [{ seat: 0, text: '午睡' }, { seat: 1, text: '肥牛卷' }] };
+    const round2 = { n: 2, same: false, entries: [{ seat: 0, text: '雪' }, { seat: 1, text: '冰' }] };
+    try {
+      const { rerender } = render(<ConvergeTable view={cvView()} />);
+      expect(calls).toHaveLength(0); // 0 轮：没有可滚的内容
+      rerender(<ConvergeTable view={cvView({ round: 2, rounds: [round1] })} />);
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+      expect(calls.at(-1)?.[0]).toMatchObject({ behavior: 'smooth' }); // 前台：平滑滚（jsdom 无布局 scrollHeight 恒 0，只验调用形态）
+      // 后台（切走 App 等对方）：不产生动画帧，平滑滚动会卡住 → 必须即时跳到底
+      hidden = true;
+      rerender(<ConvergeTable view={cvView({ round: 3, rounds: [round1, round2] })} />);
+      expect(calls.at(-1)?.[0]).toMatchObject({ behavior: 'auto' });
+      // 终局（未相遇，轮数不变）也触发一次：把最后一轮送进视野
+      const before = calls.length;
+      rerender(
+        <ConvergeTable
+          view={cvView({
+            phase: 'gameover',
+            result: { matched: false, rounds: 2, word: '', reason: 'abort' },
+            rounds: [round1, round2],
+          })}
+        />,
+      );
+      expect(calls.length).toBe(before + 1);
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+      if (orig) Object.defineProperty(HTMLElement.prototype, 'scrollTo', orig);
+      else delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+    }
+  });
+
+  it('历史容器挂 ref：相遇之路面板是内部滚动区（页面本体不滚的布局前提）', () => {
+    const { container } = render(
+      <ConvergeTable
+        view={cvView({ rounds: [{ n: 1, same: false, entries: [{ seat: 0, text: '午睡' }, { seat: 1, text: '肥牛卷' }] }] })}
+      />,
+    );
+    const history = container.querySelector('.cv-history') as HTMLElement | null;
+    expect(history).not.toBeNull();
+    expect(history?.scrollTop).toBe(0); // ref 已挂上（scrollTop 属性存在即证明是元素实例）
+  });
 });

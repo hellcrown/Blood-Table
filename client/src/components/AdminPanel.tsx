@@ -15,7 +15,31 @@ const PHASE_CN: Record<string, string> = {
   // 管理端自己的措辞，放在展开之后覆盖共享表（不动共享表，免得改到牌桌顶栏文案）
   waiting: '等待中',
   showdown: '摊牌', // 历史遗留键：不在任一联合类型里，保留以兼容旧记录
+  playing: '进行中', // 扫雷/猎场/心有灵犀
+  choosing: '选词中', // 你画我猜
+  drawing: '作画中',
+  reveal: '揭晓中',
 };
+
+// 全部模式的中文名：统计行/近期对局/房间列表共用（新模式不再误显示成「德州」）
+const MODE_CN: Record<string, string> = {
+  blood: '血色',
+  classic: '德州',
+  mines: '扫雷',
+  tactics: '猎场',
+  converge: '灵犀',
+  draw: '你画',
+};
+const MODE_FULL_CN: Record<string, string> = {
+  blood: '血色牌局',
+  classic: '德州扑克',
+  mines: '扫雷竞速',
+  tactics: '血色猎场',
+  converge: '心有灵犀',
+  draw: '你画我猜',
+};
+const MINES_DIFF_CN: Record<string, string> = { easy: '初级', medium: '中级', hard: '高级' };
+const TACTICS_MAP_CN: Record<string, string> = { small: '小图', medium: '中图', large: '大图' };
 
 interface RoomInfo {
   code: string;
@@ -62,6 +86,10 @@ interface MatchRow {
   startedAt?: number;
   /** 血色：本局以投降结束 */
   resigned?: boolean;
+  /** 心有灵犀：终局结果（相遇与否 + 用时轮数 + 相遇词） */
+  converge?: { matched: boolean; rounds: number; word?: string; reason?: string };
+  /** 扫雷：难度；猎场：地图尺寸；你画我猜：作画时限与每人次数 */
+  settings?: { difficulty?: string; mapSize?: string; turnSec?: number; cycles?: number };
   /** 操作审计关联（保留 2 天；无审计记录时无「详情」入口） */
   auditKey?: string;
   auditSameIp?: number[];
@@ -73,6 +101,11 @@ interface MatchRow {
     tickets?: number;
     blood?: number;
     chips?: number;
+    revealed?: number;
+    status?: 'done' | 'out' | 'playing';
+    hp?: number;
+    alive?: boolean;
+    score?: number;
     isBot?: boolean;
     wasAuto?: boolean;
   }[];
@@ -115,7 +148,7 @@ interface AuditActionLine {
 }
 
 interface AuditDetail {
-  start: { key: string; room: string; mode: 'blood' | 'classic'; startedAt: number; players: AuditPlayer[]; sameIp?: number[] };
+  start: { key: string; room: string; mode: string; startedAt: number; players: AuditPlayer[]; sameIp?: number[] };
   end?: {
     endedAt: number;
     durationMin?: number;
@@ -519,7 +552,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                         <td>
                           <b>{r.code}</b>
                         </td>
-                        <td>{r.mode === 'blood' ? '血色牌局' : '德州扑克'}</td>
+                        <td>{MODE_FULL_CN[r.mode] ?? r.mode}</td>
                         <td>{PHASE_CN[r.phase] ?? r.phase}</td>
                         <td>{r.players}</td>
                         <td>{r.host || '—'}</td>
@@ -586,7 +619,10 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                   <p className="hint">
                     累计 {stats.total} 局 · 近 7 天 {stats.last7d} 局 · 平均时长{' '}
                     {stats.avgDurationMin != null ? `${stats.avgDurationMin} 分钟` : '—'} · 机器人座位占{' '}
-                    {stats.botShare}% · 血色 {stats.byMode.blood ?? 0} 局 / 德州 {stats.byMode.classic ?? 0} 局
+                    {stats.botShare}% ·{' '}
+                    {Object.keys(MODE_CN)
+                      .map((k) => `${MODE_CN[k]} ${stats.byMode[k] ?? 0} 局`)
+                      .join(' / ')}
                   </p>
                   {stats.chars.length > 0 && (
                     <table className="admin-table">
@@ -623,7 +659,16 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                         <span style={{ flex: 1 }}>
                           {new Date(m.endedAt).toLocaleString('zh-CN', { hour12: false })}
                           {m.durationMin != null ? ` · ${m.durationMin} 分钟` : ''}
-                          {` · ${m.mode === 'blood' ? '血色' : '德州'} ${m.seatCount} 人`}
+                          {` · ${MODE_CN[m.mode] ?? m.mode} ${m.seatCount} 人`}
+                          {m.mode === 'mines' && m.settings?.difficulty != null &&
+                            ` · ${MINES_DIFF_CN[m.settings.difficulty] ?? m.settings.difficulty}`}
+                          {m.mode === 'tactics' && m.settings?.mapSize != null &&
+                            ` · ${TACTICS_MAP_CN[m.settings.mapSize] ?? m.settings.mapSize}`}
+                          {m.mode === 'converge' &&
+                            (m.converge?.matched
+                              ? ` · ${m.converge.rounds} 轮相遇「${m.converge.word ?? ''}」`
+                              : ' · 未相遇')}
+                          {m.mode === 'draw' && m.settings?.cycles != null && ` · 每人画 ${m.settings.cycles} 次`}
                           {m.resigned && ' · 投降'}
                           {m.auditSameIp && <b style={{ color: '#d4a017' }}> · ⚠️同IP</b>}
                         </span>
@@ -638,12 +683,16 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                       </div>
                       <div className="feedback-item-text">
                         {m.players
-                          .map(
-                            (p) =>
-                              `${p.rank === 1 ? '👑' : ''}${p.name}${p.isBot ? '🤖' : ''}${
-                                p.charId ? `(${BLOOD_CHAR_BY_ID.get(p.charId)?.name ?? p.charId})` : ''
-                              }`,
-                          )
+                          .map((p) => {
+                            // 每模式一条终局摘要后缀：血色=角色、扫雷=通关/出局/存活+已揭格数（out 不臆断原因）、猎场=存活HP/阵亡、灵犀/德州=无附加
+                            let extra = '';
+                            if (p.charId) extra = `(${BLOOD_CHAR_BY_ID.get(p.charId)?.name ?? p.charId})`;
+                            else if (p.status != null)
+                              extra = `(${p.status === 'done' ? '通关' : p.status === 'out' ? '出局' : '存活'} · 已揭 ${p.revealed ?? 0} 格)`;
+                            else if (p.alive != null) extra = p.alive ? `(存活 · HP ${p.hp ?? 0})` : '(阵亡)';
+                            else if (p.score != null) extra = `(${p.score}分)`;
+                            return `${p.rank === 1 ? '👑' : ''}${p.name}${p.isBot ? '🤖' : ''}${extra}`;
+                          })
                           .join(' · ')}
                       </div>
                       {detailKey != null && detailKey === m.auditKey && (

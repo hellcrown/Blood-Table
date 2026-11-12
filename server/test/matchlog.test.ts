@@ -93,27 +93,62 @@ describe('对局记录落库 matchlog', () => {
         { name: '丙', seat: 1, rank: 2, chips: 0 },
       ],
     });
+    // 新模式落库（扫雷/猎场/灵犀）：管理端统计与重启恢复都要认
+    recordMatch({
+      ...base,
+      mode: 'mines',
+      winnerSeat: 0,
+      settings: { difficulty: 'medium' },
+      players: [
+        { name: '乙', seat: 0, rank: 1, revealed: 30, status: 'done', isBot: true },
+        { name: '丙', seat: 1, rank: 2, revealed: 12, status: 'out' },
+      ],
+    });
+    recordMatch({
+      ...base,
+      mode: 'tactics',
+      winnerSeat: 1,
+      settings: { mapSize: 'small' },
+      players: [
+        { name: '乙', seat: 0, rank: 2, hp: 0, alive: false },
+        { name: '丙', seat: 1, rank: 1, hp: 7, alive: true },
+      ],
+    });
+    recordMatch({
+      ...base,
+      mode: 'converge',
+      winnerSeat: -1, // 灵犀无胜负概念
+      converge: { matched: true, rounds: 3, word: '午睡', reason: 'match' },
+      players: [
+        { name: '乙', seat: 0, rank: 1 }, // 相遇双方并列 rank=1
+        { name: '丙', seat: 1, rank: 1 },
+      ],
+    });
 
     // room/startedAt 往返：管理端「详情」入口靠它与审计关联
     expect(listMatches().some((m) => m.room === 'ABCD' && m.startedAt === base.endedAt - 400_000)).toBe(true);
 
     const stats = matchStats();
-    expect(stats.total).toBe(2);
+    expect(stats.total).toBe(5);
     expect(stats.byMode.blood).toBe(1);
     expect(stats.byMode.classic).toBe(1);
-    expect(stats.avgDurationMin).toBe(12.5);
-    expect(stats.botShare).toBe(25); // 4 座位中 1 bot
+    expect(stats.byMode.mines).toBe(1);
+    expect(stats.byMode.tactics).toBe(1);
+    expect(stats.byMode.converge).toBe(1);
+    expect(stats.avgDurationMin).toBe(12.5); // 新模式条目不带 durationMin，不掺入均值
+    expect(stats.botShare).toBe(20); // 10 座位中 2 bot（血色机器人1 + 扫雷乙）
     const dealer = stats.chars.find((c) => c.charId === 'dealer');
     expect(dealer?.games).toBe(1);
     expect(dealer?.wins).toBe(1);
     expect(dealer?.winRate).toBe(100);
     expect(dealer?.avgRank).toBe(1);
 
-    // 重启恢复：坏行跳过
+    // 重启恢复：坏行跳过；新模式条目不得被重载守卫丢弃
     fs.appendFileSync(file, '这不是JSON\n');
     initMatchStore(file);
-    expect(listMatches().length).toBe(2);
-    expect(matchStats().total).toBe(2);
+    expect(listMatches().length).toBe(5);
+    expect(matchStats().total).toBe(5);
+    expect(listMatches().filter((m) => m.mode === 'converge').length).toBe(1);
 
     clearMatches();
     expect(listMatches().length).toBe(0);
@@ -154,6 +189,88 @@ describe('对局记录落库 matchlog', () => {
     expect(clerk?.games).toBe(13);
     expect(clerk?.wins).toBe(3);
     expect(clerk?.winRate).toBe(23.1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('个人战绩跨模式聚合：灵犀相遇=并列夺冠，recent 带各模式详情字段', async () => {
+    const { initMatchStore, recordMatch, matchPlayerStats, clearMatches } = await import('../src/matchlog');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'matchlog-stats-'));
+    initMatchStore(path.join(dir, 'matches.jsonl'));
+    const now = Date.now();
+    // 同一账号 'acct-1' 打 5 种模式各一局（旧→新落库，recent 应新→旧）
+    recordMatch({
+      endedAt: now - 400_000,
+      mode: 'blood',
+      seatCount: 2,
+      winnerSeat: 0,
+      players: [
+        { name: '甲', seat: 0, rank: 1, accountId: 'acct-1', charId: 'dealer', tickets: 24, blood: 30 },
+        { name: '乙', seat: 1, rank: 2, charId: 'clerk', tickets: 9, blood: 4 },
+      ],
+    });
+    recordMatch({
+      endedAt: now - 300_000,
+      mode: 'mines',
+      seatCount: 2,
+      winnerSeat: 0,
+      settings: { difficulty: 'hard' },
+      players: [
+        { name: '甲', seat: 0, rank: 1, accountId: 'acct-1', revealed: 40, status: 'done' },
+        { name: '乙', seat: 1, rank: 2, revealed: 5, status: 'out' },
+      ],
+    });
+    recordMatch({
+      endedAt: now - 200_000,
+      mode: 'tactics',
+      seatCount: 2,
+      winnerSeat: 1,
+      settings: { mapSize: 'medium' },
+      players: [
+        { name: '甲', seat: 0, rank: 2, accountId: 'acct-1', hp: 0, alive: false },
+        { name: '乙', seat: 1, rank: 1, hp: 3, alive: true },
+      ],
+    });
+    recordMatch({
+      endedAt: now - 100_000,
+      mode: 'converge',
+      seatCount: 2,
+      winnerSeat: -1,
+      converge: { matched: true, rounds: 2, word: '６', reason: 'match' },
+      players: [
+        { name: '甲', seat: 0, rank: 1, accountId: 'acct-1' },
+        { name: '乙', seat: 1, rank: 1 },
+      ],
+    });
+    recordMatch({
+      endedAt: now,
+      mode: 'converge',
+      seatCount: 2,
+      winnerSeat: -1,
+      converge: { matched: false, rounds: 3, reason: 'abort' },
+      players: [
+        { name: '甲', seat: 0, rank: 2, accountId: 'acct-1' },
+        { name: '乙', seat: 1, rank: 2 },
+      ],
+    });
+
+    const stats = matchPlayerStats('acct-1');
+    expect(stats).not.toBeNull();
+    // 血色冠 + 扫雷冠 + 灵犀相遇（并列冠）= 3 冠；灵犀未相遇 rank=2 不计冠
+    expect(stats!.games).toBe(5);
+    expect(stats!.wins).toBe(3);
+    expect(stats!.avgRank).toBe(1.4); // (1+1+2+1+2)/5
+    expect(stats!.chars).toHaveLength(1); // 角色表仍是血色专属
+    expect(stats!.chars[0]?.charId).toBe('dealer');
+    // recent 新→旧：灵犀未相遇在首，带 matched:false；各模式详情字段透传
+    expect(stats!.recent.map((r) => r.mode)).toEqual(['converge', 'converge', 'tactics', 'mines', 'blood']);
+    expect(stats!.recent[0]?.matched).toBe(false);
+    expect(stats!.recent[1]?.matched).toBe(true);
+    expect(stats!.recent[2]?.alive).toBe(false);
+    expect(stats!.recent[3]?.status).toBe('done');
+    expect(stats!.recent[4]?.tickets).toBe(24);
+    // 无关账号不受新模式条目影响
+    expect(matchPlayerStats('acct-2')).toBeNull();
+    clearMatches();
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

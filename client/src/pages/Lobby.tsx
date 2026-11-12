@@ -21,7 +21,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
   const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[] | null>(null);
   const [code, setCode] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
-  const [mode, setMode] = useState<'blood' | 'classic' | 'mines' | 'tactics' | 'converge'>('blood');
+  const [mode, setMode] = useState<'blood' | 'classic' | 'mines' | 'tactics' | 'converge' | 'draw'>('blood');
   const [createPw, setCreatePw] = useState('');
   const [joinPw, setJoinPw] = useState('');
   const [pwForCode, setPwForCode] = useState<string | null>(null);
@@ -258,13 +258,14 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
             <div className="row">
               <select
                 value={mode}
-                onChange={(e) => setMode(e.target.value as 'blood' | 'classic' | 'mines' | 'tactics' | 'converge')}
+                onChange={(e) => setMode(e.target.value as 'blood' | 'classic' | 'mines' | 'tactics' | 'converge' | 'draw')}
               >
                 <option value="blood">血色牌局（卡片对决）</option>
                 <option value="classic">经典德州扑克</option>
                 <option value="mines">扫雷竞速</option>
                 <option value="tactics">血色猎场</option>
                 <option value="converge">心有灵犀（双人对词）</option>
+                <option value="draw">你画我猜（2-4 人）</option>
               </select>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
@@ -376,7 +377,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                     }
                   >
                     <b className="room-code">{r.code}</b>
-                    <span className="room-mode">{r.mode === 'blood' ? '血色牌局' : r.mode === 'mines' ? '扫雷竞速' : r.mode === 'tactics' ? '血色猎场' : r.mode === 'converge' ? '心有灵犀' : '经典德扑'}</span>
+                    <span className="room-mode">{r.mode === 'blood' ? '血色牌局' : r.mode === 'mines' ? '扫雷竞速' : r.mode === 'tactics' ? '血色猎场' : r.mode === 'converge' ? '心有灵犀' : r.mode === 'draw' ? '你画我猜' : '经典德扑'}</span>
                     <span className={`tag room-st ${status.cls}`}>{status.label}</span>
                     <span className="room-players">
                       {r.players}/{r.maxPlayers} 人

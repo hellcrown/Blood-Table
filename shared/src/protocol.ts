@@ -132,6 +132,10 @@ export interface TableView {
   tacticsMapSize?: 'small' | 'medium' | 'large';
   /** 血色猎场：回合时限秒数（0=默认 60s） */
   tacticsTurnSec?: number;
+  /** 你画我猜：作画时限秒数（0=默认 80s） */
+  drawTurnSec?: number;
+  /** 你画我猜：每人画几次（0=默认 2 次） */
+  drawCycles?: number;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   players: SeatView[];
@@ -151,7 +155,7 @@ export interface TableView {
 
 /* ---------------- 客户端 → 服务端 ---------------- */
 
-export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics' | 'converge';
+export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics' | 'converge' | 'draw';
 
 export interface PlayerActionFold {
   k: 'fold';
@@ -206,6 +210,10 @@ export interface RoomMatchEntry {
     result: import('./convergeProtocol').ConvergeResult;
     rounds: import('./convergeProtocol').ConvergeRound[];
   };
+  /** 你画我猜专属：每回合谁画了什么、几人猜中（end=回合结束原因） */
+  draw?: {
+    turns: { no: number; drawer: string; word: string; solved: number; end: 'all' | 'time' | 'away' | 'left' }[];
+  };
 }
 
 export type C2S =
@@ -225,10 +233,15 @@ export type C2S =
   | { t: 'tSkill'; skill: number; r?: number; c?: number }
   | { t: 'tEndTurn' }
   | { t: 'tRematch' }
+  | { t: 'dPick'; index: number }
+  | { t: 'dStroke'; ops: import('./drawProtocol').DrawOp[] }
+  | { t: 'dGuess'; text: string }
+  | { t: 'dRematch' }
+  | { t: 'dAbort' }
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number; drawTurnSec?: number; drawCycles?: number }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
@@ -252,8 +265,12 @@ export type C2S =
 
 export type S2C =
   | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
-  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView | import('./convergeProtocol').ConvergeView }
+  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView | import('./convergeProtocol').ConvergeView | import('./drawProtocol').DrawView }
   | { t: 'event'; line: LogLine }
+  /** 你画我猜：增量画面操作（turn=所属回合 schedule 下标，rev=应用后的修订号；画手自己不回显） */
+  | { t: 'dOps'; turn: number; rev: number; ops: import('./drawProtocol').DrawOp[] }
+  /** 你画我猜：整幅画面快照（新进房/重连/落后时补发，客户端整幅替换） */
+  | { t: 'dSnap'; turn: number; rev: number; strokes: import('./drawProtocol').DrawStroke[] }
   | { t: 'fx'; kind: 'flower' | 'egg'; from: number; to: number }
   | { t: 'error'; code: string; msg: string }
   | { t: 'pong'; n: number }

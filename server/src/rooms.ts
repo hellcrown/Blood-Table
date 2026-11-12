@@ -15,6 +15,9 @@ import * as tactics from './tactics/engine';
 import { tacticsBotDecide } from './tactics/botAI';
 import type { ConvergeState } from '@shared/convergeProtocol';
 import * as converge from './converge/engine';
+import type { DrawState } from '@shared/drawProtocol';
+import { DRAW_CYCLE_OPTIONS, DRAW_TURN_SEC_OPTIONS } from '@shared/drawProtocol';
+import * as draw from './draw/engine';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
@@ -68,6 +71,10 @@ export interface Session {
   dianjiangPick?: string;
   /** 上次点将消息时间（频控用：成功设置/取消都推全房视图，防刷广播） */
   lastDianjiang?: number;
+  /** 你画我猜：已同步到的画面修订号（缺省=未同步 → 下次广播补整幅快照；bind 时清掉，重连必拿全图） */
+  drawRev?: number;
+  /** 你画我猜：猜词限频（每会话 10 秒 10 条，超频静默丢弃） */
+  guessWindow?: SlidingWindow;
 }
 
 export interface Room {
@@ -98,6 +105,12 @@ export interface Room {
   tacticsEmptySince: number;
   /** 心有灵犀：全员断线起始时刻（宽限 30s，同扫雷口径） */
   convergeEmptySince: number;
+  /** 你画我猜：作画时限秒数（0=默认 80s） */
+  drawTurnSec: number;
+  /** 你画我猜：每人画几次（0=默认 2 次） */
+  drawCycles: number;
+  /** 你画我猜：全员断线起始时刻（宽限 30s，同扫雷口径） */
+  drawEmptySince: number;
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
@@ -105,7 +118,7 @@ export interface Room {
   matchHistory: RoomMatchEntry[];
   /** 房间内发言的稳定 id 序列（删除定位用） */
   chatSeq?: number;
-  game: GState | BloodState | MinesState | TacticsState | ConvergeState | null;
+  game: GState | BloodState | MinesState | TacticsState | ConvergeState | DrawState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
   /** 房间密码（可选；设置后加入/观战须携带） */
@@ -174,6 +187,20 @@ function takeMessageSlot(ws: WebSocket): boolean {
   if (!bucket) {
     bucket = new TokenBucket(6, 30);
     msgBuckets.set(ws, bucket);
+  }
+  return bucket.take();
+}
+
+/**
+ * 你画我猜笔画专用令牌桶：作画是持续 ~10 条/秒的高频流，与普通消息分开计——
+ * 共用 6 条/秒的普通桶会让画手几秒内就被判洪泛断线。超出静默丢弃、不计入洪泛。
+ */
+const strokeBuckets = new WeakMap<WebSocket, TokenBucket>();
+function takeStrokeSlot(ws: WebSocket): boolean {
+  let bucket = strokeBuckets.get(ws);
+  if (!bucket) {
+    bucket = new TokenBucket(20, 40);
+    strokeBuckets.set(ws, bucket);
   }
   return bucket.take();
 }
@@ -262,7 +289,11 @@ function auditRoomStart(room: Room): void {
           ? { difficulty: room.minesDifficulty, timeSec: room.minesTimeSec }
           : room.mode === 'tactics'
             ? { mapSize: room.tacticsMapSize, turnSec: room.tacticsTurnSec }
-            : { ...room.settings },
+            : room.mode === 'draw'
+              ? { turnSec: room.drawTurnSec, cycles: room.drawCycles }
+              : room.mode === 'converge'
+                ? {}
+                : { ...room.settings },
     players,
   });
 }
@@ -271,6 +302,22 @@ function auditRoomStart(room: Room): void {
 function pushRoomMatchHistory(room: Room, entry: RoomMatchEntry): void {
   room.matchHistory.push(entry);
   if (room.matchHistory.length > MATCH_HISTORY_MAX) room.matchHistory.shift();
+}
+
+/** 你画我猜终局审计摘要：结束原因 + 排名 + 每回合（谁画、什么词、几人猜中、怎么结束的） */
+function drawAuditSummary(ds: DrawState): Record<string, unknown> {
+  return {
+    mode: 'draw',
+    reason: ds.result?.reason ?? 'unknown',
+    ranking: ds.ranking,
+    turns: ds.history.map((h) => ({
+      no: h.no,
+      drawer: h.drawerName,
+      word: h.word,
+      solved: h.solvedIds.length,
+      end: h.endReason,
+    })),
+  };
 }
 
 export class RoomManager {
@@ -397,7 +444,12 @@ export class RoomManager {
   }
 
   private onMessage(ws: WebSocket, raw: RawData): void {
-    if (!takeMessageSlot(ws)) {
+    const text = String(raw);
+    // 你画我猜笔画按原始前缀分流到专用桶（客户端构造时 t 恒在首位，同全服聊天的前缀手法）
+    const viaStroke = text.startsWith('{"t":"dStroke"');
+    if (viaStroke) {
+      if (!takeStrokeSlot(ws)) return; // 超速静默丢弃，不计入洪泛断线
+    } else if (!takeMessageSlot(ws)) {
       if (msgBuckets.get(ws)?.flooded()) {
         try {
           ws.close(4009, 'flood');
@@ -409,7 +461,7 @@ export class RoomManager {
     }
     let msg: C2S;
     try {
-      msg = JSON.parse(String(raw)) as C2S;
+      msg = JSON.parse(text) as C2S;
     } catch {
       send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
       return;
@@ -420,6 +472,8 @@ export class RoomManager {
       send(ws, { t: 'error', code: 'BAD_MSG', msg: '消息格式错误' });
       return;
     }
+    // JSON 重复键取最后一个：伪造「{"t":"dStroke","t":"join",…}」可借笔画桶绕过普通限流，解析后必须复核
+    if (viaStroke && msg.t !== 'dStroke') return;
     try {
       this.dispatch(ws, msg);
     } catch (e) {
@@ -537,6 +591,21 @@ export class RoomManager {
         return;
       case 'tRematch':
         this.handleTRematch(room, session);
+        return;
+      case 'dPick':
+        this.handleDPick(room, session, msg);
+        return;
+      case 'dStroke':
+        this.handleDStroke(room, session, msg);
+        return;
+      case 'dGuess':
+        this.handleDGuess(room, session, msg);
+        return;
+      case 'dRematch':
+        this.handleDRematch(room, session);
+        return;
+      case 'dAbort':
+        this.handleDAbort(room, session);
         return;
       case 'backToRoom':
         this.handleBackToRoom(room, session);
@@ -936,7 +1005,9 @@ export class RoomManager {
             ? 'tactics'
             : msg.mode === 'converge'
               ? 'converge'
-              : 'classic';
+              : msg.mode === 'draw'
+                ? 'draw'
+                : 'classic';
     // 心有灵犀固定 2 人（双人趋同无单人局），同扫雷口径钳容量
     const room = this.createRoom(mode === 'mines' || mode === 'converge' ? 2 : msg.maxPlayers, mode, ip);
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
@@ -1053,6 +1124,8 @@ export class RoomManager {
     session.ws = ws;
     session.connected = true;
     if (ws.ip) session.lastIp = ws.ip; // 断线会话的 ws 会被置空，审计快照靠 lastIp 拿回 IP
+    // 你画我猜：新连接（进房/观战/重连/账号接管）一律视为画面未同步，下次广播补整幅快照
+    session.drawRev = undefined;
     this.bindings.set(ws, { room, session });
   }
 
@@ -1077,6 +1150,9 @@ export class RoomManager {
       tacticsTurnSec: 0,
       tacticsEmptySince: 0,
       convergeEmptySince: 0,
+      drawTurnSec: 0,
+      drawCycles: 0,
+      drawEmptySince: 0,
       sessions: new Map(),
       chatLog: [],
       matchHistory: [],
@@ -1173,6 +1249,10 @@ export class RoomManager {
         // 心有灵犀：state.players 保持完整（已揭示历史与终局结果需要）；进行中被移除
         //（踢出/主动离开等一切路径）统一按「离场未相遇」终局——双人局少一人无法继续
         converge.cLeave(room.game as ConvergeState, session.id, Date.now());
+      } else if (room.mode === 'draw') {
+        // 你画我猜：state.players 保持完整（离场者留在排名、保留得分）；一切移除路径统一走 dLeave：
+        // 画手离开作废本回合、不足 2 人终局
+        draw.dLeave(room.game as DrawState, session.id, Date.now());
       } else if (room.mode !== 'mines' && room.mode !== 'tactics') {
         const cg = room.game as GState;
         // 仅在安全时机调用（结算后/未在手牌中），直接移除
@@ -1304,6 +1384,39 @@ export class RoomManager {
       this.broadcast(room);
       return;
     }
+    // 你画我猜：进行中离场标记离场（画手离开作废本回合、不足 2 人终局），随后移除会话
+    if (room.mode === 'draw' && g && 'strokes' in g) {
+      this.removeSession(room, session); // dLeave 在 removeSession 内统一触发（同心有灵犀口径）
+      if (room.sessions.size === 0) {
+        // 末人离开=房间就地删除，审计 end 必须在此补写（同扫雷口径）
+        try {
+          const ds = g as DrawState;
+          if (ds.phase === 'gameover' && !room.matchLogged) {
+            room.matchLogged = true;
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: drawAuditSummary(ds),
+              log: ds.log,
+            });
+          } else if (!room.matchLogged) {
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { resolved: false },
+              log: ds.log,
+              resolvedOnly: true,
+            });
+          }
+        } catch (e) {
+          console.error('[audit] 你画我猜末人离开审计失败:', e);
+        }
+        if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+        return;
+      }
+      this.broadcast(room);
+      return;
+    }
     // 血色模式：直接离场标记断线（回合由超时托管兜底），终局/构筑前由 GC 清理
     if (room.mode === 'blood' && g) {
       session.connected = false;
@@ -1423,6 +1536,9 @@ export class RoomManager {
       for (const s of room.sessions.values()) s.lastEventSeq = 0;
       this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
       if (this.draining) this.notifyDrain(room);
+    } else if (room.mode === 'draw') {
+      if (room.game) return;
+      this.startDrawGame(room, now);
     } else if (room.mode === 'blood') {
       if (room.game) return;
       const players = [...room.sessions.values()]
@@ -1528,6 +1644,16 @@ export class RoomManager {
           ? 0
           : Math.min(TACTICS_TURN_SEC_MAX, Math.max(TACTICS_TURN_SEC_MIN, n))
         : 0;
+    }
+    if (msg.drawTurnSec != null) {
+      // 你画我猜作画时限：0=默认 80s，其余只认界面选项（60/80/100/120），非法值忽略
+      const n = Number(msg.drawTurnSec);
+      if (n === 0 || DRAW_TURN_SEC_OPTIONS.includes(n)) room.drawTurnSec = n;
+    }
+    if (msg.drawCycles != null) {
+      // 你画我猜每人画几次：0=默认 2 次，其余只认 1/2/3
+      const n = Number(msg.drawCycles);
+      if (n === 0 || DRAW_CYCLE_OPTIONS.includes(n)) room.drawCycles = n;
     }
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     if (msg.targetTickets != null) {
@@ -1837,6 +1963,105 @@ export class RoomManager {
     this.broadcast(room);
   }
 
+  /* ---------------- 你画我猜 ---------------- */
+
+  /** 开局/再来一局共用：建局 + 哨兵/计时/游标重置（画面游标清空 → 下次广播全员补快照，防新旧局修订号撞车） */
+  private startDrawGame(room: Room, now: number): void {
+    const players = [...room.sessions.values()]
+      .filter((s) => !s.spectator)
+      .sort((a, b) => a.seat - b.seat)
+      .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+    room.game = draw.createDrawGame(players, now, { turnSec: room.drawTurnSec, cycles: room.drawCycles });
+    room.matchLogged = false; // 终局审计 end 的哨兵（broadcast draw 分支置位）
+    room.gameStartedAt = now;
+    room.drawEmptySince = 0;
+    for (const s of room.sessions.values()) {
+      s.lastEventSeq = 0; // 新一局 logSeq 归零重排（同扫雷口径）
+      s.drawRev = undefined;
+    }
+    this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
+    if (this.draining) this.notifyDrain(room);
+  }
+
+  /** 你画我猜动作公共守卫：非本模式/未开局返回 null（静默忽略）；观战者显式报错 */
+  private drawGameOf(room: Room, session: Session): DrawState | null {
+    if (session.spectator) throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
+    const g = room.game;
+    if (room.mode !== 'draw' || !g || !('strokes' in g)) return null;
+    return g as DrawState;
+  }
+
+  private handleDPick(room: Room, session: Session, msg: Extract<C2S, { t: 'dPick' }>): void {
+    auditPlayerAct(room, session, msg.t, msg);
+    const ds = this.drawGameOf(room, session);
+    if (!ds) return;
+    if (draw.dPick(ds, session.id, msg.index, Date.now())) this.broadcast(room);
+  }
+
+  /**
+   * 笔画：高频流，三不——不审计（会瞬间吃光单局 2000 条上限）、不报错（每条都弹提示）、
+   * 不走整帧广播（每批都重发全量视图）。只把实际生效的操作增量扇出给画手以外的会话。
+   */
+  private handleDStroke(room: Room, session: Session, msg: Extract<C2S, { t: 'dStroke' }>): void {
+    if (session.spectator) return;
+    const g = room.game;
+    if (room.mode !== 'draw' || !g || !('strokes' in g)) return;
+    const ds = g as DrawState;
+    const ops = draw.dStroke(ds, session.id, msg.ops, Date.now());
+    if (!ops) return;
+    session.drawRev = ds.drawRev; // 画手本地已画，不回显
+    const data = JSON.stringify({ t: 'dOps', turn: ds.turn.id, rev: ds.drawRev, ops } satisfies S2C);
+    for (const s of room.sessions.values()) {
+      if (s.id === session.id) continue;
+      if (!s.ws || s.ws.readyState !== s.ws.OPEN) continue;
+      // 跟上上一版的会话发增量；落后者（新连上/漏帧）直接补整幅快照，不等下次整帧广播
+      if (s.drawRev !== ds.drawRev - 1) {
+        this.sendDrawSnapshot(s, ds);
+        continue;
+      }
+      try {
+        s.ws.send(data);
+        s.drawRev = ds.drawRev;
+      } catch {
+        /* 发送失败：游标不前进，下次广播补快照 */
+      }
+    }
+  }
+
+  /** 整幅快照（会话游标随之对齐） */
+  private sendDrawSnapshot(s: Session, ds: DrawState): void {
+    if (!s.ws || s.ws.readyState !== s.ws.OPEN) return;
+    send(s.ws, { t: 'dSnap', turn: ds.turn.id, rev: ds.drawRev, strokes: ds.strokes });
+    s.drawRev = ds.drawRev;
+  }
+
+  private handleDGuess(room: Room, session: Session, msg: Extract<C2S, { t: 'dGuess' }>): void {
+    auditPlayerAct(room, session, msg.t, msg);
+    const ds = this.drawGameOf(room, session);
+    if (!ds) return;
+    session.guessWindow ??= new SlidingWindow(10_000, 10);
+    if (!session.guessWindow.allow()) return; // 超频静默丢弃（同聊天口径：无回显即未发出）
+    if (draw.dGuess(ds, session.id, msg.text, Date.now())) this.broadcast(room);
+  }
+
+  private handleDAbort(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以终止本局');
+    const g = room.game;
+    if (room.mode !== 'draw' || !g || !('strokes' in g)) return;
+    if (draw.drawAbort(g as DrawState, Date.now())) this.broadcast(room);
+  }
+
+  private handleDRematch(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一局');
+    const g = room.game;
+    if (room.mode !== 'draw' || !g || !('strokes' in g) || (g as DrawState).phase !== 'gameover') return;
+    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seated < 2) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 2 名玩家'); // 与 handleStart 同口径
+    this.startDrawGame(room, Date.now());
+    auditRoomStart(room); // 再来一局写新局的审计开局行
+    this.broadcast(room);
+  }
+
   /** 返回房间等待页（终局后）。本分发分支遮蔽了 handleBlood 内血色的旧 case（已删），
    *  其语义必须在此按模式完整保留：血色=断线接任+断线会话清理；扫雷/德州=房主（或接任者）清局 */
   private handleBackToRoom(room: Room, session: Session): void {
@@ -1862,6 +2087,7 @@ export class RoomManager {
     room.minesEmptySince = 0;
     room.tacticsEmptySince = 0;
     room.convergeEmptySince = 0;
+    room.drawEmptySince = 0;
     this.broadcast(room);
   }
 
@@ -2030,8 +2256,11 @@ export class RoomManager {
    * 身份直接取会话名（入房时已清洗/查重，登录者强制账号名），无需再防冒名。
    */
   private handleRoomChat(room: Room, session: Session, msg: Extract<C2S, { t: 'roomChat' }>): void {
-    const text = cleanChatText(msg.text);
-    if (!text) return;
+    const raw = cleanChatText(msg.text);
+    if (!raw) return;
+    // 你画我猜：选词/作画阶段把候选与答案打码（防在房间聊天里直接报答案；审计同样只记打码后文本）
+    const g = room.game;
+    const text = room.mode === 'draw' && g && 'strokes' in g ? draw.maskDrawAnswer(g as DrawState, raw) : raw;
     const ip = session.ws?.ip ?? '';
     if (!this.roomChatLimits.get(ip).allow()) return; // 超频静默丢弃（与全服聊天同口径：无回显即未发出）
     room.chatSeq = (room.chatSeq ?? 0) + 1;
@@ -2211,6 +2440,21 @@ export class RoomManager {
       } else {
         room.convergeEmptySince = 0;
       }
+    } else if (g && room.mode === 'draw') {
+      // 全员（局内在场玩家）断线 30s 仍无人回来：就地终局（口径同扫雷）；否则按时推进——
+      // 选词/作画超时、半程揭字、揭晓后换回合、画手断线 10s 作废本回合
+      const ds = g as DrawState;
+      const connected = new Set(
+        [...room.sessions.values()].filter((s) => !s.spectator && s.connected).map((s) => s.id),
+      );
+      const humansConnected = ds.players.some((p) => !p.left && connected.has(p.id));
+      if (!humansConnected && ds.phase !== 'gameover') {
+        if (!room.drawEmptySince) room.drawEmptySince = now;
+        if (now - room.drawEmptySince >= 30_000) changed = draw.drawForceEnd(ds, now);
+      } else {
+        room.drawEmptySince = 0;
+        changed = draw.drawTick(ds, now, connected);
+      }
     } else if (g && room.mode === 'blood') {
       changed = blood.bloodTick(g as BloodState, now);
       if (!changed) changed = this.runBots(room, g as BloodState, now);
@@ -2284,8 +2528,8 @@ export class RoomManager {
   /* ---------------- 广播 ---------------- */
 
   /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次）；血色局同时结算天梯积分。
-   *  战棋/扫雷无 final 字段，进函数即被首行守卫跳过（战绩 matchlog 二期再扩）。 */
-  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | ConvergeState | null): void {
+   *  战棋/扫雷/心有灵犀无 final 字段，由 broadcast 各自的终局块落库（同样受 matchLogged 哨兵约束）。 */
+  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | ConvergeState | DrawState | null): void {
     if (!g || room.matchLogged || !('final' in g) || !g.final) return;
     room.matchLogged = true;
     const now = Date.now();
@@ -2467,6 +2711,30 @@ export class RoomManager {
             text: `${r.status === 'done' ? '通关' : r.status === 'out' ? '出局' : '存活'} · 已揭 ${r.revealed} 格`,
           })),
         });
+        // 对局落库进 matchlog（口径同血色/经典：管理端统计/近期对局/个人战绩可见）
+        recordMatch({
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          mode: 'mines',
+          seatCount: g.players.length,
+          winnerSeat: g.winnerId ? (g.players.find((p) => p.id === g.winnerId)?.seat ?? -1) : -1,
+          room: room.code,
+          ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+          settings: { difficulty: g.difficulty },
+          players: g.ranking.map((r): MatchPlayerRow => {
+            const p = g.players.find((x) => x.seat === r.seat);
+            const sess = room.sessions.get(p?.id ?? '');
+            return {
+              name: r.name,
+              seat: r.seat,
+              rank: r.rank,
+              ...(sess?.accountId ? { accountId: sess.accountId } : {}),
+              revealed: r.revealed,
+              status: r.status,
+              isBot: sess?.bot ?? false,
+            };
+          }),
+        });
       } catch (e) {
         console.error('[audit] 扫雷终局审计失败:', e);
       }
@@ -2501,6 +2769,30 @@ export class RoomManager {
             name: r.name,
             text: r.alive ? `存活 · HP ${r.hp}` : '阵亡',
           })),
+        });
+        // 对局落库进 matchlog（口径同血色/经典：管理端统计/近期对局/个人战绩可见）
+        recordMatch({
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          mode: 'tactics',
+          seatCount: g.players.length,
+          winnerSeat: g.winnerId ? (g.players.find((p) => p.id === g.winnerId)?.seat ?? -1) : -1,
+          room: room.code,
+          ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+          settings: { mapSize: g.mapSize },
+          players: g.ranking.map((r): MatchPlayerRow => {
+            const p = g.players.find((x) => x.seat === r.seat);
+            const sess = room.sessions.get(p?.id ?? '');
+            return {
+              name: r.name,
+              seat: r.seat,
+              rank: r.rank,
+              ...(sess?.accountId ? { accountId: sess.accountId } : {}),
+              hp: r.hp,
+              alive: r.alive,
+              isBot: sess?.bot ?? false,
+            };
+          }),
         });
       } catch (e) {
         console.error('[audit] 战棋终局审计失败:', e);
@@ -2542,10 +2834,107 @@ export class RoomManager {
           })),
           ...(res ? { converge: { result: res, rounds: g.rounds } } : {}),
         });
+        // 对局落库进 matchlog（口径同血色/经典：管理端统计/近期对局/个人战绩可见）。
+        // 心有灵犀是合作制无胜负：相遇双方并列记 rank=1（计入个人战绩夺冠），未相遇双方 rank=2，winnerSeat 恒 -1
+        recordMatch({
+          endedAt: Date.now(),
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          mode: 'converge',
+          seatCount: g.players.length,
+          winnerSeat: -1,
+          room: room.code,
+          ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+          ...(res
+            ? { converge: { matched: res.matched, rounds: res.rounds, ...(res.word ? { word: res.word } : {}), reason: res.reason } }
+            : {}),
+          players: g.players.map((p): MatchPlayerRow => {
+            const sess = room.sessions.get(p.id);
+            return {
+              name: p.name,
+              seat: p.seat,
+              rank: res?.matched ? 1 : 2,
+              ...(sess?.accountId ? { accountId: sess.accountId } : {}),
+              isBot: sess?.bot ?? false,
+            };
+          }),
+        });
       } catch (e) {
         console.error('[audit] 心有灵犀终局审计失败:', e);
       }
     }
+    const isDrawGame = (x: unknown): x is DrawState =>
+      x != null && typeof x === 'object' && 'strokes' in x && room.mode === 'draw';
+    if (isDrawGame(g) && g.phase === 'gameover' && !room.matchLogged) {
+      // 你画我猜终局审计：口径同扫雷——循环外（全员断线的终局也要落真实排名）；独立 try 不阻断广播
+      try {
+        room.matchLogged = true;
+        const now = Date.now();
+        const durationMin =
+          room.gameStartedAt != null ? Math.round(((now - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+        const top = g.ranking.find((r) => r.rank === 1 && !r.left);
+        recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: now,
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          ...(top ? { winnerSeat: top.seat } : {}),
+          summary: drawAuditSummary(g),
+          log: g.log,
+        });
+        const reason = g.result?.reason ?? 'done';
+        // 房间对局记录：名次行带总分；另附每回合「谁画了什么、几人猜中」（📜 回看）
+        pushRoomMatchHistory(room, {
+          mode: 'draw',
+          startedAt: room.gameStartedAt ?? now,
+          endedAt: now,
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          seatCount: g.players.length,
+          title: `你画我猜 · ${g.history.length} 回合${reason === 'done' ? '' : `（${reason === 'abort' ? '房主终止' : reason === 'leave' ? '人数不足' : '全员断线'}）`}`,
+          ...(top ? { winnerSeat: top.seat } : {}),
+          ranks: g.ranking.map((r) => ({ seat: r.seat, name: r.name, text: `${r.score} 分${r.left ? ' · 中途离开' : ''}` })),
+          draw: {
+            turns: g.history.map((h) => ({
+              no: h.no,
+              drawer: h.drawerName,
+              word: h.word,
+              solved: h.solvedIds.length,
+              end: h.endReason,
+            })),
+          },
+        });
+        // 对局落库进 matchlog（口径同其他模式）。一回合都没画完的局（开局即终止/掉线）不进战绩：
+        // 全员 0 分并列第一会凭空给每个人记一次夺冠
+        if (g.history.length > 0) {
+          recordMatch({
+            endedAt: now,
+            ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+            mode: 'draw',
+            seatCount: g.players.length,
+            winnerSeat: top?.seat ?? -1,
+            room: room.code,
+            ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+            settings: { turnSec: g.turnSec, cycles: g.cycles },
+            players: g.ranking.map((r): MatchPlayerRow => {
+              const p = g.players.find((x) => x.seat === r.seat);
+              const sess = room.sessions.get(p?.id ?? '');
+              return {
+                name: r.name,
+                seat: r.seat,
+                rank: r.rank,
+                ...(sess?.accountId ? { accountId: sess.accountId } : {}),
+                score: r.score,
+                isBot: sess?.bot ?? false,
+              };
+            }),
+          });
+        }
+      } catch (e) {
+        console.error('[audit] 你画我猜终局审计失败:', e);
+      }
+    }
+    // 你画我猜视图用的在场集合（循环外算一次）
+    const drawConnected = isDrawGame(g)
+      ? new Set([...room.sessions.values()].filter((x) => !x.spectator && x.connected).map((x) => x.id))
+      : null;
     const lastSeq = g ? g.logSeq : 0;
     for (const s of room.sessions.values()) {
       if (s.ws && s.ws.readyState === s.ws.OPEN) {
@@ -2583,6 +2972,19 @@ export class RoomManager {
             send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
           } else {
             send(s.ws, { t: 'state', view: converge.buildConvergeView(cs, s.id, room.code, room.hostId) });
+          }
+        } else if (g && room.mode === 'draw' && 'strokes' in g) {
+          const ds = g as DrawState;
+          // 观战者在终局自动回到房间等待页（口径同扫雷）；玩家与观战会话收对局视图
+          if (s.spectator && ds.phase === 'gameover') {
+            send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
+          } else {
+            // 画面先于视图：落后的会话（新进房/重连/换回合）补整幅快照，拿到视图时画布已就位
+            if (s.drawRev !== ds.drawRev) this.sendDrawSnapshot(s, ds);
+            send(s.ws, {
+              t: 'state',
+              view: draw.buildDrawView(ds, s.id, room.code, room.hostId, drawConnected ?? new Set()),
+            });
           }
         } else if (g && room.mode === 'blood' && 'market' in g) {
           // 首帧（新入房/重连）或落后超过尾部窗口 → 下发全量日志；其余帧只带尾部，

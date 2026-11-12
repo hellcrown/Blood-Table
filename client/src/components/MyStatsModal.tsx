@@ -13,14 +13,30 @@ interface CharsRow {
 
 interface RecentRow {
   endedAt: number;
-  mode: 'blood' | 'classic';
+  mode: string;
   durationMin?: number;
   seatCount: number;
   rank: number;
   charId?: string;
   tickets?: number;
   chips?: number;
+  revealed?: number;
+  status?: 'done' | 'out' | 'playing';
+  hp?: number;
+  alive?: boolean;
+  score?: number;
+  matched?: boolean;
 }
+
+/** 与服务端 GameMode 对齐的模式简称（新模式不再误显示成「德州」） */
+const MODE_CN: Record<string, string> = {
+  blood: '血色',
+  classic: '德州',
+  mines: '扫雷',
+  tactics: '猎场',
+  converge: '灵犀',
+  draw: '你画',
+};
 
 interface MeResponse {
   ok: boolean;
@@ -130,7 +146,7 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                   <th>模式</th>
                   <th>人数</th>
                   <th>名次</th>
-                  <th>角色 / 筹码</th>
+                  <th>详情</th>
                   <th>时长</th>
                 </tr>
               </thead>
@@ -138,7 +154,7 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                 {stats.recent.map((r, i) => (
                   <tr key={i}>
                     <td>{new Date(r.endedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td>{r.mode === 'blood' ? '血色' : '德州'}</td>
+                    <td>{MODE_CN[r.mode] ?? r.mode}</td>
                     <td>{r.seatCount}</td>
                     <td>
                       <b>{RANK_MARK[r.rank - 1] ?? `第${r.rank}名`}</b>
@@ -146,7 +162,19 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                     <td>
                       {r.mode === 'blood'
                         ? `${BLOOD_CHAR_BY_ID.get(r.charId ?? '')?.name ?? '—'}${r.tickets != null ? ` · ${r.tickets}🎫` : ''}`
-                        : `${r.chips ?? '—'} 筹码`}
+                        : r.mode === 'mines'
+                          ? `${r.status === 'done' ? '通关' : r.status === 'out' ? '出局' : '存活'} · 已揭 ${r.revealed ?? 0} 格`
+                          : r.mode === 'tactics'
+                            ? r.alive
+                              ? `存活 · HP ${r.hp ?? 0}`
+                              : '阵亡'
+                            : r.mode === 'converge'
+                              ? r.matched
+                                ? '相遇 🧠'
+                                : '未相遇'
+                              : r.mode === 'draw'
+                                ? `${r.score ?? 0} 分`
+                                : `${r.chips ?? '—'} 筹码`}
                     </td>
                     <td>{r.durationMin != null ? `${r.durationMin} 分钟` : '—'}</td>
                   </tr>

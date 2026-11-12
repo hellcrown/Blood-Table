@@ -4,8 +4,10 @@
  * 与服务端同源）。历史按轮对照展示（左 seat0 × 右 seat1，参考双列版式），相遇轮金框高亮；
  * 输入在对方提交前可反复修改（本地草稿，round 变更时以服务端 myText 重置——
  * 故意不盯 myText 本身：提交后继续打字的草稿不能被服务端回显清掉）。
+ * 布局：页面本体不滚（body overflow:hidden 全局裁剪），相遇之路是内部滚动区——
+ * 输入框恒在屏内，历史撑不下时自己出滚动条，且新一轮揭示/终局时自动滚到最新一行。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConvergeView } from '@shared/convergeProtocol';
 import { CONVERGE_TEXT_MAX } from '@shared/convergeProtocol';
 import { net } from '../net/socket';
@@ -38,6 +40,17 @@ export function ConvergeTable({ view }: { view: ConvergeView }) {
   useEffect(() => {
     if (matched) playSfx('win');
   }, [matched]);
+
+  // 相遇之路滚动区：轮数推进/终局时自动滚到最新一轮（写太久时新词沉在最底下，必须自己送上门；
+  // state 帧全量重发，按 length+phase 作依赖，不做对象身份比较）。
+  // 后台态（切走 App 等对方）不产生动画帧，平滑滚动会卡住不动：隐藏时直接跳到底，回来即见最新一轮
+  const historyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = historyRef.current;
+    if (!el || view.rounds.length === 0) return;
+    el.scrollTo?.({ top: el.scrollHeight, behavior: document.hidden ? 'auto' : 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.rounds.length, view.phase]);
 
   const submit = (): void => {
     const text = draft.trim();
@@ -166,7 +179,7 @@ export function ConvergeTable({ view }: { view: ConvergeView }) {
         </>
       )}
 
-      <div className="panel cv-history">
+      <div className="panel cv-history" ref={historyRef}>
         <div className="box-title">相遇之路{view.rounds.length > 0 ? ` · ${view.rounds.length} 轮` : ''}</div>
         {view.rounds.map((r) => (
           <div key={r.n} className={`cv-row${r.same ? ' cv-same' : ''}`}>

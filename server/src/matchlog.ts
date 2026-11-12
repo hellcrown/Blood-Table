@@ -6,13 +6,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import type { GameMode } from '@shared/protocol';
 
 export interface MatchPlayerRow {
   name: string;
   seat: number;
   /** 注册账号 id（登录态玩家才有；机器人/匿名玩家没有） */
   accountId?: string;
-  /** 名次（1 = 冠军，按 ranking 顺序） */
+  /** 名次（1 = 冠军，按 ranking 顺序；心有灵犀无胜负概念：相遇双方 1、未相遇双方 2） */
   rank: number;
   /** 血色模式：角色 id */
   charId?: string;
@@ -21,6 +22,16 @@ export interface MatchPlayerRow {
   blood?: number;
   /** 德州模式：终局筹码 */
   chips?: number;
+  /** 扫雷模式：已揭开的格数 */
+  revealed?: number;
+  /** 扫雷模式：终局状态（done=通关/out=出局含中途离开/playing=存活） */
+  status?: 'done' | 'out' | 'playing';
+  /** 血色猎场：终局 HP */
+  hp?: number;
+  /** 血色猎场：是否存活 */
+  alive?: boolean;
+  /** 你画我猜：终局总分 */
+  score?: number;
   /** 服务端机器人 */
   isBot?: boolean;
   /** 曾被超时托管代打 */
@@ -32,16 +43,23 @@ export interface MatchEntry {
   endedAt: number;
   /** 对局时长（分钟，开局时间可得时记录） */
   durationMin?: number;
-  mode: 'blood' | 'classic';
+  mode: GameMode;
   seatCount: number;
-  /** 冠军座位 */
+  /** 冠军座位（心有灵犀无胜负概念恒 -1） */
   winnerSeat: number;
   /** 房间码 + 开局时间：与操作审计（audit.ts，保留 2 天）关联的主键；旧记录无此字段 */
   room?: string;
   startedAt?: number;
   /** 血色：本局以投降结束（胜者按剩余玩家票数排序产生，票数可远低于目标） */
   resigned?: boolean;
-  /** 血色：目标票数/拓展开关；德州：盲注与起始筹码 */
+  /** 心有灵犀：终局结果（相遇与否 + 用时轮数 + 相遇词） */
+  converge?: {
+    matched: boolean;
+    rounds: number;
+    word?: string;
+    reason?: 'match' | 'abort' | 'leave' | 'idle';
+  };
+  /** 血色：目标票数/拓展开关；德州：盲注与起始筹码；扫雷：难度；猎场：地图尺寸；你画我猜：作画时限与每人次数 */
   settings?: {
     targetTickets?: number;
     charExpansion?: boolean;
@@ -49,6 +67,10 @@ export interface MatchEntry {
     sb?: number;
     bb?: number;
     startChips?: number;
+    difficulty?: 'easy' | 'medium' | 'hard';
+    mapSize?: 'small' | 'medium' | 'large';
+    turnSec?: number;
+    cycles?: number;
   };
   players: MatchPlayerRow[];
 }
@@ -78,6 +100,8 @@ export interface MatchStats {
 const MAX_MATCHES = 20_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const ROTATE_KEEP = 10_000;
+/** 重载放行的模式全集（与 @shared/protocol 的 GameMode 同步；旧文件只有 blood/classic） */
+const KNOWN_MODES: readonly GameMode[] = ['blood', 'classic', 'mines', 'tactics', 'converge', 'draw'];
 
 let file: string | null = null;
 const list: MatchEntry[] = [];
@@ -98,11 +122,7 @@ export function initMatchStore(filePath: string): void {
       if (!trimmed) continue;
       try {
         const entry = JSON.parse(trimmed) as MatchEntry;
-        if (
-          typeof entry?.endedAt === 'number' &&
-          (entry.mode === 'blood' || entry.mode === 'classic') &&
-          Array.isArray(entry?.players)
-        ) {
+        if (typeof entry?.endedAt === 'number' && KNOWN_MODES.includes(entry.mode) && Array.isArray(entry?.players)) {
           list.push(entry);
         }
       } catch {
@@ -177,7 +197,7 @@ export function listMatches(): MatchEntry[] {
 
 export interface PlayerMatchRow {
   endedAt: number;
-  mode: 'blood' | 'classic';
+  mode: GameMode;
   durationMin?: number;
   seatCount: number;
   rank: number;
@@ -185,6 +205,14 @@ export interface PlayerMatchRow {
   tickets?: number;
   blood?: number;
   chips?: number;
+  revealed?: number;
+  status?: 'done' | 'out' | 'playing';
+  hp?: number;
+  alive?: boolean;
+  /** 你画我猜：终局总分 */
+  score?: number;
+  /** 心有灵犀：是否相遇（true=相遇，双方并列冠军） */
+  matched?: boolean;
 }
 
 export interface PlayerStats {
@@ -231,6 +259,12 @@ export function matchPlayerStats(accountId: string): PlayerStats | null {
           ...(pl.tickets != null ? { tickets: pl.tickets } : {}),
           ...(pl.blood != null ? { blood: pl.blood } : {}),
           ...(pl.chips != null ? { chips: pl.chips } : {}),
+          ...(pl.revealed != null ? { revealed: pl.revealed } : {}),
+          ...(pl.status != null ? { status: pl.status } : {}),
+          ...(pl.hp != null ? { hp: pl.hp } : {}),
+          ...(pl.alive != null ? { alive: pl.alive } : {}),
+          ...(pl.score != null ? { score: pl.score } : {}),
+          ...(m.converge ? { matched: m.converge.matched } : {}),
         });
       }
     }

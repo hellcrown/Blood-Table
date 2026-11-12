@@ -105,6 +105,17 @@ function MatchEntryCard({ entry: e }: { entry: RoomMatchEntry }) {
               <span className="r-hand">{r.text}</span>
             </div>
           ))}
+          {e.draw && e.draw.turns.length > 0 && (
+            // 你画我猜：每回合谁画了什么、几人猜中（作废回合标出原因）
+            <div className="rh-draw">
+              {e.draw.turns.map((t) => (
+                <div key={t.no} className="hint rh-draw-turn">
+                  第{t.no}回合 · {t.drawer} 画「{t.word || '—'}」 ·{' '}
+                  {t.end === 'away' ? '画手掉线作废' : t.end === 'left' ? '画手离开作废' : `${t.solved} 人猜中`}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

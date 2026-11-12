@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomSettings, SeatView, TableView } from '@shared/protocol';
 import { charPoolIds, BLOOD_CHAR_BY_ID } from '@shared/bloodChars';
+import {
+  DRAW_CYCLE_OPTIONS,
+  DRAW_DEFAULT_CYCLES,
+  DRAW_DEFAULT_TURN_SEC,
+  DRAW_TURN_SEC_OPTIONS,
+} from '@shared/drawProtocol';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
 import { RoomHistoryModal } from '../components/RoomHistoryModal';
@@ -64,7 +70,9 @@ export function Room({ view }: { view: TableView }) {
           ? '血色猎场'
           : view.mode === 'converge'
             ? '心有灵犀'
-            : '经典德州';
+            : view.mode === 'draw'
+              ? '你画我猜'
+              : '经典德州';
   const inviteText = `${inviteUrl} — ${brand}房间码：${view.code}`;
 
   const copyInvite = async (text = inviteText) => {
@@ -158,6 +166,8 @@ export function Room({ view }: { view: TableView }) {
     minesTimeSec?: number;
     tacticsMapSize?: 'small' | 'medium' | 'large';
     tacticsTurnSec?: number;
+    drawTurnSec?: number;
+    drawCycles?: number;
     password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -237,7 +247,7 @@ export function Room({ view }: { view: TableView }) {
             </div>
             <div className="table-center-x">
               <div className="table-code">{view.code}</div>
-              <div className="hint">{view.mode === 'blood' ? '血色牌局' : '德州扑克'}</div>
+              <div className="hint">{brand}</div>
               <div className="hint">{view.maxPlayers} 人局</div>
             </div>
             <div className="table-pos pos-right">
@@ -298,7 +308,9 @@ export function Room({ view }: { view: TableView }) {
                   ? '血色猎场 · 对局规则'
                   : view.mode === 'converge'
                     ? '心有灵犀 · 玩法'
-                    : '房间设置（德州扑克）'}
+                    : view.mode === 'draw'
+                      ? '你画我猜 · 对局设置'
+                      : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
           {view.mode === 'mines' ? (
@@ -375,6 +387,55 @@ export function Room({ view }: { view: TableView }) {
               两人不交流，每轮各写一个词或一句话 · 两边都提交后同时亮牌 · 想到同一个答案即相遇 ·
               判同忽略全角/半角、大小写与空格 · 不限时
             </p>
+          ) : view.mode === 'draw' ? (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">人数上限：</span>
+                <select
+                  value={view.maxPlayers}
+                  disabled={!isHost}
+                  onChange={(e) => update({ maxPlayers: Number(e.target.value) })}
+                >
+                  <option value={2}>2 人</option>
+                  <option value={3}>3 人</option>
+                  <option value={4}>4 人</option>
+                </select>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">作画时限：</span>
+                <select
+                  value={view.drawTurnSec ?? 0}
+                  disabled={!isHost}
+                  onChange={(e) => update({ drawTurnSec: Number(e.target.value) })}
+                >
+                  <option value={0}>默认（{DRAW_DEFAULT_TURN_SEC} 秒）</option>
+                  {DRAW_TURN_SEC_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s} 秒
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">每人画几次：</span>
+                <select
+                  value={view.drawCycles ?? 0}
+                  disabled={!isHost}
+                  onChange={(e) => update({ drawCycles: Number(e.target.value) })}
+                >
+                  <option value={0}>默认（{DRAW_DEFAULT_CYCLES} 次）</option>
+                  {DRAW_CYCLE_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c} 次
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="hint">
+                按座位轮流作画 · 画手从简单/中等/困难三个词里挑一个（计分 ×1/×1.5/×2）· 越快猜中得分越高 ·
+                画手按猜中人数得分 · 全部画完按总分排名
+              </p>
+            </div>
           ) : view.mode === 'blood' ? (
             <p className="hint">
               每人一副 54 张牌 · 暗扣 5 张对决 · 黑市买芯片 · 血筹购买/删牌 ·

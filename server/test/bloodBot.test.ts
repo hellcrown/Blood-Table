@@ -815,4 +815,20 @@ describe('限流原语', () => {
     expect(b.take()).toBe(false);
     vi.useRealTimers();
   });
+
+  it('TokenBucket：洪泛按「连续丢弃」计——成功取到令牌即清零，偶发超速不会累积到断线', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const b = new TokenBucket(6, 1);
+    expect(b.take()).toBe(true);
+    for (let i = 0; i < 29; i++) expect(b.take()).toBe(false);
+    expect(b.flooded()).toBe(false); // 连续 29 次
+    vi.setSystemTime(new Date(NOW + 1000));
+    expect(b.take()).toBe(true); // 恢复一次 → 清零
+    for (let i = 0; i < 29; i++) b.take();
+    expect(b.flooded()).toBe(false); // 累计 58 次但从未连续 30 次
+    b.take();
+    expect(b.flooded()).toBe(true); // 连续第 30 次
+    vi.useRealTimers();
+  });
 });
