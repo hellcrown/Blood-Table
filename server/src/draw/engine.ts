@@ -175,7 +175,7 @@ function findPlayer(state: DrawState, id: string): DrawPlayerState | undefined {
   return state.players.find((p) => p.id === id);
 }
 
-/** 三档各抽一个本局未出过的词；某档抽空则该档重新洗回（一局最多 12 回合，正常不会发生） */
+/** 三档各抽一个本局未出过的词；某档抽空则该档重新洗回（上限 40 回合 × 每档 300+ 词，正常不会发生） */
 function pickChoices(state: DrawState, rng: Rng): DrawWord[] {
   const used = new Set(state.usedWords);
   const out: DrawWord[] = [];

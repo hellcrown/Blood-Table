@@ -57,7 +57,8 @@ describe('建局与轮转', () => {
     expect(resolveTurnSec(77)).toBe(80);
     expect(resolveTurnSec(120)).toBe(120);
     expect(resolveCycles(0)).toBe(2);
-    expect(resolveCycles(9)).toBe(2);
+    expect(resolveCycles(9)).toBe(9);
+    expect(resolveCycles(11)).toBe(2); // 超上限回落默认
     expect(resolveCycles(3)).toBe(3);
     expect(game(2, { turnSec: 60 }).turn.turnMs).toBe(60_000);
   });

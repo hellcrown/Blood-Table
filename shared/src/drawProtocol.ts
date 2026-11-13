@@ -45,9 +45,9 @@ export const DRAW_DRAWER_AWAY_MS = 10_000;
 /** 作画时限（房间可调；0=默认 80 秒） */
 export const DRAW_DEFAULT_TURN_SEC = 80;
 export const DRAW_TURN_SEC_OPTIONS: readonly number[] = [60, 80, 100, 120];
-/** 每人画几次（房间可调；0=默认 2 次） */
+/** 每人画几次（房间可调；0=默认 2 次；上限 10 次 → 4 人局最多 40 回合） */
 export const DRAW_DEFAULT_CYCLES = 2;
-export const DRAW_CYCLE_OPTIONS: readonly number[] = [1, 2, 3];
+export const DRAW_CYCLE_OPTIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 /** 猜词/发言长度上限 */
 export const DRAW_GUESS_MAX = 30;
 

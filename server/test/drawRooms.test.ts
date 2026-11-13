@@ -82,7 +82,7 @@ describe('你画我猜 · 房间接线', () => {
     expect(room.maxPlayers).toBe(4);
     raw(socks[0], { t: 'settings', drawTurnSec: 100, drawCycles: 3 });
     expect([room.drawTurnSec, room.drawCycles]).toEqual([100, 3]);
-    raw(socks[0], { t: 'settings', drawTurnSec: 77, drawCycles: 9 });
+    raw(socks[0], { t: 'settings', drawTurnSec: 77, drawCycles: 11 });
     expect([room.drawTurnSec, room.drawCycles]).toEqual([100, 3]); // 非选项值忽略
     expect(lastState(socks[1])).toMatchObject({ mode: 'draw', drawTurnSec: 100, drawCycles: 3 });
     raw(socks[1], { t: 'settings', drawTurnSec: 60 });
