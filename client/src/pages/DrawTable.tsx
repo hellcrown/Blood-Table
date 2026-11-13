@@ -27,7 +27,7 @@ import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { useEscClose } from '../components/useOverlayClose';
 import { playSfx } from '../audio/sound';
 
-const END_TEXT = { all: '全员猜对', time: '时间到', away: '画手掉线，本回合作废', left: '画手离开，本回合作废' } as const;
+const END_TEXT = { all: '全员猜对', time: '时间到', away: '画手掉线，本回合作废', left: '画手离开，本回合作废', awayGuess: '在线玩家已全部猜对' } as const;
 const RESULT_TEXT = { done: '全部回合画完', abort: '房主终止了本局', leave: '人数不足，本局结束', idle: '全员断线，本局结束' } as const;
 /** 色板名（无障碍名 + 提示）：下标同 DRAW_COLORS，0 号是橡皮不在色块里出现 */
 const COLOR_NAMES = ['橡皮', '墨黑', '红', '橙', '黄', '绿', '蓝', '紫', '棕'];

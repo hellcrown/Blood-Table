@@ -19,6 +19,7 @@ import {
   DRAW_DEFAULT_TURN_SEC,
   DRAW_DIFF_LABEL,
   DRAW_DRAWER_AWAY_MS,
+  DRAW_GUESSER_AWAY_MS,
   DRAW_GUESS_MAX,
   DRAW_H,
   DRAW_MAX_POINTS,
@@ -75,6 +76,7 @@ const END_REASON_TEXT: Record<NonNullable<DrawTurnState['endReason']>, string> =
   time: '时间到',
   away: '画手掉线，本回合作废',
   left: '画手离开，本回合作废',
+  awayGuess: '在线玩家已全部猜对',
 };
 
 /** 词 → 词库条目（取别称用；候选词只携带 word/cat/d） */
@@ -140,6 +142,7 @@ export function createDrawGame(
     usedWords: [],
     history: [],
     awaySince: 0,
+    guessWaitSince: 0,
     startedAt: now,
     ranking: [],
     result: null,
@@ -212,6 +215,7 @@ function startTurn(state: DrawState, fromIdx: number, now: number, rng: Rng): vo
   state.pointCount = 0;
   state.drawRev += 1; // 换回合必触发一次快照（清空所有人的画布）
   state.awaySince = 0;
+  state.guessWaitSince = 0;
   pushFeed(state, { kind: 'sys', vis: 'all', text: `第 ${no} 回合：轮到 ${drawer.name} 作画` });
   pushLog(state, 'sys', `第 ${no} 回合：轮到 ${drawer.name} 作画`);
 }
@@ -360,6 +364,13 @@ function allGuessersSolved(state: DrawState): boolean {
   return guessers.length > 0 && guessers.every((p) => solved.has(p.id));
 }
 
+/** 在线猜词者是否全部猜对（掉线猜词者不阻塞提前揭晓，见 drawTick 的宽限计时） */
+function connectedGuessersSolved(state: DrawState, connectedIds: ReadonlySet<string>): boolean {
+  const solved = new Set(state.turn.solved.map((x) => x.id));
+  const online = guessersOf(state).filter((p) => connectedIds.has(p.id));
+  return online.length > 0 && online.every((p) => solved.has(p.id));
+}
+
 /**
  * 猜词 / 回合聊天。作画阶段非画手：猜对计分、接近只给本人、猜错公开；已猜对者发言只对画手与已猜对者可见。
  * 选词/揭晓阶段：公开聊天。画手作画中发言直接拒绝（防直接报答案）。
@@ -420,6 +431,7 @@ function endTurn(state: DrawState, reason: NonNullable<DrawTurnState['endReason'
   state.phase = 'reveal';
   t.deadline = now + DRAW_REVEAL_SEC * 1000;
   state.awaySince = 0;
+  state.guessWaitSince = 0;
   const drawer = findPlayer(state, t.drawerId);
   const guessers = guessersOf(state).length;
   state.history.push({
@@ -512,6 +524,19 @@ export function drawTick(state: DrawState, now: number, connectedIds: ReadonlySe
       t.revealed.push(Math.min(len - 1, Math.floor(rng() * len)));
       pushFeed(state, { kind: 'sys', vis: 'all', text: '提示：揭开了一个字' });
       changed = true;
+    }
+    if (
+      guessersOf(state).some((p) => !connectedIds.has(p.id)) &&
+      connectedGuessersSolved(state, connectedIds)
+    ) {
+      // 在线猜词者全部猜对：给掉线者 10s 重连宽限，超时提前揭晓（重连即复位）
+      if (!state.guessWaitSince) state.guessWaitSince = now;
+      else if (now - state.guessWaitSince >= DRAW_GUESSER_AWAY_MS) {
+        endTurn(state, 'awayGuess', now);
+        return true;
+      }
+    } else {
+      state.guessWaitSince = 0;
     }
     if (now >= t.deadline) {
       endTurn(state, 'time', now);

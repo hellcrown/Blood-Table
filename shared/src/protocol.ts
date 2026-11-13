@@ -212,7 +212,7 @@ export interface RoomMatchEntry {
   };
   /** 你画我猜专属：每回合谁画了什么、几人猜中（end=回合结束原因） */
   draw?: {
-    turns: { no: number; drawer: string; word: string; solved: number; end: 'all' | 'time' | 'away' | 'left' }[];
+    turns: { no: number; drawer: string; word: string; solved: number; end: 'all' | 'time' | 'away' | 'left' | 'awayGuess' }[];
   };
 }
 

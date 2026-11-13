@@ -303,6 +303,42 @@ describe('画面操作', () => {
 });
 
 describe('离场、断线与终止', () => {
+  it('掉线猜词者不阻塞提前揭晓：在线猜词者全部猜对后 10s 宽限，重连即复位', () => {
+    const s = game(3);
+    dPick(s, 'a', 0, NOW); // 猫
+    const online = new Set(['a', 'c']); // b 掉线
+    dGuess(s, 'c', '猫', NOW + 10_000);
+    drawTick(s, NOW + 10_000, online, zero); // 宽限由 tick 置位
+    // 在线猜词者已全部猜对、掉线者未猜 → 不立即揭晓，进入宽限等待
+    expect(s.phase).toBe('drawing');
+    expect(s.guessWaitSince).toBe(NOW + 10_000);
+    // 宽限内 b 重连 → 计时复位不揭晓
+    drawTick(s, NOW + 15_000, new Set(['a', 'b', 'c']), zero);
+    expect(s.phase).toBe('drawing');
+    expect(s.guessWaitSince).toBe(0);
+    // b 再掉线，宽限走满 → 以 awayGuess 提前揭晓
+    drawTick(s, NOW + 16_000, online, zero);
+    expect(s.guessWaitSince).toBe(NOW + 16_000);
+    drawTick(s, NOW + 26_000, online, zero);
+    expect(s.phase).toBe('reveal');
+    expect(s.turn.endReason).toBe('awayGuess');
+  });
+
+  it('在线猜词者未全部猜对时不进入掉线宽限；宽限超时揭晓掉线者计未猜对', () => {
+    const s = game(3);
+    dPick(s, 'a', 0, NOW); // 猫
+    const online = new Set(['a', 'c']); // b 掉线
+    drawTick(s, NOW + 70_000, online, zero); // 在线者没全猜对 → 无宽限计时
+    expect(s.phase).toBe('drawing');
+    expect(s.guessWaitSince).toBe(0);
+    dGuess(s, 'c', '猫', NOW + 71_000);
+    drawTick(s, NOW + 71_500, online, zero);
+    expect(s.guessWaitSince).toBe(NOW + 71_500);
+    drawTick(s, NOW + 81_500, online, zero); // 宽限恰满 10s（早于作画时限判定）
+    expect(s.phase).toBe('reveal');
+    expect(s.turn.endReason).toBe('awayGuess');
+  });
+
   it('画手离开：本回合作废；剩 1 人：终局 leave；离场者排后且不再轮到', () => {
     const s = game(3);
     dPick(s, 'a', 0, NOW);

@@ -38,10 +38,12 @@ export const DRAW_NUMS_PER_MSG = 600;
 export const DRAW_MAX_STROKES = 1500;
 export const DRAW_MAX_POINTS = 30_000;
 
-/** 节奏：选词 15 秒（超时随机）、揭晓 5 秒、画手断线 10 秒作废本回合 */
+/** 节奏：选词 15 秒（超时随机）、揭晓 5 秒、画手断线 10 秒作废本回合、掉线猜词者阻塞提前揭晓 10 秒宽限 */
 export const DRAW_PICK_SEC = 15;
 export const DRAW_REVEAL_SEC = 5;
 export const DRAW_DRAWER_AWAY_MS = 10_000;
+/** 在线猜词者全部猜对后，给掉线猜词者的重连宽限；超时按「在线全员猜对」提前揭晓 */
+export const DRAW_GUESSER_AWAY_MS = 10_000;
 /** 作画时限（房间可调；0=默认 80 秒） */
 export const DRAW_DEFAULT_TURN_SEC = 80;
 export const DRAW_TURN_SEC_OPTIONS: readonly number[] = [60, 80, 100, 120];
@@ -148,8 +150,8 @@ export interface DrawTurnState {
   revealed: number[];
   solved: { id: string; at: number; points: number }[];
   drawerPoints: number;
-  /** 回合结束原因：all=全员猜对 time=时间到 away=画手断线作废 left=画手离开作废 */
-  endReason: 'all' | 'time' | 'away' | 'left' | null;
+  /** 回合结束原因：all=全员猜对 time=时间到 away=画手断线作废 left=画手离开作废 awayGuess=在线全员猜对（掉线者宽限超时） */
+  endReason: 'all' | 'time' | 'away' | 'left' | 'awayGuess' | null;
 }
 
 /** 每回合摘要（揭晓时写入；房间记录与审计用） */
@@ -200,6 +202,8 @@ export interface DrawState {
   history: DrawTurnSummary[];
   /** 画手断线起点（0=在线） */
   awaySince: number;
+  /** 在线猜词者全部猜对后等待掉线猜词者的宽限起点（0=未等待） */
+  guessWaitSince: number;
   startedAt: number;
   ranking: DrawRankRow[];
   result: DrawResult | null;
