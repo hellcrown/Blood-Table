@@ -1350,6 +1350,7 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 10px 14px;
+  min-width: 0; /* 环绕布局左右列被压窄时不撑破：内部各行负责折行（黑市溢出同族教训） */
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
@@ -1361,12 +1362,15 @@ select:focus {
 .bp-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* 长昵称+标记+票数放不下时折行，不横向撑破对手面板 */
   gap: 10px;
 }
 
 .bp-name {
   font-weight: 700;
   font-size: 15px;
+  min-width: 0;
+  overflow-wrap: anywhere; /* 长昵称折行（长 ID/整词），不撑破 1fr 列 */
 }
 
 .bp-name em {
@@ -1387,6 +1391,7 @@ select:focus {
 
 .bp-body {
   display: flex;
+  flex-wrap: wrap; /* 手牌行+道具行在窄面板里上下堆叠，不横向溢出 */
   gap: 14px;
   align-items: center;
   margin-top: 6px;
@@ -4381,6 +4386,13 @@ body {
 }
 
 .mines-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto; /* body overflow:hidden 全局裁剪：页根必须自建滚动区（converge 同款教训）——
+                       进度面板/终局面板叠在棋盘后总高可超一屏 */
+  width: 100%; /* flex 子项横向外边距 auto 会阻止 stretch、交叉尺寸变 fit-content：中级/高级棋盘
+                  （16 列 446px）会把整页撑宽出横向滚动——显式 100% 让棋盘外层滚动容器真正被约束，
+                  宽棋盘在 wrap 内部横向滚（mine-board-wrap overflow-x） */
   max-width: 1100px;
   margin: 0 auto;
   padding: 0 16px 24px;
@@ -4435,6 +4447,10 @@ body {
 
 /* ---------- 血色猎场（格子战棋） ---------- */
 .tac-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto; /* 同 mines-page：手机窄屏棋盘/行动/面板纵向堆叠后总高超一屏，战报与面板要能翻到 */
+  width: 100%; /* 同 mines-page：防 fit-content 撑宽（居中由 max-width+auto 边距完成） */
   padding: 10px 12px calc(40px + var(--sab));
   max-width: 1280px;
   margin: 0 auto;
@@ -4704,6 +4720,7 @@ body {
 .converge-page {
   flex: 1;
   min-height: 0;
+  width: 100%; /* flex 子项横向外边距 auto 阻止 stretch、交叉尺寸变 fit-content（mines-page 教训），显式 100% 防未来宽内容撑页 */
   max-width: 760px;
   margin: 0 auto;
   padding: 0 16px 24px;
