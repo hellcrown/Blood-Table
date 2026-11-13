@@ -22,6 +22,14 @@ export interface ChangelogEntry extends ChangelogRef {
 /** 更新日志数组（约定：CHANGELOG[0] 恒为最新；下方 LATEST 即其首项） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-11-13',
+    title: '你画我猜：词库大扩充',
+    items: [
+      '词库扩到 600 个词（原来 360 个）：简单 / 中等 / 困难三档各 200 个，新增动物、美食、乐器、名胜古迹、神话故事、童年动画角色和日常小动作等一大波新词，反复玩不容易撞词',
+      '常见叫法更容易猜对：新增一大批复称——猜「树袋熊」「无尾熊」都算「考拉」，猜「芝士」「干酪」都算「奶酪」，猜「机器猫」「小叮当」都算「哆啦A梦」，猜「AI」也算「人工智能」',
+    ],
+  },
+  {
     date: '2026-11-09',
     title: '新玩法「你画我猜」',
     items: [
