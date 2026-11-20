@@ -209,6 +209,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
         </h1>
         <p className="subtitle">2-4 人 · 建房后把房间码告诉朋友即可开局</p>
         <p className="subtitle dim">支持匿名即玩（无需注册）· 注册登录后赢真人局可累积天梯积分上榜</p>
+        <p className="subtitle dim sister-link">
+          姐妹游戏：<a href="/pawnshop/">🎰 深空当铺 · 星环黑店模拟（单机网页游戏）</a>
+        </p>
 
         <AuthPanel />
 
