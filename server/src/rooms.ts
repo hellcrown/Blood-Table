@@ -18,6 +18,19 @@ import * as converge from './converge/engine';
 import type { DrawState } from '@shared/drawProtocol';
 import { DRAW_CYCLE_OPTIONS, DRAW_TURN_SEC_OPTIONS } from '@shared/drawProtocol';
 import * as draw from './draw/engine';
+import type { DriveCrawlRate, DriveState, DriveTail } from '@shared/driveProtocol';
+import {
+  DRIVE_BROADCAST_MS,
+  DRIVE_CRAWL_OPTIONS,
+  DRIVE_DURABILITY_OPTIONS,
+  DRIVE_DEFAULT_SIGN_GAP,
+  DRIVE_EMPTY_MS,
+  DRIVE_SIGN_GAP_OPTIONS,
+  DRIVE_TAIL_OPTIONS,
+  DRIVE_TARGET_OPTIONS,
+  DRIVE_TICK_MS,
+} from '@shared/driveProtocol';
+import * as drive from './drive/engine';
 import { GameError, RESULT_MS, type GState } from './game/types';
 import { IpTable, SlidingWindow, TokenBucket } from './net/limits';
 import { recordMatch, type MatchEntry, type MatchPlayerRow } from './matchlog';
@@ -111,6 +124,20 @@ export interface Room {
   drawCycles: number;
   /** 你画我猜：全员断线起始时刻（宽限 30s，同扫雷口径） */
   drawEmptySince: number;
+  /** 勿停：路牌间隔米数（默认 400；每过一块路牌 tier+1） */
+  driveSignGap: number;
+  /** 勿停：车耐久上限（默认 3） */
+  driveDurability: number;
+  /** 勿停：猎影凶度（衰减速率档） */
+  driveTail: DriveTail;
+  /** 勿停：爬窗频率档 */
+  driveCrawl: DriveCrawlRate;
+  /** 勿停：目标路牌数（0=纯无尽冲距离） */
+  driveTarget: number;
+  /** 勿停：全员断线起始时刻（宽限 30s，同扫雷口径） */
+  driveEmptySince: number;
+  /** 勿停：上次视图广播时刻（66ms tick 下按 DRIVE_BROADCAST_MS 节流到 ~10Hz） */
+  lastDriveBroadcast?: number;
   sessions: Map<string, Session>;
   /** 房间内对话历史（含观战者发言；仅内存，房间销毁即随之丢弃） */
   chatLog: ChatMsg[];
@@ -118,7 +145,7 @@ export interface Room {
   matchHistory: RoomMatchEntry[];
   /** 房间内发言的稳定 id 序列（删除定位用） */
   chatSeq?: number;
-  game: GState | BloodState | MinesState | TacticsState | ConvergeState | DrawState | null;
+  game: GState | BloodState | MinesState | TacticsState | ConvergeState | DrawState | DriveState | null;
   /** 手牌结束后再移除的玩家（中途退出且还在手牌中） */
   pendingRemove: Set<string>;
   /** 房间密码（可选；设置后加入/观战须携带） */
@@ -201,6 +228,18 @@ function takeStrokeSlot(ws: WebSocket): boolean {
   if (!bucket) {
     bucket = new TokenBucket(20, 40);
     strokeBuckets.set(ws, bucket);
+  }
+  return bucket.take();
+}
+
+/** 勿停按键意图专用令牌桶：按住油门/刹车时按下与松开成对出现，异常连点也在 10/s 内。
+ *  超出静默丢弃、不计入洪泛（同笔画桶口径）。 */
+const vIntBuckets = new WeakMap<WebSocket, TokenBucket>();
+function takeVIntSlot(ws: WebSocket): boolean {
+  let bucket = vIntBuckets.get(ws);
+  if (!bucket) {
+    bucket = new TokenBucket(10, 20);
+    vIntBuckets.set(ws, bucket);
   }
   return bucket.take();
 }
@@ -291,9 +330,11 @@ function auditRoomStart(room: Room): void {
             ? { mapSize: room.tacticsMapSize, turnSec: room.tacticsTurnSec }
             : room.mode === 'draw'
               ? { turnSec: room.drawTurnSec, cycles: room.drawCycles }
-              : room.mode === 'converge'
-                ? {}
-                : { ...room.settings },
+              : room.mode === 'drive'
+                ? { signGap: room.driveSignGap, durability: room.driveDurability, tail: room.driveTail, crawl: room.driveCrawl, target: room.driveTarget }
+                : room.mode === 'converge'
+                  ? {}
+                  : { ...room.settings },
     players,
   });
 }
@@ -445,10 +486,13 @@ export class RoomManager {
 
   private onMessage(ws: WebSocket, raw: RawData): void {
     const text = String(raw);
-    // 你画我猜笔画按原始前缀分流到专用桶（客户端构造时 t 恒在首位，同全服聊天的前缀手法）
+    // 你画我猜笔画 / 勿停按键意图按原始前缀分流到各自专用桶（客户端构造时 t 恒在首位，同全服聊天的前缀手法）
     const viaStroke = text.startsWith('{"t":"dStroke"');
+    const viaVInt = text.startsWith('{"t":"vInt"');
     if (viaStroke) {
       if (!takeStrokeSlot(ws)) return; // 超速静默丢弃，不计入洪泛断线
+    } else if (viaVInt) {
+      if (!takeVIntSlot(ws)) return; // 超速静默丢弃，不计入洪泛断线
     } else if (!takeMessageSlot(ws)) {
       if (msgBuckets.get(ws)?.flooded()) {
         try {
@@ -474,6 +518,7 @@ export class RoomManager {
     }
     // JSON 重复键取最后一个：伪造「{"t":"dStroke","t":"join",…}」可借笔画桶绕过普通限流，解析后必须复核
     if (viaStroke && msg.t !== 'dStroke') return;
+    if (viaVInt && msg.t !== 'vInt') return;
     try {
       this.dispatch(ws, msg);
     } catch (e) {
@@ -606,6 +651,15 @@ export class RoomManager {
         return;
       case 'dAbort':
         this.handleDAbort(room, session);
+        return;
+      case 'vInt':
+        this.handleVInt(room, session, msg);
+        return;
+      case 'vRematch':
+        this.handleVRematch(room, session);
+        return;
+      case 'vAbort':
+        this.handleVAbort(room, session);
         return;
       case 'backToRoom':
         this.handleBackToRoom(room, session);
@@ -1007,7 +1061,9 @@ export class RoomManager {
               ? 'converge'
               : msg.mode === 'draw'
                 ? 'draw'
-                : 'classic';
+                : msg.mode === 'drive'
+                  ? 'drive'
+                  : 'classic';
     // 心有灵犀固定 2 人（双人趋同无单人局），同扫雷口径钳容量
     const room = this.createRoom(mode === 'mines' || mode === 'converge' ? 2 : msg.maxPlayers, mode, ip);
     const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 12) : '';
@@ -1153,6 +1209,12 @@ export class RoomManager {
       drawTurnSec: 0,
       drawCycles: 0,
       drawEmptySince: 0,
+      driveSignGap: DRIVE_DEFAULT_SIGN_GAP,
+      driveDurability: 3,
+      driveTail: 'normal' as DriveTail,
+      driveCrawl: 'normal' as DriveCrawlRate,
+      driveTarget: 0,
+      driveEmptySince: 0,
       sessions: new Map(),
       chatLog: [],
       matchHistory: [],
@@ -1253,6 +1315,10 @@ export class RoomManager {
         // 你画我猜：state.players 保持完整（离场者留在排名、保留得分）；一切移除路径统一走 dLeave：
         // 画手离开作废本回合、不足 2 人终局
         draw.dLeave(room.game as DrawState, session.id, Date.now());
+      } else if (room.mode === 'drive') {
+        // 勿停：state.players 保持完整（离场者留在结算里）；一切移除路径统一走 driveLeave：
+        // 清持键与开窗归因、无人在车上则终局
+        drive.driveLeave(room.game as DriveState, session.id, Date.now());
       } else if (room.mode !== 'mines' && room.mode !== 'tactics') {
         const cg = room.game as GState;
         // 仅在安全时机调用（结算后/未在手牌中），直接移除
@@ -1488,8 +1554,9 @@ export class RoomManager {
   private handleStart(room: Room, session: Session): void {
     if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以开始游戏');
     const seatedPlayers = [...room.sessions.values()].filter((s) => !s.spectator).length;
-    if (seatedPlayers < (room.mode === 'mines' ? 1 : 2)) {
-      throw new GameError('NOT_ENOUGH_PLAYERS', room.mode === 'mines' ? '至少需要 1 名玩家' : '至少需要 2 名玩家');
+    const minPlayers = room.mode === 'mines' || room.mode === 'drive' ? 1 : 2;
+    if (seatedPlayers < minPlayers) {
+      throw new GameError('NOT_ENOUGH_PLAYERS', minPlayers === 1 ? '至少需要 1 名玩家' : '至少需要 2 名玩家');
     }
     const now = Date.now();
     if (room.mode === 'mines') {
@@ -1539,6 +1606,9 @@ export class RoomManager {
     } else if (room.mode === 'draw') {
       if (room.game) return;
       this.startDrawGame(room, now);
+    } else if (room.mode === 'drive') {
+      if (room.game) return;
+      this.startDriveGame(room, now);
     } else if (room.mode === 'blood') {
       if (room.game) return;
       const players = [...room.sessions.values()]
@@ -1654,6 +1724,29 @@ export class RoomManager {
       // 你画我猜每人画几次：0=默认 2 次，其余只认 1/2/3
       const n = Number(msg.drawCycles);
       if (n === 0 || DRAW_CYCLE_OPTIONS.includes(n)) room.drawCycles = n;
+    }
+    if (msg.driveSignGap != null) {
+      // 勿停路牌间隔：只认界面选项（200/300/400/600），非法值忽略
+      const n = Number(msg.driveSignGap);
+      if (DRIVE_SIGN_GAP_OPTIONS.includes(n)) room.driveSignGap = n;
+    }
+    if (msg.driveDurability != null) {
+      // 勿停车耐久：只认界面选项（2/3/5）
+      const n = Number(msg.driveDurability);
+      if (DRIVE_DURABILITY_OPTIONS.includes(n)) room.driveDurability = n;
+    }
+    if (msg.driveTail != null) {
+      // 勿停猎影凶度：仅白名单枚举
+      if (DRIVE_TAIL_OPTIONS.includes(msg.driveTail)) room.driveTail = msg.driveTail;
+    }
+    if (msg.driveCrawl != null) {
+      // 勿停爬窗频率：仅白名单枚举
+      if (DRIVE_CRAWL_OPTIONS.includes(msg.driveCrawl)) room.driveCrawl = msg.driveCrawl;
+    }
+    if (msg.driveTarget != null) {
+      // 勿停目标路牌：0=纯无尽，其余只认界面选项（5/10/15）
+      const n = Number(msg.driveTarget);
+      if (DRIVE_TARGET_OPTIONS.includes(n)) room.driveTarget = n;
     }
     if (msg.expansion != null) room.expansion = !!msg.expansion;
     if (msg.targetTickets != null) {
@@ -2062,6 +2155,69 @@ export class RoomManager {
     this.broadcast(room);
   }
 
+  /* ---------------- 勿停 ---------------- */
+
+  /** 开局/再来一局共用：建局 + 哨兵/计时/游标重置（同 startDrawGame 口径） */
+  private startDriveGame(room: Room, now: number): void {
+    const players = [...room.sessions.values()]
+      .filter((s) => !s.spectator)
+      .sort((a, b) => a.seat - b.seat)
+      .map((s) => ({ id: s.id, name: s.name, seat: s.seat }));
+    room.game = drive.createDriveGame(players, now, {
+      signGap: room.driveSignGap,
+      tail: room.driveTail,
+      durability: room.driveDurability,
+      crawl: room.driveCrawl,
+      target: room.driveTarget,
+    });
+    room.matchLogged = false; // 终局审计 end 的哨兵（broadcast drive 分支置位）
+    room.gameStartedAt = now;
+    room.driveEmptySince = 0;
+    room.lastDriveBroadcast = 0;
+    for (const s of room.sessions.values()) {
+      s.lastEventSeq = 0; // 新一局 logSeq 归零重排（同扫雷口径）
+    }
+    this.drainNotified.delete(room.code); // 公告按局去重：新对局须重新预告
+    if (this.draining) this.notifyDrain(room);
+  }
+
+  /** 勿停动作公共守卫：非本模式/未开局返回 null（静默忽略）；观战者显式报错 */
+  private driveGameOf(room: Room, session: Session): DriveState | null {
+    if (session.spectator) throw new blood.BloodError('SPECTATING', '观战中不能执行玩家操作');
+    const g = room.game;
+    if (room.mode !== 'drive' || !g || !('road' in g)) return null;
+    return g as DriveState;
+  }
+
+  /**
+   * 按键意图：高频流，三不——不审计（油门按住时按下/松开成对出现，会吃光单局 act 上限）、
+   * 不报错（非法值引擎静默丢弃）、不走整帧广播（状态由 66ms tick 统一广播）。
+   */
+  private handleVInt(room: Room, session: Session, msg: Extract<C2S, { t: 'vInt' }>): void {
+    if (session.spectator) return;
+    const g = room.game;
+    if (room.mode !== 'drive' || !g || !('road' in g)) return;
+    drive.driveIntent(g as DriveState, session.id, msg.intent, Date.now());
+  }
+
+  private handleVAbort(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以终止本局');
+    const g = room.game;
+    if (room.mode !== 'drive' || !g || !('road' in g)) return;
+    if (drive.driveAbort(g as DriveState, Date.now())) this.broadcast(room);
+  }
+
+  private handleVRematch(room: Room, session: Session): void {
+    if (room.hostId !== session.id) throw new GameError('NOT_HOST', '只有房主可以再来一局');
+    const g = room.game;
+    if (room.mode !== 'drive' || !g || !('road' in g) || (g as DriveState).phase !== 'gameover') return;
+    const seated = [...room.sessions.values()].filter((s) => !s.spectator).length;
+    if (seated < 1) throw new GameError('NOT_ENOUGH_PLAYERS', '至少需要 1 名玩家'); // 与 handleStart 同口径（solo 硬核）
+    this.startDriveGame(room, Date.now());
+    auditRoomStart(room); // 再来一局写新局的审计开局行
+    this.broadcast(room);
+  }
+
   /** 返回房间等待页（终局后）。本分发分支遮蔽了 handleBlood 内血色的旧 case（已删），
    *  其语义必须在此按模式完整保留：血色=断线接任+断线会话清理；扫雷/德州=房主（或接任者）清局 */
   private handleBackToRoom(room: Room, session: Session): void {
@@ -2088,6 +2244,8 @@ export class RoomManager {
     room.tacticsEmptySince = 0;
     room.convergeEmptySince = 0;
     room.drawEmptySince = 0;
+    room.driveEmptySince = 0;
+    room.lastDriveBroadcast = 0;
     this.broadcast(room);
   }
 
@@ -2393,6 +2551,48 @@ export class RoomManager {
     }
   }
 
+  /**
+   * 勿停专用快拍（index.ts 每 DRIVE_TICK_MS=66ms 调一次）：15Hz 模拟 + 按 DRIVE_BROADCAST_MS
+   * 节流的视图广播（≈10Hz）。独立于 500ms 全局 tick——车辆模拟不能按 2Hz 走。
+   * 毒房间保护（连续 3 次异常强制回收）与 tickAll 同口径；空房回收仍由 tickRoom 统一管理。
+   */
+  tickDriveRooms(): void {
+    const now = Date.now();
+    for (const room of [...this.rooms.values()]) {
+      if (room.mode !== 'drive') continue;
+      const g = room.game;
+      if (!g || !('road' in g)) continue;
+      try {
+        const ds = g as DriveState;
+        const connected = new Set(
+          [...room.sessions.values()].filter((s) => !s.spectator && s.connected).map((s) => s.id),
+        );
+        const humansConnected = ds.players.some((p) => !p.left && connected.has(p.id));
+        let changed = false;
+        if (!humansConnected && ds.phase !== 'gameover') {
+          // 全员断线 30s 仍无人回来：就地终局（宽限覆盖刷新重连，同扫雷/你画我猜口径）
+          if (!room.driveEmptySince) room.driveEmptySince = now;
+          if (now - room.driveEmptySince >= DRIVE_EMPTY_MS) changed = drive.driveForceEnd(ds, now);
+        } else {
+          room.driveEmptySince = 0;
+          changed = drive.driveTick(ds, now, connected);
+        }
+        if (changed && now - (room.lastDriveBroadcast ?? 0) >= DRIVE_BROADCAST_MS) {
+          room.lastDriveBroadcast = now;
+          this.broadcast(room);
+        }
+        room.tickFails = 0;
+      } catch (e) {
+        room.tickFails = (room.tickFails ?? 0) + 1;
+        console.error(`[tick] 勿停房间 ${room.code} 驱动异常(${room.tickFails}):`, e);
+        if ((room.tickFails ?? 0) >= 3) {
+          console.error(`[tick] 勿停房间 ${room.code} 连续异常，强制回收`);
+          this.disposeRoom(room);
+        }
+      }
+    }
+  }
+
   private tickRoom(room: Room, now: number): void {
     const g = room.game;
     let changed = false;
@@ -2455,6 +2655,8 @@ export class RoomManager {
         room.drawEmptySince = 0;
         changed = draw.drawTick(ds, now, connected);
       }
+    } else if (g && room.mode === 'drive') {
+      // 勿停由 66ms 快拍驱动（tickDriveRooms，见下）：这里只保留空房回收，不重复积分
     } else if (g && room.mode === 'blood') {
       changed = blood.bloodTick(g as BloodState, now);
       if (!changed) changed = this.runBots(room, g as BloodState, now);
@@ -2529,7 +2731,7 @@ export class RoomManager {
 
   /** 终局落库：final 首次出现且尚未记录时写一条对局摘要（每局一次）；血色局同时结算天梯积分。
    *  战棋/扫雷/心有灵犀无 final 字段，由 broadcast 各自的终局块落库（同样受 matchLogged 哨兵约束）。 */
-  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | ConvergeState | DrawState | null): void {
+  private maybeRecordFinal(room: Room, g: GState | BloodState | TacticsState | ConvergeState | DrawState | DriveState | null): void {
     if (!g || room.matchLogged || !('final' in g) || !g.final) return;
     room.matchLogged = true;
     const now = Date.now();
@@ -2931,8 +3133,72 @@ export class RoomManager {
         console.error('[audit] 你画我猜终局审计失败:', e);
       }
     }
-    // 你画我猜视图用的在场集合（循环外算一次）
+    const isDriveGame = (x: unknown): x is DriveState =>
+      x != null && typeof x === 'object' && 'road' in x && room.mode === 'drive';
+    if (isDriveGame(g) && g.phase === 'gameover' && !room.matchLogged) {
+      // 勿停终局审计：口径同扫雷/你画我猜——循环外（全员断线的终局也要落真实结果）；独立 try 不阻断广播
+      try {
+        room.matchLogged = true;
+        const now = Date.now();
+        const durationMin =
+          room.gameStartedAt != null ? Math.round(((now - room.gameStartedAt) / 60_000) * 10) / 10 : undefined;
+        const res = g.result;
+        recordGameEnd({
+          key: auditKeyOf(room),
+          endedAt: now,
+          ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+          summary: { mode: 'drive', ...(res ?? { reason: 'unknown' }) },
+          log: g.log,
+        });
+        if (res) {
+          // 房间对局记录：合作局无个人名次，名次行写终局状态（📜 回看）
+          pushRoomMatchHistory(room, {
+            mode: 'drive',
+            startedAt: room.gameStartedAt ?? now,
+            endedAt: now,
+            ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+            seatCount: g.players.length,
+            title: `勿停 · ${res.signs} 号路牌 · ${res.distance}m${res.reason === 'won' ? '（全员逃生）' : ''}`,
+            ranks: g.players.map((p) => ({
+              seat: p.seat,
+              name: p.name,
+              text: p.left ? '中途离开' : p.downed ? '被拖走' : '在车上',
+            })),
+            drive: { distance: res.distance, signs: res.signs, attacks: res.attacks, crawls: res.crawls, loots: res.loots },
+          });
+          // 对局落库进 matchlog：合作制无个人胜负——到达目标全员 rank=1，其余全员 rank=2（同心有灵犀口径）
+          recordMatch({
+            endedAt: now,
+            ...(durationMin != null && durationMin > 0 ? { durationMin } : {}),
+            mode: 'drive',
+            seatCount: g.players.length,
+            winnerSeat: -1,
+            room: room.code,
+            ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
+            settings: { signGap: g.signGap, tail: g.tail, durability: g.maxDurability, crawl: g.crawlRate, target: g.targetSigns },
+            players: g.players.map((p): MatchPlayerRow => {
+              const sess = room.sessions.get(p.id);
+              return {
+                name: p.name,
+                seat: p.seat,
+                rank: res.reason === 'won' ? 1 : 2,
+                ...(sess?.accountId ? { accountId: sess.accountId } : {}),
+                loots: p.loots,
+                dragged: p.dragged,
+                isBot: sess?.bot ?? false,
+              };
+            }),
+          });
+        }
+      } catch (e) {
+        console.error('[audit] 勿停终局审计失败:', e);
+      }
+    }
+    // 你画我猜/勿停视图用的在场集合（循环外算一次）
     const drawConnected = isDrawGame(g)
+      ? new Set([...room.sessions.values()].filter((x) => !x.spectator && x.connected).map((x) => x.id))
+      : null;
+    const driveConnected = isDriveGame(g)
       ? new Set([...room.sessions.values()].filter((x) => !x.spectator && x.connected).map((x) => x.id))
       : null;
     const lastSeq = g ? g.logSeq : 0;
@@ -2984,6 +3250,17 @@ export class RoomManager {
             send(s.ws, {
               t: 'state',
               view: draw.buildDrawView(ds, s.id, room.code, room.hostId, drawConnected ?? new Set()),
+            });
+          }
+        } else if (g && room.mode === 'drive' && 'road' in g) {
+          const ds = g as DriveState;
+          // 观战者在终局自动回到房间等待页（口径同扫雷）；玩家（含被拖走/局中入座者）与观战会话收对局视图
+          if (s.spectator && ds.phase === 'gameover') {
+            send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
+          } else {
+            send(s.ws, {
+              t: 'state',
+              view: drive.buildDriveView(ds, s.id, room.code, room.hostId, driveConnected ?? new Set()),
             });
           }
         } else if (g && room.mode === 'blood' && 'market' in g) {

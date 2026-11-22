@@ -32,6 +32,10 @@ export interface MatchPlayerRow {
   alive?: boolean;
   /** 你画我猜：终局总分 */
   score?: number;
+  /** 勿停：本局搜掠次数 */
+  loots?: number;
+  /** 勿停：被拖走次数 */
+  dragged?: number;
   /** 服务端机器人 */
   isBot?: boolean;
   /** 曾被超时托管代打 */
@@ -59,7 +63,7 @@ export interface MatchEntry {
     word?: string;
     reason?: 'match' | 'abort' | 'leave' | 'idle';
   };
-  /** 血色：目标票数/拓展开关；德州：盲注与起始筹码；扫雷：难度；猎场：地图尺寸；你画我猜：作画时限与每人次数 */
+  /** 血色：目标票数/拓展开关；德州：盲注与起始筹码；扫雷：难度；猎场：地图尺寸；你画我猜：作画时限与每人次数；勿停：路牌间隔/凶度/耐久/爬窗/目标 */
   settings?: {
     targetTickets?: number;
     charExpansion?: boolean;
@@ -71,6 +75,11 @@ export interface MatchEntry {
     mapSize?: 'small' | 'medium' | 'large';
     turnSec?: number;
     cycles?: number;
+    signGap?: number;
+    durability?: number;
+    tail?: 'lenient' | 'normal' | 'fierce';
+    crawl?: 'low' | 'normal' | 'high';
+    target?: number;
   };
   players: MatchPlayerRow[];
 }
@@ -101,7 +110,7 @@ const MAX_MATCHES = 20_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const ROTATE_KEEP = 10_000;
 /** 重载放行的模式全集（与 @shared/protocol 的 GameMode 同步；旧文件只有 blood/classic） */
-const KNOWN_MODES: readonly GameMode[] = ['blood', 'classic', 'mines', 'tactics', 'converge', 'draw'];
+const KNOWN_MODES: readonly GameMode[] = ['blood', 'classic', 'mines', 'tactics', 'converge', 'draw', 'drive'];
 
 let file: string | null = null;
 const list: MatchEntry[] = [];

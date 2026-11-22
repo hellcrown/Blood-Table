@@ -23,6 +23,11 @@ export function buildView(room: Room, viewerId: string | null, asWaiting = false
     tacticsTurnSec: room.tacticsTurnSec,
     drawTurnSec: room.drawTurnSec,
     drawCycles: room.drawCycles,
+    driveSignGap: room.driveSignGap,
+    driveDurability: room.driveDurability,
+    driveTail: room.driveTail,
+    driveCrawl: room.driveCrawl,
+    driveTarget: room.driveTarget,
     serverTime: now,
   };
 

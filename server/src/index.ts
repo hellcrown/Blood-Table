@@ -27,6 +27,7 @@ import { findAudit, initAuditStore, loadAuditGame } from './audit';
 import { flushDianjiang, initDianjiangStore } from './dianjiang';
 import { ChatHub } from './chat';
 import { RoomManager } from './rooms';
+import { DRIVE_TICK_MS } from '@shared/driveProtocol';
 import { CHANGELOG, LATEST } from '@shared/changelog';
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -1039,6 +1040,16 @@ setInterval(() => {
     console.error('[tick] 房间驱动异常:', e);
   }
 }, 500).unref();
+
+// 勿停专用快拍：15Hz 车辆模拟 + ~10Hz 视图广播（ rooms.tickDriveRooms 内按 DRIVE_BROADCAST_MS 节流）。
+// 车辆模拟不能跟着 500ms 全局 tick 按 2Hz 走，必须独立驱拍；unref 同全局 tick（不阻止进程退出）
+setInterval(() => {
+  try {
+    manager.tickDriveRooms();
+  } catch (e) {
+    console.error('[tick] 勿停快拍异常:', e);
+  }
+}, DRIVE_TICK_MS).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log('==========================================');

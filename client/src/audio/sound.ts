@@ -18,7 +18,11 @@ export type SfxName =
   | 'ticket' // 结算车票
   | 'win' // 终局胜利
   | 'lose' // 终局失败
-  | 'error'; // 错误提示
+  | 'error' // 错误提示
+  | 'scratch' // 勿停：窗爬者抓挠玻璃
+  | 'thud' // 勿停：撞击/扑击闷响
+  | 'sign' // 勿停：通过路牌的风切
+  | 'alarm'; // 勿停：危险预警双响
 
 function loadVol(key: string, dflt: number): number {
   try {
@@ -185,6 +189,27 @@ export function playSfx(name: SfxName): void {
         tone(c, master, 'triangle', 170, 150, 0.14, 0.09);
         tone(c, master, 'triangle', 140, 120, 0.14, 0.09, 0.12);
         break;
+      case 'scratch':
+        // 窗爬者抓挠：三下高频噪声刮擦（声音先于红光，是「快关窗！」的唯一预警）
+        noise(c, master, 2400, 0.09, 0.2);
+        noise(c, master, 2000, 0.08, 0.16, 0.12);
+        noise(c, master, 2700, 0.1, 0.2, 0.24);
+        break;
+      case 'thud':
+        // 闷撞击：低频下滑 + 短噪声（路障/扑击/破窗共用）
+        tone(c, master, 'sine', 120, 45, 0.3, 0.4);
+        noise(c, master, 300, 0.12, 0.22);
+        break;
+      case 'sign':
+        // 通过路牌：风切 + 高频轻响（里程碑的正反馈）
+        noise(c, master, 1400, 0.18, 0.12);
+        tone(c, master, 'triangle', 660, 880, 0.12, 0.1, 0.02);
+        break;
+      case 'alarm':
+        // 危险预警双响（爬窗计时进入最后 1 秒等）
+        tone(c, master, 'square', 440, 440, 0.1, 0.07);
+        tone(c, master, 'square', 330, 330, 0.1, 0.07, 0.14);
+        break;
     }
   } catch {
     /* 音频失败不影响游戏 */
@@ -298,6 +323,94 @@ export function stopBgm(): void {
         }
       }
       gain.disconnect();
+    }, 500);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/* ---------------- 勿停 · 引擎嗡鸣（连续音，随速度变调）+ 猎影心跳 ----------------
+ * 「熄火感」本身就是尾压 UI：速度掉下去引擎声跟着垮，猎影逼近时心跳渐强。
+ * updateEngine 由渲染循环每帧调用（rAF 直写，不走 React state）。 */
+
+let engineNodes: { osc: OscillatorNode; sub: OscillatorNode; gain: GainNode } | null = null;
+let engineLastBeat = 0;
+
+export function startEngine(): void {
+  const c = ensureCtx();
+  if (!c || engineNodes) return;
+  if (c.state !== 'running') {
+    void c.resume().then(() => startEngine());
+    return;
+  }
+  try {
+    const gain = c.createGain();
+    gain.gain.value = 0;
+    gain.connect(c.destination);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 240;
+    lp.Q.value = 0.7;
+    lp.connect(gain);
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 38;
+    osc.connect(lp);
+    osc.start();
+    const sub = c.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.value = 42;
+    const subGain = c.createGain();
+    subGain.gain.value = 0.5;
+    sub.connect(subGain).connect(gain);
+    sub.start();
+    engineNodes = { osc, sub, gain };
+  } catch {
+    /* 音频失败不影响游戏 */
+  }
+}
+
+/** speedRatio 0-1（车速/上限），dangerRatio 0-1（猎影逼近度：1=扑击边缘） */
+export function updateEngine(speedRatio: number, dangerRatio: number): void {
+  if (!engineNodes || !ctx) return;
+  const c = ctx;
+  try {
+    const t = c.currentTime;
+    const sr = Math.min(1, Math.max(0, speedRatio));
+    engineNodes.osc.frequency.setTargetAtTime(34 + sr * 92, t, 0.12);
+    engineNodes.sub.frequency.setTargetAtTime(30 + sr * 46, t, 0.12);
+    engineNodes.gain.gain.setTargetAtTime(0.045 + sr * 0.055, t, 0.18);
+    // 猎影心跳：越近越急越响（updateEngine 每帧调用，按时间自调度）
+    const danger = Math.min(1, Math.max(0, dangerRatio));
+    if (danger > 0.12) {
+      const period = 1300 - danger * 750; // 1.3s → 0.55s
+      if (t - engineLastBeat >= period / 1000) {
+        engineLastBeat = t;
+        heartbeatThump(c, engineNodes.gain, 0.5 + danger * 0.5, true);
+      }
+    }
+  } catch {
+    /* 忽略 */
+  }
+}
+
+export function stopEngine(): void {
+  if (!engineNodes || !ctx) {
+    engineNodes = null;
+    return;
+  }
+  const { osc, sub, gain } = engineNodes;
+  engineNodes = null;
+  try {
+    gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+    window.setTimeout(() => {
+      try {
+        osc.stop();
+        sub.stop();
+        gain.disconnect();
+      } catch {
+        /* 忽略 */
+      }
     }, 500);
   } catch {
     /* 忽略 */

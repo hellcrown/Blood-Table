@@ -136,6 +136,16 @@ export interface TableView {
   drawTurnSec?: number;
   /** 你画我猜：每人画几次（0=默认 2 次） */
   drawCycles?: number;
+  /** 勿停：路牌间隔米数（默认 400） */
+  driveSignGap?: number;
+  /** 勿停：车耐久上限（默认 3） */
+  driveDurability?: number;
+  /** 勿停：猎影凶度（衰减速率档） */
+  driveTail?: import('./driveProtocol').DriveTail;
+  /** 勿停：爬窗频率档 */
+  driveCrawl?: import('./driveProtocol').DriveCrawlRate;
+  /** 勿停：目标路牌数（0=纯无尽） */
+  driveTarget?: number;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
   targetTickets: number;
   players: SeatView[];
@@ -155,7 +165,7 @@ export interface TableView {
 
 /* ---------------- 客户端 → 服务端 ---------------- */
 
-export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics' | 'converge' | 'draw';
+export type GameMode = 'classic' | 'blood' | 'mines' | 'tactics' | 'converge' | 'draw' | 'drive';
 
 export interface PlayerActionFold {
   k: 'fold';
@@ -214,6 +224,14 @@ export interface RoomMatchEntry {
   draw?: {
     turns: { no: number; drawer: string; word: string; solved: number; end: 'all' | 'time' | 'away' | 'left' | 'awayGuess' }[];
   };
+  /** 勿停专属：终局统计（里程/路牌/扑击/搏斗/搜掠） */
+  drive?: {
+    distance: number;
+    signs: number;
+    attacks: number;
+    crawls: number;
+    loots: number;
+  };
 }
 
 export type C2S =
@@ -238,10 +256,13 @@ export type C2S =
   | { t: 'dGuess'; text: string }
   | { t: 'dRematch' }
   | { t: 'dAbort' }
+  | { t: 'vInt'; intent: import('./driveProtocol').DriveIntent }
+  | { t: 'vRematch' }
+  | { t: 'vAbort' }
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number; drawTurnSec?: number; drawCycles?: number }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number; drawTurnSec?: number; drawCycles?: number; driveSignGap?: number; driveDurability?: number; driveTail?: import('./driveProtocol').DriveTail; driveCrawl?: import('./driveProtocol').DriveCrawlRate; driveTarget?: number }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }
@@ -265,7 +286,7 @@ export type C2S =
 
 export type S2C =
   | { t: 'hello'; token: string; playerId: string; account?: { id: string; name: string } }
-  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView | import('./convergeProtocol').ConvergeView | import('./drawProtocol').DrawView }
+  | { t: 'state'; view: TableView | import('./bloodProtocol').BloodView | import('./minesProtocol').MinesView | import('./tacticsProtocol').TacticsView | import('./convergeProtocol').ConvergeView | import('./drawProtocol').DrawView | import('./driveProtocol').DriveView }
   | { t: 'event'; line: LogLine }
   /** 你画我猜：增量画面操作（turn=所属回合 schedule 下标，rev=应用后的修订号；画手自己不回显） */
   | { t: 'dOps'; turn: number; rev: number; ops: import('./drawProtocol').DrawOp[] }

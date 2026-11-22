@@ -7,6 +7,15 @@ import {
   DRAW_DEFAULT_TURN_SEC,
   DRAW_TURN_SEC_OPTIONS,
 } from '@shared/drawProtocol';
+import {
+  DRIVE_CRAWL_OPTIONS,
+  DRIVE_DURABILITY_OPTIONS,
+  DRIVE_SIGN_GAP_OPTIONS,
+  DRIVE_TAIL_OPTIONS,
+  DRIVE_TARGET_OPTIONS,
+  type DriveCrawlRate,
+  type DriveTail,
+} from '@shared/driveProtocol';
 import { net } from '../net/socket';
 import { ChatModal } from '../components/ChatModal';
 import { RoomHistoryModal } from '../components/RoomHistoryModal';
@@ -152,7 +161,7 @@ export function Room({ view }: { view: TableView }) {
   const mySeatBase = view.players.find((p) => p.id === net.playerId)?.seat ?? 0;
   const tablePosSeat = (offset: number): number => (mySeatBase + offset) % 4;
 
-  const canStart = view.players.length >= (view.mode === 'mines' ? 1 : 2); // 扫雷支持单人开局
+  const canStart = view.players.length >= (view.mode === 'mines' || view.mode === 'drive' ? 1 : 2); // 扫雷/勿停支持单人开局
 
   const update = (patch: {
     sb?: number;
@@ -168,6 +177,11 @@ export function Room({ view }: { view: TableView }) {
     tacticsTurnSec?: number;
     drawTurnSec?: number;
     drawCycles?: number;
+    driveSignGap?: number;
+    driveDurability?: number;
+    driveTail?: DriveTail;
+    driveCrawl?: DriveCrawlRate;
+    driveTarget?: number;
     password?: string;
   }) => {
     net.send({ t: 'settings', ...patch });
@@ -308,8 +322,10 @@ export function Room({ view }: { view: TableView }) {
                   ? '血色猎场 · 对局规则'
                   : view.mode === 'converge'
                     ? '心有灵犀 · 玩法'
-                    : view.mode === 'draw'
-                      ? '你画我猜 · 对局设置'
+                  : view.mode === 'draw'
+                    ? '你画我猜 · 对局设置'
+                    : view.mode === 'drive'
+                      ? '勿停 · 对局设置'
                       : '房间设置（德州扑克）'}
             {isHost ? '' : '（房主可修改）'}
           </div>
@@ -434,6 +450,78 @@ export function Room({ view }: { view: TableView }) {
               <p className="hint">
                 按座位轮流作画 · 画手从简单/中等/困难三个词里挑一个（计分 ×1/×1.5/×2）· 越快猜中得分越高 ·
                 画手按猜中人数得分 · 全部画完按总分排名
+              </p>
+            </div>
+          ) : view.mode === 'drive' ? (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">路牌间隔：</span>
+                <select
+                  value={view.driveSignGap ?? 400}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveSignGap: Number(e.target.value) })}
+                >
+                  {DRIVE_SIGN_GAP_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m} 米
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">每过一块路牌难度 +1 并复活被拖走的人</span>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">车耐久：</span>
+                <select
+                  value={view.driveDurability ?? 3}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveDurability: Number(e.target.value) })}
+                >
+                  {DRIVE_DURABILITY_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n} 格
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">猎影凶度：</span>
+                <select
+                  value={view.driveTail ?? 'normal'}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveTail: e.target.value as DriveTail })}
+                >
+                  <option value="lenient">缓（尾压涨得慢）</option>
+                  <option value="normal">标准</option>
+                  <option value="fierce">凶（停车几秒就挨撞）</option>
+                </select>
+              </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">爬窗频率：</span>
+                <select
+                  value={view.driveCrawl ?? 'normal'}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveCrawl: e.target.value as DriveCrawlRate })}
+                >
+                  {DRIVE_CRAWL_OPTIONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r === 'low' ? '低' : r === 'normal' ? '标准' : '高'}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">目标：</span>
+                <select
+                  value={view.driveTarget ?? 0}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveTarget: Number(e.target.value) })}
+                >
+                  {DRIVE_TARGET_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n === 0 ? '无尽（冲距离）' : `到达 ${n} 号路牌`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="hint">
+                车速低于勿停线（30km/h）喂养「猎影」，追上即撞损车尾 · 开窗才能搜掠路肩补给，但窗爬者会爬开着的窗 ·
+                灯亮看得远却吸引爬窗 · 加油站必须停稳才加得到油 · 一切收益都要慢下来，而一切慢都在喂养后面那个东西
               </p>
             </div>
           ) : view.mode === 'blood' ? (

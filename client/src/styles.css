@@ -5190,3 +5190,127 @@ body {
   text-decoration: none;
   border-bottom-color: currentColor;
 }
+
+/* ---------- 勿停（合作夜路逃亡，车内仪表视角） ---------- */
+/* 页根三行规矩同 .tac-page：body overflow:hidden 全局裁剪，页根必须自建滚动区 + width:100% 防撑宽 */
+.drv-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.drv-phase {
+  gap: 10px;
+}
+.drv-phase b {
+  color: var(--text, #ddd);
+}
+/* 状态条紧急色：尾距 <25% 时变红 */
+.drv-urgent {
+  color: #e03131;
+  font-weight: 700;
+}
+.drv-warn {
+  background: rgba(224, 160, 49, 0.14);
+  border-color: rgba(224, 160, 49, 0.5);
+  color: #e0a031;
+}
+.drv-danger {
+  background: rgba(224, 49, 49, 0.16);
+  border-color: rgba(224, 49, 49, 0.6);
+  color: #e03131;
+  animation: drv-blink 0.6s step-end infinite;
+}
+.drv-downed {
+  background: rgba(126, 32, 32, 0.25);
+  border-color: rgba(126, 32, 32, 0.6);
+  color: #d99a9a;
+}
+@keyframes drv-blink {
+  50% {
+    opacity: 0.55;
+  }
+}
+/* 挡风玻璃画布：flex 撑满剩余高度，canvas 铺满；触摸交互交给下方操控区 */
+.drv-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 220px;
+  overflow: hidden;
+  background: #04050a;
+  border-radius: 10px;
+  margin: 8px;
+}
+.drv-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* 操控区：底部固定两排；按钮 touch-action:manipulation 防双击缩放吞连点 */
+.drv-controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px calc(10px + var(--sab, 0px));
+  touch-action: manipulation;
+}
+.drv-row {
+  display: flex;
+  gap: 6px;
+}
+.drv-btn {
+  flex: 1;
+  min-height: 44px;
+  font-size: 15px;
+  padding: 6px 4px;
+  white-space: nowrap;
+}
+.drv-btn:disabled {
+  opacity: 0.45;
+}
+/* 终局面板：盖在挡风玻璃画布上层（不遮操控区——终局后操控区已隐藏） */
+.drv-over {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(92%, 420px);
+  height: fit-content;
+  max-height: 92%;
+  overflow-y: auto;
+  background: rgba(10, 10, 14, 0.92);
+  border: 1px solid #2a2b33;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.drv-over h3 {
+  margin: 2px 0 10px;
+  font-size: 18px;
+}
+.drv-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  justify-content: center;
+  color: var(--text-dim, #9a9da8);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.drv-stats b {
+  color: var(--text, #ddd);
+}
+.drv-crew {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 12px;
+}

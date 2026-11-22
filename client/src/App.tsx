@@ -9,6 +9,7 @@ import { MinesTable } from './pages/MinesTable';
 import { TacticsTable } from './pages/TacticsTable';
 import { ConvergeTable } from './pages/ConvergeTable';
 import { DrawTable } from './pages/DrawTable';
+import { DriveTable } from './pages/DriveTable';
 import type { AnyView } from './net/socket';
 
 export default function App() {
@@ -58,6 +59,7 @@ export default function App() {
   else if (view.kind === 'tactics') page = <TacticsTable view={view} />;
   else if (view.kind === 'converge') page = <ConvergeTable view={view} />;
   else if (view.kind === 'draw') page = <DrawTable view={view} />;
+  else if (view.kind === 'drive') page = <DriveTable view={view} />;
   else if (view.phase === 'waiting') page = <Room view={view} />;
   else page = <Table view={view} />;
 

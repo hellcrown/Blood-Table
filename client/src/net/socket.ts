@@ -5,7 +5,7 @@ import { mergeBloodLog as mergeLogs } from './bloodLog';
 import { DrawBoard } from './drawBoard';
 
 export type ConnStatus = 'connecting' | 'open' | 'closed' | 'replaced';
-export type AnyView = import('@shared/protocol').TableView | BloodView | import('@shared/minesProtocol').MinesView | import('@shared/tacticsProtocol').TacticsView | import('@shared/convergeProtocol').ConvergeView | import('@shared/drawProtocol').DrawView;
+export type AnyView = import('@shared/protocol').TableView | BloodView | import('@shared/minesProtocol').MinesView | import('@shared/tacticsProtocol').TacticsView | import('@shared/convergeProtocol').ConvergeView | import('@shared/drawProtocol').DrawView | import('@shared/driveProtocol').DriveView;
 
 type ViewListener = (v: AnyView | null) => void;
 type ErrorListener = (code: string, msg: string) => void;
