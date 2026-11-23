@@ -118,7 +118,7 @@ describe('意图清洗与钳制', () => {
     expect(s.nextCrawlAt).toBeGreaterThan(NOW);
   });
 
-  it('灯与瞭望标记：toggle；ping 钳制进车道域、环形截断 8 条', () => {
+  it('灯与瞭望标记：toggle；ping 钳制进车道域、环形截断 8 条；5 秒后过期不再随视图下发', () => {
     const s = game();
     driveIntent(s, 'a', { k: 'lamp' }, NOW);
     expect(s.lamp).toBe(false);
@@ -126,6 +126,8 @@ describe('意图清洗与钳制', () => {
     expect(s.pings).toHaveLength(8);
     expect(s.pings[0]).toMatchObject({ lane: 2, at: 0, by: '甲' });
     expect(s.pings.at(-1)).toMatchObject({ lane: 2, at: 0 });
+    run(s, 5_500); // 广播瘦身：过期 ping 服务端就地清掉，不随 10Hz 帧重复下发
+    expect(s.pings).toHaveLength(0);
   });
 });
 

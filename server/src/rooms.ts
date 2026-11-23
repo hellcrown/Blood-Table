@@ -3258,10 +3258,11 @@ export class RoomManager {
           if (s.spectator && ds.phase === 'gameover') {
             send(s.ws, { t: 'state', view: buildView(room, s.id, true) });
           } else {
-            send(s.ws, {
-              t: 'state',
-              view: drive.buildDriveView(ds, s.id, room.code, room.hostId, driveConnected ?? new Set()),
-            });
+            const dv = drive.buildDriveView(ds, s.id, room.code, room.hostId, driveConnected ?? new Set());
+            // 广播瘦身：10Hz 全量帧绝不重复捎带全量日志——新增行已由上方 event 增量补齐，
+            // 只有首帧（wasFresh）带尾部 60 行。勿停一局日志可持续增长，不裁的话每帧 10KB+ 的纯浪费
+            dv.log = wasFresh ? dv.log.slice(-60) : [];
+            send(s.ws, { t: 'state', view: dv });
           }
         } else if (g && room.mode === 'blood' && 'market' in g) {
           // 首帧（新入房/重连）或落后超过尾部窗口 → 下发全量日志；其余帧只带尾部，

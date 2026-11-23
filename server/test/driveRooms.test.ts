@@ -113,6 +113,10 @@ describe('勿停 · 房间接线', () => {
     const states = ofType(socks[0], 'state');
     expect(states.length).toBeGreaterThanOrEqual(10); // ~10Hz：20 拍 ≈ 1.3s → ≥10 帧
     expect(states.length).toBeLessThan(20); // 且明显少于拍数（节流生效）
+    // 广播瘦身：驾驶首帧带日志尾部，后续帧不再重复捎带（增量走 event 通道，客户端不渲染全量日志）
+    const driveStates = states.filter((x) => (x.view as { kind?: string }).kind === 'drive');
+    expect((driveStates[0]!.view as { log: unknown[] }).log.length).toBeGreaterThan(0);
+    expect((driveStates[driveStates.length - 1]!.view as { log: unknown[] }).log).toEqual([]);
     // 静默意图：非法值不报错不广播
     raw(socks[0], { t: 'vInt', intent: { k: 'nope' } });
     expect(ofType(socks[0], 'error')).toHaveLength(0);

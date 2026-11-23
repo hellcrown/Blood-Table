@@ -145,6 +145,24 @@ describe('DriveTable · 勿停对局页', () => {
     hiddenSpy.mockRestore();
   });
 
+  it('重连自愈：本地仍按住油门而服务端已清零（掉线兜底）→ 新视图到达时自动重新上报', () => {
+    const sendSpy = vi.spyOn(net, 'send').mockReturnValue(true);
+    const v1 = drvView();
+    const { rerender } = render(<DriveTable view={v1} />);
+    fireEvent.pointerDown(screen.getByText('⛽ 油门'));
+    expect(sendSpy).toHaveBeenCalledWith({ t: 'vInt', intent: { k: 'gas', on: true } });
+    sendSpy.mockClear();
+    // 服务端在掉线期间清了持键：新视图帧 myInputs.gas=false，但玩家手指仍按着 → 自动补发
+    const v2 = drvView({ myInputs: { gas: false, brake: false, spot: false } });
+    rerender(<DriveTable view={v2} />);
+    expect(sendSpy).toHaveBeenCalledWith({ t: 'vInt', intent: { k: 'gas', on: true } });
+    // 服务端已确认（myInputs.gas=true）→ 不重发
+    sendSpy.mockClear();
+    const v3 = drvView({ myInputs: { gas: true, brake: false, spot: false } });
+    rerender(<DriveTable view={v3} />);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('被拖走：横幅提示且操控禁用；爬入计时显示危险横幅', () => {
     const sendSpy = vi.spyOn(net, 'send').mockReturnValue(true);
     const { unmount } = render(<DriveTable view={drvView({ iDowned: true, myInputs: null })} />);

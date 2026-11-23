@@ -125,6 +125,10 @@ class Net {
   authToken: string | null = Net.loadAuthToken();
   /** 服务端确认的登录身份（hello 下发；null = 匿名或令牌失效） */
   account: AccountInfo | null = null;
+  /** 应用层保活：20s 一次 ping，45s 没收到 pong 判定半开连接主动重连 */
+  private keepAliveTimer: number | null = null;
+  private lastPongAt = 0;
+  private pingSeq = 0;
 
   private static loadAuthToken(): string | null {
     try {
@@ -174,6 +178,7 @@ class Net {
       window.clearTimeout(watchdog);
       this.quietReconnect = false;
       this.reconnectDelay = 800;
+      this.startKeepAlive(); // 保活与半开检测随每条连接启停
       // rejoin 必须先于 setStatus('open')：状态监听者（如聊天弹窗的重连补拉）会在 open
       // 同步发出房间请求，服务端按消息序处理——先绑座才不会吃到 NOT_IN_ROOM
       if (this.token) this.send({ t: 'rejoin', token: this.token });
@@ -229,6 +234,8 @@ class Net {
         // 血战日志增量：服务端把每帧新增的行单独下发（随后必有一条 state），
         // 先并入本地累积，这样滑出尾部窗口的旧行也不会丢
         this.mergeBloodLog([msg.line], false);
+      } else if (msg.t === 'pong') {
+        this.lastPongAt = Date.now(); // 应用层心跳回执：半开连接检测的唯一依据
       } else if (msg.t === 'fx') {
         this.fxListeners.forEach((l) => l(msg));
       } else if (msg.t === 'roomList') {
@@ -278,6 +285,7 @@ class Net {
     };
     ws.onclose = (ev) => {
       window.clearTimeout(watchdog);
+      this.stopKeepAlive();
       if (this.ws === ws) this.ws = null;
       // 被更新的连接顶掉（同 token 双标签页互踢）：清凭据回大厅，停止重连避免互踢死循环。
       // 单独状态而非 closed：App 层对 closed 一律显示「正在重连」，但 4000 永不重连，文案必须区分
@@ -306,6 +314,37 @@ class Net {
   private wsUrl(): string {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     return `${proto}://${location.host}/ws`;
+  }
+
+  /**
+   * 应用层保活（配合服务端 30s 协议层心跳的两端兜底）：
+   * - 每 20s 一次 ping/pong：让移动网络 NAT 映射持续保温，并让两端都能更早发现死链；
+   * - 45s（约两个周期）无 pong 视为半开连接——TCP 层看着活着、对端实际已失联，
+   *   表现是「页面连着但永远收不到帧」。主动 close 走既有重连路径自愈。
+   */
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    this.lastPongAt = Date.now();
+    this.keepAliveTimer = window.setInterval(() => {
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastPongAt > 45_000) {
+        try {
+          ws.close();
+        } catch {
+          /* 忽略 */
+        }
+        return;
+      }
+      this.send({ t: 'ping', n: ++this.pingSeq });
+    }, 20_000);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer != null) {
+      window.clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
   }
 
   private scheduleReconnect(): void {

@@ -542,6 +542,11 @@ export function driveTick(state: DriveState, now: number, connectedIds: Readonly
   const drivable = state.players.filter((p) => !p.left && !p.downed && connectedIds.has(p.id));
   const held = (k: keyof DriveInputs): boolean => drivable.some((p) => state.inputs[p.id]?.[k] === true);
 
+  // 瞭望标记只留 5s 内的（广播瘦身：过期 ping 不再随每帧视图重复下发）
+  if (state.pings.length > 0) {
+    state.pings = state.pings.filter((p) => now - p.ts < 5_000);
+  }
+
   const prevPos = state.pos;
 
   // 车速：刹车优先于油门；空油时油门失效且速度上限锁死

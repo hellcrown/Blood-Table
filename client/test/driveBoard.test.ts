@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { DriveEvent, DriveView } from '@shared/driveProtocol';
 import {
   CAM_D_M,
+  DriveFx,
   HORIZON_FRAC,
   drawDistOf,
   eventLen,
@@ -113,6 +114,61 @@ describe('表针与能见度', () => {
   });
 });
 
+describe('DriveFx · 帧间平滑与特效', () => {
+  it('里程外推+一阶跟随：朝目标收敛、不回跳；换道横向偏移渐移', () => {
+    const fx = new DriveFx();
+    const v = view({ pos: 100, speed: 36, lane: 1 });
+    fx.onView(v, 0);
+    fx.frame(16, 16, v);
+    expect(fx.pos).toBeGreaterThan(100); // 已朝「服务器 pos + 速度外推」靠拢
+    const v2 = view({ pos: 300, speed: 36, lane: 2 });
+    fx.onView(v2, 100);
+    fx.frame(116, 16, v2);
+    expect(fx.laneOffset).toBeGreaterThan(0); // 车向右横移中
+    expect(fx.laneOffset).toBeLessThan(laneCenterMeters(2)); // 平滑渐移，未瞬间到位
+    for (let i = 0; i < 60; i++) fx.frame(116 + i * 16, 16, v2);
+    expect(fx.laneOffset).toBeCloseTo(laneCenterMeters(2), 1); // 最终到位
+  });
+
+  it('事件跳变：过路牌/耐久下降触发闪现与震屏红闪，按帧衰减', () => {
+    const fx = new DriveFx();
+    const v = view({ signs: 2, durability: 3 });
+    fx.onView(v, 0);
+    fx.frame(16, 16, v);
+    expect(fx.signFlash).toBe(0);
+    const v2 = view({ signs: 3, durability: 2 });
+    fx.onView(v2, 100);
+    expect(fx.signFlash).toBe(1);
+    expect(fx.signNo).toBe(3);
+    expect(fx.shake).toBe(1);
+    expect(fx.flash).toBe(1);
+    fx.frame(116, 16, v2);
+    expect(fx.flash).toBeLessThan(1);
+    expect(fx.shake).toBeLessThan(1);
+    for (let i = 0; i < 80; i++) fx.frame(116 + i * 16, 16, v2); // 按帧衰减至归零
+    expect(fx.flash).toBe(0);
+    expect(fx.shake).toBe(0);
+  });
+
+  it('爬窗红光由窗状态驱动（预警半亮/爬入全亮）；新一局全量对齐', () => {
+    const fx = new DriveFx();
+    const warn = view({ windows: { L: { open: false, warn: true, climbLeft: null }, R: { open: false, warn: false, climbLeft: null } } });
+    fx.onView(warn, 0);
+    expect(fx.crawlL).toBe(0.55);
+    expect(fx.crawlR).toBe(0);
+    const climb = view({ windows: { L: { open: true, warn: false, climbLeft: 2000 }, R: { open: false, warn: false, climbLeft: null } } });
+    fx.onView(climb, 50);
+    expect(fx.crawlL).toBe(1);
+    // 新一局（startedAt 变化）：车道/里程立即归位
+    const fresh = view({ startedAt: 999, pos: 5000, lane: 0, speed: 0, signs: 0, durability: 3 });
+    fx.onView(fresh, 100);
+    expect(fx.pos).toBe(5000);
+    expect(fx.laneOffset).toBe(laneCenterMeters(0));
+    expect(fx.shake).toBe(0);
+    expect(fx.flash).toBe(0);
+  });
+});
+
 describe('paintScene 冒烟（假 2D 上下文）', () => {
   function makeCtx(): { ctx: CanvasRenderingContext2D; calls: string[] } {
     const calls: string[] = [];
@@ -153,5 +209,17 @@ describe('paintScene 冒烟（假 2D 上下文）', () => {
     const { ctx } = makeCtx();
     expect(() => paintScene(ctx, W, H, { view: view({ lamp: false }), renderPos: 0, now: 0, drawDist: 90 })).not.toThrow();
     expect(() => paintScene(ctx, W, H, { view: view({ phase: 'gameover', result: { reason: 'dead', distance: 100, signs: 1, durationMs: 5000, attacks: 1, crawls: 0, loots: 0 } }), renderPos: 0, now: 0, drawDist: 200 })).not.toThrow();
+  });
+
+  it('带特效与换道偏移同样不抛错（爬窗红光/红闪/震屏/路牌闪现/高速风线）', () => {
+    const { ctx, calls } = makeCtx();
+    const fx = new DriveFx();
+    fx.onView(view({ speed: 110, lane: 2, windows: { L: { open: true, warn: false, climbLeft: 2000 }, R: { open: false, warn: false, climbLeft: null } } }), 0);
+    fx.shake = 1;
+    fx.flash = 1;
+    fx.signFlash = 1;
+    fx.signNo = 3;
+    expect(() => paintScene(ctx, W, H, { view: view({ speed: 110, lane: 2 }), renderPos: 0, now: 100, drawDist: 200, fx })).not.toThrow();
+    expect(calls).toContain('fillText'); // 过路牌闪现 + 仪表文字
   });
 });

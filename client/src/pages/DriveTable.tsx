@@ -15,7 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { DRIVE_MAX_SPEED, DRIVE_RESULT_TEXT, type DriveIntent, type DriveSide, type DriveView } from '@shared/driveProtocol';
 import { net } from '../net/socket';
-import { drawDistOf, paintScene } from '../net/driveBoard';
+import { DriveFx, createSceneCache, drawDistOf, paintScene } from '../net/driveBoard';
 import { playSfx, startEngine, stopEngine, updateEngine } from '../audio/sound';
 import { ChatModal } from '../components/ChatModal';
 import { RoomHistoryModal } from '../components/RoomHistoryModal';
@@ -44,11 +44,26 @@ export function DriveTable({ view }: { view: DriveView }) {
 
   const viewRef = useRef(view);
   viewRef.current = view;
+  const holdsRef = useRef<Record<HoldKey, boolean>>({ gas: false, brake: false, spot: false });
+  const resyncAtRef = useRef(0);
 
-  /* ---------------- 里程外推（视图 10Hz，rAF 60Hz：按当前速度推算渲染里程） ---------------- */
-  const deadRef = useRef({ pos: view.pos, t: 0, speed: view.speed });
+  /* ---------------- 帧间平滑与特效（视图 10Hz → 渲染 60Hz 的全部插值在此） ---------------- */
+  const fxRef = useRef<DriveFx | null>(null);
+  if (!fxRef.current) fxRef.current = new DriveFx();
+  const cacheRef = useRef(createSceneCache());
   useEffect(() => {
-    deadRef.current = { pos: view.pos, t: Date.now(), speed: view.speed };
+    fxRef.current!.onView(view, Date.now());
+    // 重连/丢帧后持键自愈：本地还按着、服务端却已清零 → 重新上报（服务端清零是掉线兜底，不是否定玩家）
+    const mine = view.myInputs;
+    if (mine && canDrive) {
+      const held = holdsRef.current;
+      const need = (['gas', 'brake', 'spot'] as HoldKey[]).filter((k) => held[k] && !mine[k]);
+      if (need.length > 0 && Date.now() - resyncAtRef.current > 300) {
+        resyncAtRef.current = Date.now();
+        for (const k of need) net.send({ t: 'vInt', intent: { k, on: true } });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   /* ---------------- 画布 ---------------- */
@@ -66,6 +81,7 @@ export function DriveTable({ view }: { view: DriveView }) {
       const bw = Math.max(1, Math.round(r.width * dpr));
       const bh = Math.max(1, Math.round(r.height * dpr));
       sizeRef.current = { w: r.width, h: r.height, dpr };
+      cacheRef.current.dpr = dpr; // 静态层按新 DPR 重建（paintScene 内 ensureCache 比对尺寸）
       if (canvas.width !== bw || canvas.height !== bh) {
         canvas.width = bw;
         canvas.height = bh;
@@ -85,9 +101,8 @@ export function DriveTable({ view }: { view: DriveView }) {
   useEffect(() => {
     let raf = 0;
     let stopped = false;
-    const loop = (): void => {
-      if (stopped) return;
-      raf = scheduleFrame(loop);
+    let lastFrameAt = 0;
+    const renderFrame = (): void => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -96,21 +111,40 @@ export function DriveTable({ view }: { view: DriveView }) {
       if (w === 0 || h === 0) return;
       const v = viewRef.current;
       const now = Date.now();
-      const elapsed = Math.max(0, now - deadRef.current.t) / 1000;
-      const renderPos = deadRef.current.pos + (deadRef.current.speed / 3.6) * Math.min(elapsed, 1.2);
+      const fx = fxRef.current!;
+      fx.frame(now, lastFrameAt === 0 ? 33 : now - lastFrameAt, v);
+      lastFrameAt = now;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      paintScene(ctx, w, h, {
-        view: v,
-        renderPos,
-        now,
-        drawDist: drawDistOf(v.lamp, v.myInputs?.spot === true),
-      });
+      paintScene(
+        ctx,
+        w,
+        h,
+        {
+          view: v,
+          renderPos: fx.pos,
+          now,
+          drawDist: drawDistOf(v.lamp, v.myInputs?.spot === true),
+          fx,
+        },
+        cacheRef.current,
+      );
       updateEngine(v.speed / DRIVE_MAX_SPEED, 1 - v.gap / 100);
     };
+    const loop = (): void => {
+      if (stopped) return;
+      raf = scheduleFrame(loop);
+      renderFrame();
+    };
     raf = scheduleFrame(loop);
+    // 保底渲染：部分内置浏览器把页面判成 hidden，rAF 永久暂停——正常环境 250ms 间隔里
+    // 发现「40ms 内刚渲染过」即自静默（零开销）；rAF 停转的环境靠它保住低频可玩不冻结
+    const safetyTimer = window.setInterval(() => {
+      if (!stopped && Date.now() - lastFrameAt > 200) renderFrame();
+    }, 250);
     return () => {
       stopped = true;
       cancelFrame(raf);
+      window.clearInterval(safetyTimer);
       stopEngine();
     };
   }, []);
@@ -123,7 +157,6 @@ export function DriveTable({ view }: { view: DriveView }) {
   }, [view.phase, spectating]);
 
   /* ---------------- 操控：持键与点按 ---------------- */
-  const holdsRef = useRef<Record<HoldKey, boolean>>({ gas: false, brake: false, spot: false });
   const [holds, setHolds] = useState<Record<HoldKey, boolean>>({ gas: false, brake: false, spot: false });
 
   const sendHold = (k: HoldKey, on: boolean): void => {
