@@ -144,6 +144,8 @@ export interface TableView {
   driveTail?: import('./driveProtocol').DriveTail;
   /** 勿停：爬窗频率档 */
   driveCrawl?: import('./driveProtocol').DriveCrawlRate;
+  /** 勿停：弯道凶度 */
+  driveCurves?: import('./driveProtocol').DriveCurveSetting;
   /** 勿停：目标路牌数（0=纯无尽） */
   driveTarget?: number;
   /** 血色模式：自定义目标票数（0=按人数默认 24/20/16，钳制 8-30） */
@@ -262,7 +264,7 @@ export type C2S =
   | { t: 'rejoin'; token: string; auth?: string }
   | { t: 'leave' }
   | { t: 'start' }
-  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number; drawTurnSec?: number; drawCycles?: number; driveSignGap?: number; driveDurability?: number; driveTail?: import('./driveProtocol').DriveTail; driveCrawl?: import('./driveProtocol').DriveCrawlRate; driveTarget?: number }
+  | { t: 'settings'; sb?: number; bb?: number; startChips?: number; maxPlayers?: number; charExpansion?: boolean; expansion?: boolean; targetTickets?: number; password?: string; minesDifficulty?: 'easy' | 'medium' | 'hard'; minesTimeSec?: number; tacticsMapSize?: 'small' | 'medium' | 'large'; tacticsTurnSec?: number; drawTurnSec?: number; drawCycles?: number; driveSignGap?: number; driveDurability?: number; driveTail?: import('./driveProtocol').DriveTail; driveCrawl?: import('./driveProtocol').DriveCrawlRate; driveTarget?: number; driveCurves?: import('./driveProtocol').DriveCurveSetting }
   | { t: 'sit'; seat: number }
   | { t: 'addBot' }
   | { t: 'kickBot'; seat: number }

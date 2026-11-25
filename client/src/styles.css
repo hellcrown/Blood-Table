@@ -5191,105 +5191,323 @@ body {
   border-bottom-color: currentColor;
 }
 
-/* ---------- 勿停（合作夜路逃亡，车内仪表视角） ---------- */
-/* 页根三行规矩同 .tac-page：body overflow:hidden 全局裁剪，页根必须自建滚动区 + width:100% 防撑宽 */
+/* ---------- 勿停 v2（真 3D · 仅电脑：驾驶/导航分屏） ---------- */
+/* 页根三行规矩同 .tac-page：body overflow:hidden 全局裁剪，页根必须自建滚动区 + width:100% 防撑宽。
+   本页是整屏游戏画面：自身不滚（内容按视口高度分配），过小的窗口由各面板内部滚动兜底 */
 .drv-page {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   width: 100%;
   display: flex;
   flex-direction: column;
+  background: #05060c;
 }
 .drv-phase {
   gap: 10px;
+  flex-wrap: wrap;
 }
 .drv-phase b {
   color: var(--text, #ddd);
 }
-/* 状态条紧急色：尾距 <25% 时变红 */
 .drv-urgent {
   color: #e03131;
   font-weight: 700;
 }
-.drv-warn {
-  background: rgba(224, 160, 49, 0.14);
-  border-color: rgba(224, 160, 49, 0.5);
-  color: #e0a031;
+/* 岗位切换（双按钮：选中态高亮） */
+.drv-role {
+  display: inline-flex;
+  gap: 4px;
 }
-.drv-danger {
-  background: rgba(224, 49, 49, 0.16);
-  border-color: rgba(224, 49, 49, 0.6);
-  color: #e03131;
-  animation: drv-blink 0.6s step-end infinite;
-}
-.drv-downed {
-  background: rgba(126, 32, 32, 0.25);
-  border-color: rgba(126, 32, 32, 0.6);
-  color: #d99a9a;
-}
-@keyframes drv-blink {
-  50% {
-    opacity: 0.55;
-  }
-}
-/* 挡风玻璃画布：flex 撑满剩余高度，canvas 铺满；触摸交互交给下方操控区 */
-.drv-canvas-wrap {
-  position: relative;
+/* 主体：左地图 / 右（3D 画面 + 导航操作）。三种布局共用同一套 DOM，只靠下面的 mode-* 切换 */
+.drv-main {
   flex: 1;
-  min-height: 220px;
-  overflow: hidden;
-  background: #04050a;
-  border-radius: 10px;
-  margin: 8px;
+  min-height: 0;
+  display: flex;
+  position: relative;
 }
-.drv-canvas {
-  position: absolute;
-  inset: 0;
+.drv-map {
+  flex: 0 0 46%;
+  min-width: 280px;
+  position: relative;
+  background: #08090d;
+  border-right: 1px solid #1c1d24;
+}
+.drv-map-canvas {
+  display: block;
   width: 100%;
   height: 100%;
+  cursor: crosshair;
+}
+.drv-side {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.drv-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #05060c;
+}
+.drv-3d {
   display: block;
+  width: 100%;
+  height: 100%;
   touch-action: none;
   user-select: none;
-  -webkit-touch-callout: none;
+  cursor: grab;
 }
-/* 操控区：底部固定两排；按钮 touch-action:manipulation 防双击缩放吞连点 */
-.drv-controls {
-  flex-shrink: 0;
+.drv-panel {
+  flex: 0 0 auto;
+  max-height: 54%;
+  overflow-y: auto;
+  padding: 8px 10px calc(8px + var(--sab, 0px));
+  border-top: 1px solid #1c1d24;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px 8px calc(10px + var(--sab, 0px));
-  touch-action: manipulation;
 }
-.drv-row {
-  display: flex;
-  gap: 6px;
+/* 驾驶员：整幅挡风玻璃，没有地图、没有导航操作 */
+.drv-main.mode-driver .drv-map,
+.drv-main.mode-driver .drv-panel {
+  display: none;
 }
-.drv-btn {
-  flex: 1;
-  min-height: 44px;
-  font-size: 15px;
-  padding: 6px 4px;
-  white-space: nowrap;
+/* 副驾驶：地图占左半，右侧上半是画面、下半是操作 */
+.drv-main.mode-navigator .drv-view {
+  flex: 0 0 44%;
 }
-.drv-btn:disabled {
-  opacity: 0.45;
+/* 单人全占：角落小地图 + 底部一条导航操作 */
+.drv-main.mode-solo .drv-map {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 230px;
+  height: 290px;
+  flex: none;
+  min-width: 0;
+  border: 1px solid #2a2b33;
+  border-radius: 8px;
+  z-index: 3;
+  opacity: 0.94;
 }
-/* 终局面板：盖在挡风玻璃画布上层（不遮操控区——终局后操控区已隐藏） */
-.drv-over {
+.drv-main.mode-solo .drv-panel {
+  max-height: 34%;
+}
+/* HUD：叠在 3D 画面上，不拦截鼠标（环顾/锁定要落到画布上） */
+.drv-hud {
   position: absolute;
   inset: 0;
-  margin: auto;
-  width: min(92%, 420px);
-  height: fit-content;
-  max-height: 92%;
-  overflow-y: auto;
-  background: rgba(10, 10, 14, 0.92);
-  border: 1px solid #2a2b33;
-  border-radius: 12px;
-  padding: 16px;
+  pointer-events: none;
+}
+.drv-flash {
+  position: absolute;
+  inset: 0;
+  background: #e03131;
+  opacity: 0;
+}
+.drv-sign {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  transform: translateX(-50%);
+  font-size: 40px;
+  font-weight: 800;
+  color: #e8e4da;
+  text-shadow: 0 0 16px #000, 0 2px 4px #000;
+  opacity: 0;
+}
+.drv-warns {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 60%;
+}
+.drv-warn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  background: rgba(224, 49, 49, 0.22);
+  color: #ff7b7b;
+  border: 1px solid rgba(224, 49, 49, 0.55);
+  width: fit-content;
+  text-shadow: 0 1px 2px #000;
+}
+.drv-warn.amber {
+  background: rgba(224, 160, 49, 0.18);
+  color: #f0b44a;
+  border-color: rgba(224, 160, 49, 0.55);
+}
+.drv-warn.blink {
+  animation: drv-blink 0.5s step-end infinite;
+}
+@keyframes drv-blink {
+  50% {
+    opacity: 0.5;
+  }
+}
+/* 副驾驶的喊话：挡风玻璃上方大字闪现 */
+.drv-call {
+  position: absolute;
+  left: 50%;
+  top: 13%;
+  transform: translateX(-50%);
+  font-size: 30px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0 14px #e03131, 0 2px 4px #000;
+  white-space: nowrap;
+  animation: drv-pop 0.22s ease-out;
+}
+.drv-call small {
+  display: block;
   text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffb0b0;
+}
+@keyframes drv-pop {
+  from {
+    transform: translateX(-50%) scale(1.5);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+}
+/* 地图标记旗标：带距离，出屏时贴边带箭头 */
+.drv-ping {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  color: #7ee081;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 0 4px #000, 0 1px 2px #000;
+}
+.drv-ping[data-edge='1'] {
+  transform: translate(0, -50%);
+  font-size: 13px;
+}
+/* 被扒/被爬的一侧：画面边缘泛出急促闪烁的红光（不拦截鼠标） */
+.drv-sideglow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 34%;
+  opacity: 0;
+  pointer-events: none;
+}
+.drv-sideglow.left {
+  left: 0;
+  background: linear-gradient(90deg, rgba(255, 32, 24, 0.5), rgba(255, 32, 24, 0));
+}
+.drv-sideglow.right {
+  right: 0;
+  background: linear-gradient(270deg, rgba(255, 32, 24, 0.5), rgba(255, 32, 24, 0));
+}
+/* 帧率读数：右下角小字，不抢注意力 */
+.drv-perf {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  font-size: 11px;
+  color: #6b6f7e;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+.drv-lockhint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #b4b8c4;
+  background: rgba(8, 9, 13, 0.74);
+  padding: 4px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.drv-spec {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+/* 底部键位提示 */
+.drv-hints {
+  flex: none;
+  padding: 4px 10px calc(6px + var(--sab, 0px));
+  font-size: 12px;
+  color: #7c8090;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 导航操作区 */
+.drv-status {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--text-dim, #9a9da8);
+}
+.drv-status b {
+  color: var(--text, #ddd);
+}
+.drv-status b.bad {
+  color: #e03131;
+}
+.drv-btnrow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.drv-btnrow .btn {
+  min-height: 34px;
+  font-size: 14px;
+  padding: 4px 10px;
+}
+.drv-calls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+.drv-calls .btn {
+  min-height: 30px;
+  font-size: 13px;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+.drv-calls kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 3px;
+  margin-right: 2px;
+  border: 1px solid #4a4e5a;
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 15px;
+  font-family: inherit;
+  color: #c9ccd6;
+  background: #15161c;
+}
+/* 终局面板：盖在整个主区域上 */
+.drv-overwrap {
+  z-index: 20;
 }
 .drv-over h3 {
   margin: 2px 0 10px;
@@ -5313,4 +5531,57 @@ body {
   gap: 6px;
   justify-content: center;
   margin-bottom: 12px;
+}
+/* 画布里的整屏提示（WebGL 不可用） */
+.drv-gate {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(88%, 440px);
+  height: fit-content;
+  padding: 18px;
+  border-radius: 12px;
+  background: rgba(10, 10, 14, 0.94);
+  border: 1px solid #2a2b33;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+.drv-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim, #9a9da8);
+  background: #05060c;
+}
+/* 仅电脑：触屏设备的整屏提示（对局页）与等待房横幅 */
+.drv-page-gate {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  display: flex;
+  padding: 16px;
+  background: #05060c;
+}
+.drv-gatepanel {
+  text-align: center;
+}
+.drv-roomgate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin: 4px 0 10px;
+  border: 1px solid rgba(224, 160, 49, 0.55);
+  border-radius: 8px;
+  background: rgba(224, 160, 49, 0.12);
+  color: var(--text-dim, #c8a468);
+  font-size: 13px;
+}
+.drv-roomgate b {
+  color: #f0b44a;
 }

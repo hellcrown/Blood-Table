@@ -79,6 +79,7 @@ export interface MatchEntry {
     durability?: number;
     tail?: 'lenient' | 'normal' | 'fierce';
     crawl?: 'low' | 'normal' | 'high';
+    curve?: 'lenient' | 'normal' | 'fierce';
     target?: number;
   };
   players: MatchPlayerRow[];

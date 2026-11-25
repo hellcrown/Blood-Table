@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { loadLastRoom, net, type ConnStatus } from '../net/socket';
+import { isKeyboardPC } from '../device';
 import type { PublicRoomInfo } from '@shared/protocol';
 import { AdminPanel } from '../components/AdminPanel';
 import { AuthPanel } from '../components/AuthPanel';
@@ -269,7 +270,9 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
                 <option value="tactics">血色猎场</option>
                 <option value="converge">心有灵犀（双人对词）</option>
                 <option value="draw">你画我猜（2-4 人）</option>
-                <option value="drive">勿停（合作夜路逃亡）</option>
+                <option value="drive" disabled={!isKeyboardPC()}>
+                  勿停（真 3D 合作夜路逃亡）{isKeyboardPC() ? '' : ' · 仅电脑'}
+                </option>
               </select>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
@@ -287,7 +290,7 @@ export function Lobby({ connected, status }: { connected: boolean; status?: Conn
               ) : mode === 'converge' ? (
                 <span className="hint" style={{ alignSelf: 'center' }}>2 人对局（另有观战位）</span>
               ) : mode === 'drive' ? (
-                <span className="hint" style={{ alignSelf: 'center' }}>1~4 人共乘一辆车（人越多越好开）</span>
+                <span className="hint" style={{ alignSelf: 'center' }}>1~4 人共乘一辆车 · 仅电脑（键盘 + 鼠标）</span>
               ) : (
                 <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
                   <option value={2}>2 人局</option>

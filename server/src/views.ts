@@ -27,6 +27,7 @@ export function buildView(room: Room, viewerId: string | null, asWaiting = false
     driveDurability: room.driveDurability,
     driveTail: room.driveTail,
     driveCrawl: room.driveCrawl,
+    driveCurves: room.driveCurves,
     driveTarget: room.driveTarget,
     serverTime: now,
   };

@@ -20,6 +20,8 @@ export type SfxName =
   | 'lose' // 终局失败
   | 'error' // 错误提示
   | 'scratch' // 勿停：窗爬者抓挠玻璃
+  | 'shriek' // 勿停：夜行者被惊动的尖啸
+  | 'bang' // 勿停：夜行者拍打车门
   | 'thud' // 勿停：撞击/扑击闷响
   | 'sign' // 勿停：通过路牌的风切
   | 'alarm'; // 勿停：危险预警双响
@@ -194,6 +196,20 @@ export function playSfx(name: SfxName): void {
         noise(c, master, 2400, 0.09, 0.2);
         noise(c, master, 2000, 0.08, 0.16, 0.12);
         noise(c, master, 2700, 0.1, 0.2, 0.24);
+        break;
+      case 'shriek':
+        // 尖啸：高频下滑的双层啸叫 + 气声噪声——车一停下，它们从四面八方回应
+        tone(c, master, 'sawtooth', 1500, 520, 0.38, 0.11);
+        tone(c, master, 'square', 980, 380, 0.3, 0.045, 0.06);
+        noise(c, master, 3200, 0.22, 0.14);
+        noise(c, master, 2200, 0.14, 0.09, 0.2);
+        break;
+      case 'bang':
+        // 拍打：闷响 + 玻璃咯咯作响
+        tone(c, master, 'sine', 150, 58, 0.2, 0.42);
+        noise(c, master, 480, 0.08, 0.28);
+        noise(c, master, 2600, 0.05, 0.13, 0.03);
+        noise(c, master, 3100, 0.04, 0.08, 0.1);
         break;
       case 'thud':
         // 闷撞击：低频下滑 + 短噪声（路障/扑击/破窗共用）

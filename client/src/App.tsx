@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { playSfx } from './audio/sound';
 import { net } from './net/socket';
 import { Lobby } from './pages/Lobby';
@@ -9,8 +9,11 @@ import { MinesTable } from './pages/MinesTable';
 import { TacticsTable } from './pages/TacticsTable';
 import { ConvergeTable } from './pages/ConvergeTable';
 import { DrawTable } from './pages/DrawTable';
-import { DriveTable } from './pages/DriveTable';
 import type { AnyView } from './net/socket';
+
+/** 勿停页带着整个 3D 引擎（three.js 约 150KB gzip）：按需加载，只有进了勿停对局才下载，
+ *  其他模式的玩家完全不受影响。 */
+const DriveTable = lazy(() => import('./pages/DriveTable').then((m) => ({ default: m.DriveTable })));
 
 export default function App() {
   const [view, setView] = useState<AnyView | null>(net.view);
@@ -59,7 +62,12 @@ export default function App() {
   else if (view.kind === 'tactics') page = <TacticsTable view={view} />;
   else if (view.kind === 'converge') page = <ConvergeTable view={view} />;
   else if (view.kind === 'draw') page = <DrawTable view={view} />;
-  else if (view.kind === 'drive') page = <DriveTable view={view} />;
+  else if (view.kind === 'drive')
+    page = (
+      <Suspense fallback={<div className="drv-loading">正在加载 3D 引擎…</div>}>
+        <DriveTable view={view} />
+      </Suspense>
+    );
   else if (view.phase === 'waiting') page = <Room view={view} />;
   else page = <Table view={view} />;
 

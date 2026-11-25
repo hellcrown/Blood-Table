@@ -18,10 +18,11 @@ import * as converge from './converge/engine';
 import type { DrawState } from '@shared/drawProtocol';
 import { DRAW_CYCLE_OPTIONS, DRAW_TURN_SEC_OPTIONS } from '@shared/drawProtocol';
 import * as draw from './draw/engine';
-import type { DriveCrawlRate, DriveState, DriveTail } from '@shared/driveProtocol';
+import type { DriveCrawlRate, DriveCurveSetting, DriveState, DriveTail } from '@shared/driveProtocol';
 import {
   DRIVE_BROADCAST_MS,
   DRIVE_CRAWL_OPTIONS,
+  DRIVE_CURVE_OPTIONS,
   DRIVE_DURABILITY_OPTIONS,
   DRIVE_DEFAULT_SIGN_GAP,
   DRIVE_EMPTY_MS,
@@ -132,6 +133,8 @@ export interface Room {
   driveTail: DriveTail;
   /** 勿停：爬窗频率档 */
   driveCrawl: DriveCrawlRate;
+  /** 勿停：弯道凶度（曲率乘数档） */
+  driveCurves: DriveCurveSetting;
   /** 勿停：目标路牌数（0=纯无尽冲距离） */
   driveTarget: number;
   /** 勿停：全员断线起始时刻（宽限 30s，同扫雷口径） */
@@ -331,7 +334,7 @@ function auditRoomStart(room: Room): void {
             : room.mode === 'draw'
               ? { turnSec: room.drawTurnSec, cycles: room.drawCycles }
               : room.mode === 'drive'
-                ? { signGap: room.driveSignGap, durability: room.driveDurability, tail: room.driveTail, crawl: room.driveCrawl, target: room.driveTarget }
+                ? { signGap: room.driveSignGap, durability: room.driveDurability, tail: room.driveTail, crawl: room.driveCrawl, curve: room.driveCurves, target: room.driveTarget }
                 : room.mode === 'converge'
                   ? {}
                   : { ...room.settings },
@@ -1213,6 +1216,7 @@ export class RoomManager {
       driveDurability: 3,
       driveTail: 'normal' as DriveTail,
       driveCrawl: 'normal' as DriveCrawlRate,
+      driveCurves: 'normal' as DriveCurveSetting,
       driveTarget: 0,
       driveEmptySince: 0,
       sessions: new Map(),
@@ -1443,6 +1447,40 @@ export class RoomManager {
           }
         } catch (e) {
           console.error('[audit] 心有灵犀末人离开审计失败:', e);
+        }
+        if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+        return;
+      }
+      this.broadcast(room);
+      return;
+    }
+    // 勿停：进行中离场标记离场（清持键与开窗归因；无人在车上即终局），随后移除会话
+    if (room.mode === 'drive' && g && 'road' in g) {
+      this.removeSession(room, session); // driveLeave 在 removeSession 内统一触发（同心有灵犀口径）
+      if (room.sessions.size === 0) {
+        // 末人离开=房间就地删除，审计 end 必须在此补写（同扫雷口径）。
+        // 漏掉这个分支时勿停会掉进通用路径：房间照样删，但中途弃局在审计里永远悬挂「进行中」
+        try {
+          const ds = g as DriveState;
+          if (ds.phase === 'gameover' && !room.matchLogged) {
+            room.matchLogged = true;
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { mode: 'drive', ...(ds.result ?? { reason: 'unknown' }) },
+              log: ds.log,
+            });
+          } else if (!room.matchLogged) {
+            recordGameEnd({
+              key: auditKeyOf(room),
+              endedAt: Date.now(),
+              summary: { resolved: false },
+              log: ds.log,
+              resolvedOnly: true,
+            });
+          }
+        } catch (e) {
+          console.error('[audit] 勿停末人离开审计失败:', e);
         }
         if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
         return;
@@ -1742,6 +1780,10 @@ export class RoomManager {
     if (msg.driveCrawl != null) {
       // 勿停爬窗频率：仅白名单枚举
       if (DRIVE_CRAWL_OPTIONS.includes(msg.driveCrawl)) room.driveCrawl = msg.driveCrawl;
+    }
+    if (msg.driveCurves != null) {
+      // 勿停弯道凶度：仅白名单枚举
+      if (DRIVE_CURVE_OPTIONS.includes(msg.driveCurves)) room.driveCurves = msg.driveCurves;
     }
     if (msg.driveTarget != null) {
       // 勿停目标路牌：0=纯无尽，其余只认界面选项（5/10/15）
@@ -2168,6 +2210,7 @@ export class RoomManager {
       tail: room.driveTail,
       durability: room.driveDurability,
       crawl: room.driveCrawl,
+      curves: room.driveCurves,
       target: room.driveTarget,
     });
     room.matchLogged = false; // 终局审计 end 的哨兵（broadcast drive 分支置位）
@@ -2568,8 +2611,9 @@ export class RoomManager {
           [...room.sessions.values()].filter((s) => !s.spectator && s.connected).map((s) => s.id),
         );
         const humansConnected = ds.players.some((p) => !p.left && connected.has(p.id));
+        const wasOver = ds.phase === 'gameover';
         let changed = false;
-        if (!humansConnected && ds.phase !== 'gameover') {
+        if (!humansConnected && !wasOver) {
           // 全员断线 30s 仍无人回来：就地终局（宽限覆盖刷新重连，同扫雷/你画我猜口径）
           if (!room.driveEmptySince) room.driveEmptySince = now;
           if (now - room.driveEmptySince >= DRIVE_EMPTY_MS) changed = drive.driveForceEnd(ds, now);
@@ -2577,7 +2621,10 @@ export class RoomManager {
           room.driveEmptySince = 0;
           changed = drive.driveTick(ds, now, connected);
         }
-        if (changed && now - (room.lastDriveBroadcast ?? 0) >= DRIVE_BROADCAST_MS) {
+        // 终局那一帧无视节流：对局结束后每拍都不再有变化，这一帧要是被节流吞掉就永远不会补发——
+        // 真机上出现过「车毁后画面冻住，直到有人退出房间才弹出结算」（目检时机器人脚本日志暴露）
+        const justEnded = !wasOver && ds.phase === 'gameover';
+        if (justEnded || (changed && now - (room.lastDriveBroadcast ?? 0) >= DRIVE_BROADCAST_MS)) {
           room.lastDriveBroadcast = now;
           this.broadcast(room);
         }
@@ -3175,7 +3222,7 @@ export class RoomManager {
             winnerSeat: -1,
             room: room.code,
             ...(room.gameStartedAt != null ? { startedAt: room.gameStartedAt } : {}),
-            settings: { signGap: g.signGap, tail: g.tail, durability: g.maxDurability, crawl: g.crawlRate, target: g.targetSigns },
+            settings: { signGap: g.signGap, tail: g.tail, durability: g.maxDurability, crawl: g.crawlRate, curve: g.curveSetting, target: g.targetSigns },
             players: g.players.map((p): MatchPlayerRow => {
               const sess = room.sessions.get(p.id);
               return {

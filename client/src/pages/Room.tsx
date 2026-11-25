@@ -9,14 +9,17 @@ import {
 } from '@shared/drawProtocol';
 import {
   DRIVE_CRAWL_OPTIONS,
+  DRIVE_CURVE_OPTIONS,
   DRIVE_DURABILITY_OPTIONS,
   DRIVE_SIGN_GAP_OPTIONS,
   DRIVE_TAIL_OPTIONS,
   DRIVE_TARGET_OPTIONS,
   type DriveCrawlRate,
+  type DriveCurveSetting,
   type DriveTail,
 } from '@shared/driveProtocol';
 import { net } from '../net/socket';
+import { isKeyboardPC } from '../device';
 import { ChatModal } from '../components/ChatModal';
 import { RoomHistoryModal } from '../components/RoomHistoryModal';
 import { CharPortrait } from '../components/CharCard';
@@ -181,6 +184,7 @@ export function Room({ view }: { view: TableView }) {
     driveDurability?: number;
     driveTail?: DriveTail;
     driveCrawl?: DriveCrawlRate;
+    driveCurves?: DriveCurveSetting;
     driveTarget?: number;
     password?: string;
   }) => {
@@ -309,6 +313,18 @@ export function Room({ view }: { view: TableView }) {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {view.mode === 'drive' && !isKeyboardPC() && (
+          <div className="drv-roomgate">
+            <b>勿停是电脑端玩法</b>
+            <span>这个模式需要键盘开车、鼠标环顾和点地图，手机和平板玩不了。请在带键盘和鼠标的电脑上打开本站加入房间。</span>
+            <div className="panel-actions">
+              <button className="btn" onClick={() => net.send({ t: 'enterSpectate' })}>
+                转为观战
+              </button>
+            </div>
           </div>
         )}
 
@@ -519,8 +535,24 @@ export function Room({ view }: { view: TableView }) {
                   ))}
                 </select>
               </div>
+              <div className="act-row wrap" style={{ alignItems: 'center' }}>
+                <span className="hint">弯道：</span>
+                <select
+                  value={view.driveCurves ?? 'normal'}
+                  disabled={!isHost}
+                  onChange={(e) => update({ driveCurves: e.target.value as DriveCurveSetting })}
+                >
+                  {DRIVE_CURVE_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c === 'lenient' ? '缓' : c === 'fierce' ? '急' : '标准'}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">越急越要提前减速打方向</span>
+              </div>
               <p className="hint">
-                车速低于勿停线（30km/h）喂养「猎影」，追上即撞损车尾 · 开窗才能搜掠路肩补给，但窗爬者会爬开着的窗 ·
+                车速低于勿停线（30km/h）喂养「猎影」，追上即撞损车尾 · 车一停稳附近的夜行者就会冲过来扒车，开起来才能甩掉 ·
+                驾驶员只有挡风玻璃、副驾驶看地图喊话（Tab 切换岗位） · 开窗才能搜掠路肩补给，但窗爬者会爬开着的窗 ·
                 灯亮看得远却吸引爬窗 · 加油站必须停稳才加得到油 · 一切收益都要慢下来，而一切慢都在喂养后面那个东西
               </p>
             </div>
