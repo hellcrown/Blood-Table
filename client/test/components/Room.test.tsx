@@ -2,16 +2,24 @@
  * Room（房间等待页）组件测试（jsdom）。此前该页只有构建+人工判断，这里钉住两处回归过的问题：
  * 1. 「移除机器人」必须按服务端下发的 isBot 字段识别，不得用 🤖 昵称前缀启发式
  *    （人类可合法取 🤖 开头昵称，旧启发式会让房主的移除按钮永远打不中真机器人）；
- * 2. 目标票数输入失焦钳制到 8-30（非 0），与服务端/界面承诺同口径。
+ * 2. 目标票数输入失焦钳制到 8-30（非 0），与服务端/界面承诺同口径；
+ * 3. 勿停等待房一进房就预取 3D 引擎分包（对局在点开始时就开跑，进对局页才下载会让慢网络的玩家白白损失十秒）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Room } from '../../src/pages/Room';
 import { net } from '../../src/net/socket';
 import type { SeatView, TableView } from '@shared/protocol';
 
 const ME = 'u-me';
+
+const prefetchState = vi.hoisted(() => ({ loads: 0 }));
+// 模块工厂只在第一次被加载时执行：用它计数「3D 引擎分包是否被取过」
+vi.mock('../../src/pages/DriveTable', () => {
+  prefetchState.loads += 1;
+  return { DriveTable: () => null };
+});
 
 function seat(partial: Partial<SeatView> & { id: string; seat: number }): SeatView {
   return {
@@ -118,5 +126,18 @@ describe('Room · 房间等待页', () => {
     fireEvent.blur(input);
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ t: 'settings', targetTickets: 0 }));
     expect((input as HTMLInputElement).value).toBe('');
+  });
+
+  it('勿停等待房：一进房就预取 3D 引擎分包；其他模式的等待房不预取', async () => {
+    const before = prefetchState.loads;
+    const drive = waitingView([seat({ id: ME, seat: 0, name: '房主', isHost: true })]);
+    drive.mode = 'drive';
+    const { unmount } = render(<Room view={drive} />);
+    await waitFor(() => expect(prefetchState.loads).toBe(before + 1));
+    unmount();
+    // 血色等待房：不取（其他模式的玩家不该为勿停的 3D 引擎付流量）
+    render(<Room view={waitingView([seat({ id: ME, seat: 0, name: '房主', isHost: true })])} />);
+    await act(async () => {});
+    expect(prefetchState.loads).toBe(before + 1);
   });
 });

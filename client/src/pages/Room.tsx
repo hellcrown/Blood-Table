@@ -61,6 +61,16 @@ export function Room({ view }: { view: TableView }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [djPickerOpen, setDjPickerOpen] = useState(false);
 
+  // 勿停：一进等待房就预取 3D 引擎分包（约 160KB gzip）。对局在房主点「开始」时就在服务端开跑，
+  // 等进了对局页才下载的话，网速慢的玩家画面出来时车已经被猎影撞了
+  //（线上慢网络实测这一步要 9.6 秒）。与 App 里的按需加载指向同一个模块，取过一次即命中缓存
+  useEffect(() => {
+    if (view.mode !== 'drive') return;
+    import('./DriveTable').catch(() => {
+      /* 预取失败不影响等待房；进对局页时会按需再加载 */
+    });
+  }, [view.mode]);
+
   // 服务端设置的三个数值：只在**数值真的变化**时同步草稿。
   // 依赖整个 view.settings（每条广播都是新对象）会在别人入座/改设置时，把房主正在输入、
   // 尚未失焦的值覆盖回旧值 —— 失焦后提交的就是被覆盖的值，等于白改。
