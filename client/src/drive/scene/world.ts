@@ -146,7 +146,7 @@ export class Sky {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const stars = new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ color: 0xcdd6ee, size: 1.7, sizeAttenuation: false, transparent: true, opacity: 0.85, fog: false, depthWrite: false }),
+      new THREE.PointsMaterial({ color: 0xcdd6ee, size: 1.7, sizeAttenuation: false, transparent: true, opacity: 0.6, fog: false, depthWrite: false }),
     );
     stars.frustumCulled = false;
     this.group.add(stars);
@@ -200,7 +200,7 @@ export class World {
         map: tex,
         emissiveMap: tex,
         emissive: new THREE.Color(0xb9bab2),
-        emissiveIntensity: 0.09, // 车灯照不到时，车道线只剩一点反光——贴着路面依稀可辨
+        emissiveIntensity: 0.03, // 车灯照不到时车道线不该自己发光：路面只靠车灯看得见
         roughness: 0.9,
         side: THREE.DoubleSide,
       })),

@@ -91,6 +91,7 @@ import {
   DRIVE_MONSTER_PAIR_TIER,
   DRIVE_MONSTER_RUN,
   DRIVE_MONSTER_RUN_TIER,
+  DRIVE_MONSTER_RUN_TIER_CAP,
   DRIVE_MONSTER_WALK,
   DRIVE_PING_TTL_MS,
   ROAD_HALF_M,
@@ -585,10 +586,20 @@ function throwMonster(state: DriveState, m: DriveMonsterState, now: number, text
   pushLog(state, 'sys', text);
 }
 
-function tickMonsters(state: DriveState, now: number, dtSec: number, prevPos: number): void {
+/** 夜行者的奔跑速度（m/s）：随路牌数加快，封顶 +50% */
+export function monsterRunSpeed(signs: number): number {
+  return DRIVE_MONSTER_RUN * Math.min(1 + DRIVE_MONSTER_RUN_TIER_CAP, 1 + DRIVE_MONSTER_RUN_TIER * signs);
+}
+
+/** 甩脱线（km/h）：跑得比车还快的夜行者，车得开得比它更快才甩得掉 */
+export function escapeSpeedOf(signs: number): number {
+  return Math.max(DRIVE_ESCAPE_SPEED, monsterRunSpeed(signs) * 3.6);
+}
+
+function tickMonsters(state: DriveState, now: number, dtSec: number, prevPos: number, escape: number): void {
   const hunt = state.moved && state.speed < DRIVE_HUNT_SPEED;
-  const escaping = state.speed >= DRIVE_ESCAPE_SPEED;
-  const run = DRIVE_MONSTER_RUN * (1 + DRIVE_MONSTER_RUN_TIER * state.signs);
+  const escaping = state.speed >= escape;
+  const run = monsterRunSpeed(state.signs);
   const t = (now - state.startedAt) / 1000;
   const homeLat = (m: DriveMonsterState): number =>
     clamp(m.center + m.amp * Math.sin(m.w * t + m.phase), -DRIVE_MONSTER_LAT_MAX, DRIVE_MONSTER_LAT_MAX);
@@ -673,7 +684,7 @@ function tickMonsters(state: DriveState, now: number, dtSec: number, prevPos: nu
       m.mode = 'latched';
       m.side = m.lat >= state.lateral ? 'R' : 'L';
       m.climbSince = 0;
-      pushLog(state, 'sys', `一只夜行者扒住了${m.side === 'L' ? '左' : '右'}侧车门！开起来才能甩掉它`);
+      pushLog(state, 'sys', `一只夜行者扒住了${m.side === 'L' ? '左' : '右'}侧车门！开到 ${Math.round(escape)}km/h 才能甩掉它`);
       continue;
     }
     // 行驶中撞上：车扫过它所在的位置且横向重叠
@@ -690,7 +701,7 @@ function tickMonsters(state: DriveState, now: number, dtSec: number, prevPos: nu
       }
     }
   }
-  // 撕扯节奏（多只共用）：首次 1.2s 后开始，之后每 2.5s 耐久 -1
+  // 撕扯节奏（多只共用）：首次 DRIVE_MAUL_FIRST_MS 后开始，之后每 2.5s 耐久 -1
   if (latched) {
     if (!state.maulAt) state.maulAt = now + DRIVE_MAUL_FIRST_MS;
     else if (now >= state.maulAt) {
@@ -925,7 +936,7 @@ export function driveTick(state: DriveState, now: number, connectedIds: Readonly
   if (state.calls.length > 0) state.calls = state.calls.filter((c) => now - c.ts < DRIVE_CALL_TTL_MS);
 
   consumeEvents(state, prevPos, dtSec, rng);
-  tickMonsters(state, now, dtSec, prevPos);
+  tickMonsters(state, now, dtSec, prevPos, escapeSpeedOf(state.signs));
 
   // 猎影尾压
   const drain = DRIVE_TAIL_DRAIN[state.tail] ?? DRIVE_GAP_DRAIN;
@@ -1048,6 +1059,7 @@ export function buildDriveView(
     canNavigate: alive && state.phase === 'driving' && (solo || me!.role === 'navigate'),
     solo,
     drivers,
+    escapeSpeed: Math.round(escapeSpeedOf(state.signs)),
     iDowned: !!me && me.downed,
     spectator,
     mauls: state.mauls,

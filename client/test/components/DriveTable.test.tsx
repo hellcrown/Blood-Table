@@ -348,7 +348,7 @@ describe('DriveTable · 勿停对局页', () => {
         })}
       />,
     );
-    expect(screen.getByText(/被扒车 ×1/)).toBeTruthy();
+    expect(screen.getByText(/被扒车 ×1！开到 32km\/h 才能甩掉/)).toBeTruthy(); // 甩脱线跟着夜行者的速度走，直接告诉玩家
     u3();
     const { unmount: u4 } = render(<DriveTable view={drvView({ iDowned: true, canDrive: false })} />);
     expect(screen.getByText(/你被拖出了车外/)).toBeTruthy();

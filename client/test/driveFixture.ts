@@ -50,6 +50,7 @@ export function drvView(overrides?: Partial<DriveView>): DriveView {
     canNavigate: false,
     solo: false,
     drivers: 1,
+    escapeSpeed: 32,
     iDowned: false,
     spectator: false,
     mauls: 0,

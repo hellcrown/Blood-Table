@@ -20,6 +20,10 @@ const SEAT: Record<Seat, [number, number, number]> = {
 };
 /** 默认视线略向下（rad）：平视时仪表台占掉近四成画面，路面被挤成一条窄带 */
 const BASE_PITCH = -0.07;
+/** 后视镜：朝后相机的竖直视场角（度）与渲染贴图尺寸——眼神光按它们换算屏幕像素（figures.ts） */
+export const MIRROR_FOV = 34;
+export const MIRROR_W = 384;
+export const MIRROR_H = 128;
 
 /** 两点之间拉一根方条（车架用） */
 function bar(a: [number, number, number], b: [number, number, number], thick: number, mat: THREE.Material): THREE.Mesh {
@@ -118,11 +122,11 @@ export class Cockpit {
     box(1.8, 0.45, 0.2, 0, 0.78, 1.42, trim); // 后排椅背
 
     /* 后视镜：实时画面 */
-    this.rearCamera = new THREE.PerspectiveCamera(34, 3, 0.3, 320);
+    this.rearCamera = new THREE.PerspectiveCamera(MIRROR_FOV, MIRROR_W / MIRROR_H, 0.3, 320);
     this.rearCamera.position.set(0, 1.3, 0.6);
     this.rearCamera.rotation.y = Math.PI; // 朝后看
     this.group.add(this.rearCamera);
-    this.mirrorTarget = new THREE.WebGLRenderTarget(384, 128);
+    this.mirrorTarget = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H);
     box(0.34, 0.12, 0.03, 0, 1.36, -0.44, trim);
     this.group.add(bar([0, 1.47, -0.5], [0, 1.42, -0.44], 0.022, trim));
     const mirrorGeo = new THREE.PlaneGeometry(0.32, 0.096);

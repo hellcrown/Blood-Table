@@ -210,14 +210,18 @@ async function main(): Promise<void> {
     check(host.view!.monsters.some((m) => m.mode === 'hunt' || m.mode === 'latched'), '车一停稳，附近的夜行者冲了过来');
     await sleep(2500);
     console.log(`  ℹ 两秒半后的状态：${host.view!.monsters.some((m) => m.mode === 'latched') ? '已扒住车门' : '仍在追（距离较远）'}`);
-    // 开起来甩脱：带车道保持地加速，直到过了甩脱线
+    // 开起来甩脱：带车道保持地加速，直到过了甩脱线（跟着夜行者的速度走，越往后越高）
+    const escape = host.view!.escapeSpeed;
     const escStart = Date.now();
-    while (host.view!.speed < 25 && host.view?.phase === 'driving' && Date.now() - escStart < 10_000) {
+    while (host.view!.speed < escape + 3 && host.view?.phase === 'driving' && Date.now() - escStart < 12_000) {
       autopilot(70);
       await sleep(100);
     }
-    check(host.view!.phase === 'gameover' || host.view!.speed >= 25, `重新开起来（${host.view!.speed.toFixed(0)} km/h）`);
-    check(host.view!.monsters.every((m) => m.mode !== 'latched'), '车速到 25 km/h 后没有扒着的夜行者');
+    check(host.view!.phase === 'gameover' || host.view!.speed >= escape, `重新开起来（${host.view!.speed.toFixed(0)} km/h）`);
+    check(
+      host.view!.monsters.every((m) => m.mode !== 'latched'),
+      `车速过 ${escape} km/h 的甩脱线后没有扒着的夜行者`,
+    );
     drive(0, false, false);
   }
 

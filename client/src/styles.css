@@ -5248,10 +5248,20 @@ body {
 }
 .drv-view {
   position: relative;
+  isolation: isolate; /* 画面内的层叠自家管：压暗层 1、HUD 2 */
   flex: 1;
   min-height: 0;
   overflow: hidden;
   background: #05060c;
+}
+/* 夜间视野：挡风玻璃边缘发黑，只有车灯照到的那一块清楚（不拦截鼠标，HUD 压在它上面） */
+.drv-view::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 74% 68% at 50% 54%, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.4) 76%, rgba(0, 0, 0, 0.85) 100%);
 }
 .drv-3d {
   display: block;
@@ -5301,6 +5311,7 @@ body {
 .drv-hud {
   position: absolute;
   inset: 0;
+  z-index: 2;
   pointer-events: none;
 }
 .drv-flash {
@@ -5427,6 +5438,7 @@ body {
 }
 .drv-lockhint {
   position: absolute;
+  z-index: 2;
   left: 50%;
   bottom: 14px;
   transform: translateX(-50%);
@@ -5440,6 +5452,7 @@ body {
 }
 .drv-spec {
   position: absolute;
+  z-index: 2;
   left: 50%;
   bottom: 12px;
   transform: translateX(-50%);

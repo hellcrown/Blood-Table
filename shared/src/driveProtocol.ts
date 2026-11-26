@@ -192,19 +192,21 @@ export const DRIVE_MONSTER_PAIR_TIER = 4;
 export const DRIVE_MONSTER_PAIR_CHANCE = 0.3;
 /** 停车判定：车速低于此值即视为「停下」，惊动范围内的夜行者 */
 export const DRIVE_HUNT_SPEED = 10;
-/** 甩脱车速：到达后扒着的全部甩飞、没追上的放弃 */
+/** 甩脱车速的下限（km/h）：实际甩脱线取 max(本值, 夜行者的奔跑车速)，见 engine 的 escapeSpeedOf */
 export const DRIVE_ESCAPE_SPEED = 25;
 export const DRIVE_HUNT_RANGE = 90;
-/** 冲刺速度（m/s）随路牌数加快；放弃后走回原位的速度 */
-export const DRIVE_MONSTER_RUN = 5.5;
-export const DRIVE_MONSTER_RUN_TIER = 0.06;
+/** 冲刺速度（m/s）：基础 9（约 32km/h）× (1 + 5%×路牌数，最多 +50%)。
+ *  首版是 5.5（约 20km/h）——车开到 25 就永远追不上，停车时它从 60m 外要 11 秒才到，加满油都绰绰有余。 */
+export const DRIVE_MONSTER_RUN = 9;
+export const DRIVE_MONSTER_RUN_TIER = 0.05;
+export const DRIVE_MONSTER_RUN_TIER_CAP = 0.5;
 export const DRIVE_MONSTER_WALK = 2.2;
 /** 游荡的横向活动范围上限 */
 export const DRIVE_MONSTER_LAT_MAX = 4.2;
-/** 扒车撕扯：首次 1.6s 后开始，之后每 2.5s 耐久 -1（多只共用节奏）。
- *  1.6s 是给「立刻满油门」留的活路：被扒着时加速 17.5km/h/s，1.6s 刚好冲过 25km/h 的甩脱线——
- *  反应够快一下都不挨，稍有犹豫就先掉一格 */
-export const DRIVE_MAUL_FIRST_MS = 1_600;
+/** 扒车撕扯：首次 2.0s 后开始，之后每 2.5s 耐久 -1（多只共用节奏）。
+ *  2.0s 是给「立刻满油门」留的活路：被扒着时加速 17.5km/h/s，不到 2 秒冲过基础档的甩脱线（32km/h）——
+ *  反应够快一下都不挨，稍有犹豫就先掉一格；路牌多了它跑得更快，甩脱线跟着抬高，停在不该停的地方必然挨一下 */
+export const DRIVE_MAUL_FIRST_MS = 2_000;
 export const DRIVE_MAUL_EVERY_MS = 2_500;
 /** 扒车侧车窗开着：持续 2.5s 即爬进来（关窗即打断） */
 export const DRIVE_LATCH_CLIMB_MS = 2_500;
@@ -511,6 +513,8 @@ export interface DriveView {
   solo: boolean;
   /** 在线且在驾驶位的玩家数（0=无人驾驶） */
   drivers: number;
+  /** 当前甩脱线（km/h，取整）：车速到了，扒着的夜行者才会被甩飞 */
+  escapeSpeed: number;
   iDowned: boolean;
   spectator: boolean;
   mauls: number;

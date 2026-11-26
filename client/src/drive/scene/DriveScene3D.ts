@@ -16,16 +16,22 @@ import type { DriveView } from '@shared/driveProtocol';
 import type { ClusterData } from '../cluster';
 import type { DriveFx } from '../fx';
 import { PATH_STEP_M, buildRoadPath, placeAt, sampleAt, type RoadSample } from '../roadPath';
-import { Cockpit, type Seat } from './cockpit';
-import { Crawler, Monsters, Shadow } from './figures';
+import { Cockpit, MIRROR_FOV, MIRROR_H, type Seat } from './cockpit';
+import { Crawler, Monsters, Shadow, applyGlints, glintScaleFactor } from './figures';
 import { Props } from './props';
 import { Sky, World, WORLD_AHEAD_M, WORLD_BACK_M } from './world';
 
 /** 镜头竖直视场角（度）——与驾驶舱相机一致 */
 const FOV = 60;
-/** 车灯强度：衰减为线性（decay 1），近处不能过曝到吞掉车道线 */
-const HEADLIGHT = 120;
-const HEADLIGHT_FILL = 5;
+/** 车灯是近光：射程六七十米、压得很低，实际看得清的只有车头前三四十米，再往前是雾和黑暗——
+ *  弯后、远处一律看不见，驾驶员得靠副驾驶报路。首版照到两百多米开外，驾驶员自己就能看清整条路，
+ *  副驾驶形同虚设。强度衰减为线性（decay 1）：近处要够亮（看得清车道线），远处靠射程与雾截断 */
+const HEADLIGHT = 160;
+const HEADLIGHT_RANGE = 70;
+const HEADLIGHT_FILL = 3;
+/** 天光（月光）：开着灯也只剩一点轮廓；关灯后几乎全黑——但招来的窗爬者更少 */
+const SKY_LAMP_ON = 0.16;
+const SKY_LAMP_OFF = 0.06;
 
 export class DriveScene3D {
   readonly renderer: THREE.WebGLRenderer;
@@ -55,17 +61,20 @@ export class DriveScene3D {
   private lastClusterAt = 0;
   private width = 1;
   private height = 1;
+  /** 眼神光的像素换算系数：主画面随画布高度变，后视镜的贴图尺寸固定 */
+  private glintKMain = 0.01;
+  private readonly glintKMirror = glintScaleFactor(MIRROR_FOV, MIRROR_H);
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.0;
 
     const night = new THREE.Color(0x05060c);
     this.scene.background = night;
-    // 指数雾：约 230m 外一切没入黑暗（车灯照不到、也看不见弯后的东西）
-    this.scene.fog = new THREE.FogExp2(night, 0.0105);
+    // 指数雾：四十米外开始发灰，七八十米外没入黑暗（车灯射程之内才看得清，弯后看不见）
+    this.scene.fog = new THREE.FogExp2(night, 0.017);
 
     this.scene.add(this.sky.group);
     this.scene.add(this.world.group);
@@ -77,12 +86,13 @@ export class DriveScene3D {
     this.crawler = new Crawler(this.car);
 
     /* 灯：极暗的天光（只剩轮廓）+ 两个真实的聚光车灯 + 近处补光 */
-    this.hemi = new THREE.HemisphereLight(0x27314f, 0x05060a, 0.42);
+    this.hemi = new THREE.HemisphereLight(0x27314f, 0x05060a, SKY_LAMP_ON);
     this.scene.add(this.hemi);
+    // 车灯压得低（照路面，不照树梢）：否则路边松林被照亮，等于把弯道走向提前告诉了驾驶员
     const head = (x: number, aimX: number): THREE.SpotLight => {
-      const l = new THREE.SpotLight(0xfff1d2, HEADLIGHT, 230, 0.42, 0.6, 1.0);
+      const l = new THREE.SpotLight(0xfff1d2, HEADLIGHT, HEADLIGHT_RANGE, 0.38, 0.7, 1.0);
       l.position.set(x, 0.82, -2.0);
-      l.target.position.set(aimX, 0, -50);
+      l.target.position.set(aimX, -0.6, -34);
       this.car.add(l);
       this.car.add(l.target);
       return l;
@@ -132,6 +142,7 @@ export class DriveScene3D {
     this.cockpit.camera.aspect = this.width / this.height;
     this.cockpit.camera.fov = FOV;
     this.cockpit.camera.updateProjectionMatrix();
+    this.glintKMain = glintScaleFactor(FOV, this.height * this.renderer.getPixelRatio());
   }
 
   /** 每帧把最新状态灌进场景（在 render 之前调用） */
@@ -161,7 +172,7 @@ export class DriveScene3D {
     this.headL.visible = lamp;
     this.headR.visible = lamp;
     this.fill.visible = lamp;
-    this.hemi.intensity = lamp ? 0.42 : 0.16;
+    this.hemi.intensity = lamp ? SKY_LAMP_ON : SKY_LAMP_OFF;
 
     // 环顾 + 震动（撞击/路肩/被扒车）
     const s = fx.shake;
@@ -213,11 +224,13 @@ export class DriveScene3D {
     if (this.frameNo % 2 === 0) {
       // 后视镜：朝后的相机看一遍（车厢隐藏，否则被仪表台挡住），隔帧一次
       this.cockpit.group.visible = false;
+      applyGlints(this.glintKMirror); // 眼神光按这台相机的视场与贴图高度换算
       this.renderer.setRenderTarget(this.cockpit.mirrorTarget);
       this.renderer.render(this.scene, this.cockpit.rearCamera);
       this.renderer.setRenderTarget(null);
       this.cockpit.group.visible = true;
     }
+    applyGlints(this.glintKMain);
     this.renderer.render(this.scene, this.cockpit.camera);
   }
 

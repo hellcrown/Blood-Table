@@ -14,7 +14,9 @@ import {
   driveIntent,
   driveLeave,
   driveTick,
+  escapeSpeedOf,
   isSolo,
+  monsterRunSpeed,
   resolveCrawl,
   resolveCurveSetting,
   resolveDurability,
@@ -29,7 +31,6 @@ import {
   DRIVE_CLIMB_MS,
   DRIVE_CURVE_CHAIN_MAX,
   DRIVE_CRAWL_FIRST_MS,
-  DRIVE_ESCAPE_SPEED,
   DRIVE_FUEL_MAX,
   DRIVE_GAP_MAX,
   DRIVE_GUARD_M,
@@ -239,6 +240,27 @@ describe('转向', () => {
 });
 
 describe('被扒车的活路', () => {
+  it('甩脱线跟着夜行者的速度走：基础约 32 码，路牌越多越高，封顶 +50%', () => {
+    expect(monsterRunSpeed(0)).toBeCloseTo(9, 9); // 约 32km/h：全力奔跑的人形
+    expect(escapeSpeedOf(0)).toBeCloseTo(32.4, 6);
+    expect(escapeSpeedOf(6)).toBeCloseTo(9 * 1.3 * 3.6, 6); // 6 块路牌：+30%
+    expect(escapeSpeedOf(10)).toBeCloseTo(9 * 1.5 * 3.6, 6); // 封顶 +50%（约 48.6 码）
+    expect(escapeSpeedOf(999)).toBe(escapeSpeedOf(10));
+  });
+
+  it('车开得比它慢它不放弃（30 码 < 基础甩脱线）；开得比它快才掉头回去', () => {
+    const s = game();
+    s.moved = true;
+    s.speed = 0;
+    const m = addMonster(s, 60, 3);
+    run(s, 200);
+    expect(m.mode).toBe('hunt');
+    runAt(s, 30, 600);
+    expect(m.mode).toBe('hunt'); // 30 码甩不掉基础档的夜行者
+    runAt(s, 45, 400);
+    expect(m.mode).toBe('return');
+  });
+
   it('车停着被扒住的瞬间立刻满油门：在第一次撕扯之前冲过甩脱线，一下都不挨', () => {
     const s = game();
     s.moved = true;
@@ -246,10 +268,10 @@ describe('被扒车的活路', () => {
     while (!s.monsters.some((m) => m.mode === 'latched')) driveTick(s, s.lastTickAt + 66, everyone(s), zero);
     gas(s, 'a'); // 扒上的同一刻踩死油门
     const dur0 = s.durability;
-    run(s, 1800);
-    expect(s.speed).toBeGreaterThanOrEqual(25); // 冲过了甩脱线
+    run(s, 2200);
+    expect(s.speed).toBeGreaterThanOrEqual(escapeSpeedOf(0)); // 冲过了甩脱线
     expect(s.monsters.every((m) => m.mode !== 'latched')).toBe(true); // 全部甩飞
-    expect(s.durability).toBe(dur0); // 第一次撕扯（1.6s 后）还没到就甩掉了
+    expect(s.durability).toBe(dur0); // 第一次撕扯（约 2.1s 后）还没到就甩掉了
   });
 });
 
@@ -505,7 +527,7 @@ describe('夜行者', () => {
     expect(left.side).toBe('L');
   });
 
-  it('扒车撕扯：追上 1.2s 后开始，之后每 2.5s 耐久 -1；多只共用节奏', () => {
+  it('扒车撕扯：追上约 2.1s 后开始，之后每 2.5s 耐久 -1；多只共用节奏', () => {
     const s = game();
     s.moved = true;
     const m = addMonster(s, 6, 1);
@@ -517,12 +539,12 @@ describe('夜行者', () => {
       until += ms;
       while (s.lastTickAt + 66 <= until) driveTick(s, s.lastTickAt + 66, everyone(s), zero);
     };
-    advance(1600); // 扒上 1.6s：还没开始扣（下一拍才起计时，首次在约 1.72s）
+    advance(2000); // 扒上 2.0s：还没开始扣（下一拍才起计时，首次在约 2.1s）
     expect(s.durability).toBe(s.maxDurability);
-    advance(400); // 扒上 2.0s：首次撕扯已发生
+    advance(400); // 扒上 2.4s：首次撕扯已发生
     expect(s.durability).toBe(s.maxDurability - 1);
     expect(s.mauls).toBe(1);
-    advance(3000); // 扒上 4.7s：第二次撕扯（首次后 2.5s）已发生、第三次未到
+    advance(3000); // 扒上 5.4s：第二次撕扯（首次后 2.5s）已发生、第三次未到
     expect(s.durability).toBe(s.maxDurability - 2);
     expect(s.mauls).toBe(2);
 
@@ -530,7 +552,7 @@ describe('夜行者', () => {
     two.moved = true;
     addMonster(two, 5, 1);
     addMonster(two, 5, -1);
-    run(two, 4600);
+    run(two, 4000); // 约 0.3s 扒上，首次撕扯在约 2.4s，第二次在约 4.9s 之外
     expect(two.monsters.filter((m) => m.mode === 'latched')).toHaveLength(2);
     expect(two.mauls).toBe(1); // 两只也只按一个节奏扣
     expect(two.durability).toBe(two.maxDurability - 1);
@@ -563,13 +585,16 @@ describe('夜行者', () => {
     expect(climbing.climbSince).toBe(0);
   });
 
-  it('甩脱：车速到 25 km/h 扒着的被甩飞（计入搏斗），翻滚一小段后移除', () => {
+  it('甩脱：车速过了甩脱线（基础 32 码）扒着的才被甩飞（计入搏斗），翻滚一小段后移除', () => {
     const s = game();
     s.moved = true;
     const m = addMonster(s, 6, 1);
     run(s, 1500);
     expect(m.mode).toBe('latched');
-    s.speed = DRIVE_ESCAPE_SPEED + 5;
+    s.speed = escapeSpeedOf(0) - 2;
+    driveTick(s, at(s) + 66, everyone(s), zero);
+    expect(m.mode).toBe('latched'); // 差一点没到线：还扒着
+    s.speed = escapeSpeedOf(0) + 5;
     driveTick(s, at(s) + 66, everyone(s), zero);
     expect(m.mode).toBe('thrown');
     expect(s.crawls).toBe(1);
@@ -584,9 +609,9 @@ describe('夜行者', () => {
     const m = addMonster(s, 40, 3); // 偏在右侧，车从它旁边驶过不会撞上
     run(s, 300);
     expect(m.mode).toBe('hunt');
-    runAt(s, 30, 300); // 车跑起来
+    runAt(s, 45, 300); // 车开得比它快：它放弃
     expect(m.mode).toBe('return');
-    runAt(s, 30, 3000);
+    runAt(s, 45, 3000);
     expect(m.mode).toBe('wander');
     expect(m.at).toBeCloseTo(40, 0);
 
@@ -768,6 +793,9 @@ describe('视图', () => {
     addMonster(s, 2000);
     const v = view(s, 'a');
     expect(v.steerIn).toBe(1);
+    expect(v.escapeSpeed).toBe(32); // 基础甩脱线
+    s.signs = 6;
+    expect(view(s, 'a').escapeSpeed).toBe(42); // 路牌越多，夜行者越快，甩脱线越高
     expect(v.myInputs).toMatchObject({ steer: 1 });
     expect(v.monsters).toHaveLength(1);
     expect(v.monsters[0]).toMatchObject({ id: near.id, mode: 'hunt', side: null, climbLeft: null });

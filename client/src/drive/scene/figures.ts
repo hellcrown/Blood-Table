@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DRIVE_CLIMB_MS, type DriveSide, type DriveView } from '@shared/driveProtocol';
 import { placeAt, type RoadSample } from '../roadPath';
+import { glowTexture } from './textures';
 import type { MonsterTrack } from '../fx';
 
 export type FigurePose = 'idle' | 'run' | 'walk' | 'latched' | 'climb' | 'crawl';
@@ -61,6 +62,29 @@ const UP_LEN = { arm: 0.35, leg: 0.48 };
 const LOW_LEN = { arm: 0.31, leg: 0.45 };
 const HIP_Y = 0.94;
 
+/**
+ * 眼神光：真实眼球只有几厘米，几十米外不足一个像素——「照不到的地方只剩一对反光的眼睛」靠眼球本身做不到。
+ * 每只人形在眼睛位置另挂一对按距离放大的光斑，在屏幕上始终保持固定的几个像素：黑暗里看得见「有东西」，
+ * 看不清在哪条道。车灯射程之外没有反光可看，所以 GLINT_FAR_M 外淡出。
+ * glintK 把「屏幕像素」换算成「世界尺寸」，随相机视场角与画布高度变化（主画面与后视镜各有一个）。
+ */
+const GLINT_FAR_M = 130;
+const GLINT_FADE_M = 40;
+const GLINT_PX = 10;
+const glintFigs = new Set<Figure>();
+let glintK = 0.01;
+
+/** 换相机渲染前调用（主画面 / 后视镜）：按该相机的视场与画布高度重排全部眼神光的尺寸 */
+export function applyGlints(k: number): void {
+  glintK = k;
+  for (const f of glintFigs) f.applyGlintK(k);
+}
+
+/** 由视场角（度）与画布像素高度算出 glintK */
+export function glintScaleFactor(fovDeg: number, bufferH: number): number {
+  return (2 * Math.tan((fovDeg * Math.PI) / 360) * GLINT_PX) / Math.max(1, bufferH);
+}
+
 export class Figure {
   readonly group = new THREE.Group();
   private readonly pelvis = new THREE.Group();
@@ -74,6 +98,10 @@ export class Figure {
   private readonly shinL = new THREE.Group();
   private readonly shinR = new THREE.Group();
   readonly eyeMat: THREE.MeshBasicMaterial;
+  private readonly glintMat: THREE.SpriteMaterial;
+  private readonly glints: THREE.Sprite[] = [];
+  /** 到车的距离（米）；0=不亮眼神光（贴在车边时眼球本身已经看得见） */
+  private glintDist = 0;
 
   constructor(opts: FigureOpts = {}) {
     const a = assets();
@@ -108,6 +136,26 @@ export class Figure {
       eye.userData.eye = true;
       this.head.add(eye);
     }
+    // 眼神光（见 GLINT 说明）：加色混合的软光斑，不被头挡住（贴在脸面稍前）
+    this.glintMat = new THREE.SpriteMaterial({
+      map: glowTexture(),
+      color: opts.eyeColor ?? 0xffe2a0,
+      transparent: true,
+      opacity: 0,
+      fog: false,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    });
+    for (const sx of [-1, 1]) {
+      const g = new THREE.Sprite(this.glintMat);
+      g.position.set(sx * 0.05, 0.15, -0.125);
+      g.visible = false;
+      g.renderOrder = 10;
+      this.head.add(g);
+      this.glints.push(g);
+    }
+    glintFigs.add(this);
     limb(this.armL, this.foreL, this.pelvis, -0.24, 0.66, a.upperArm, a.foreArm, UP_LEN.arm, LOW_LEN.arm);
     limb(this.armR, this.foreR, this.pelvis, 0.24, 0.66, a.upperArm, a.foreArm, UP_LEN.arm, LOW_LEN.arm);
     limb(this.legL, this.shinL, this.pelvis, -0.105, 0, a.thigh, a.shin, UP_LEN.leg, LOW_LEN.leg);
@@ -205,13 +253,30 @@ export class Figure {
     }
   }
 
-  /** 眼睛可见度（远处淡出；1=全亮） */
-  setEyeAlpha(alpha: number): void {
+  /**
+   * 眼睛可见度：alpha 为眼球亮度（远处淡出，1=全亮）；dist（米，>0）为到车的距离，眼神光按它缩放；
+   * facing=false（背对着车，比如走回原位的）时眼神光不亮；far 为眼神光的淡出起点（默认 GLINT_FAR_M）。
+   */
+  setEyeAlpha(alpha: number, dist = 0, facing = true, far = GLINT_FAR_M): void {
     this.eyeMat.opacity = Math.min(1, Math.max(0, alpha));
+    this.glintDist = dist;
+    this.glintMat.opacity = facing ? Math.min(1, Math.max(0, (far - dist) / GLINT_FADE_M)) : 0;
+    this.applyGlintK(glintK);
+  }
+
+  applyGlintK(k: number): void {
+    const on = this.glintDist > 0 && this.glintMat.opacity > 0.01;
+    for (const g of this.glints) {
+      g.visible = on;
+      if (on) g.scale.setScalar(this.glintDist * k);
+    }
   }
 
   dispose(): void {
+    glintFigs.delete(this);
     this.eyeMat.dispose();
+    this.glintMat.map?.dispose();
+    this.glintMat.dispose();
   }
 }
 
@@ -298,8 +363,9 @@ export class Monsters {
       else if (m.mode === 'hunt') fig.pose('run', local, Math.hypot(m.vs, m.vx));
       else if (m.mode === 'return') fig.pose('walk', local, 0);
       else fig.pose('idle', local, 0);
-      // 眼睛反光：200m 内全亮，260m 外淡出
-      fig.setEyeAlpha(clamp01((260 - Math.hypot(m.at - pos, m.lat - lateral)) / 60));
+      // 眼球：200m 内全亮，260m 外淡出；眼神光按到车的距离缩放（回位的背对着车、被甩飞的都不亮）
+      const dist = Math.hypot(m.at - pos, m.lat - lateral);
+      fig.setEyeAlpha(clamp01((260 - dist) / 60), dist, !thrown && m.mode !== 'return');
     }
     for (const [id, it] of this.items) {
       if (seen.has(id)) continue;
@@ -339,6 +405,8 @@ export class Shadow {
     this.group.position.set(p.x, 0, -p.y);
     this.group.rotation.y = Math.PI - p.theta;
     this.fig.pose('run', now / 1000, 6);
+    // 红眼是后视镜里唯一看得见的东西：不管多远都是一小团红光（不随距离淡出，越来越近靠身形变大）
+    this.fig.setEyeAlpha(1, pos - s, true, Infinity);
     const closeness = 1 - Math.min(100, Math.max(0, gap)) / 100;
     this.glow.intensity = 6 + closeness * 26;
   }

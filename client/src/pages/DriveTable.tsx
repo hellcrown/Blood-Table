@@ -705,7 +705,11 @@ export function DriveTable({ view }: { view: DriveView }) {
               <div ref={signRef} className="drv-sign" />
               <div className="drv-warns">
                 {driving && !view.solo && view.drivers === 0 && <div className="drv-warn blink">⚠ 无人驾驶！按 Tab 接管方向盘</div>}
-                {driving && latched > 0 && <div className="drv-warn blink">🚨 被扒车 ×{latched}！开起来才能甩掉</div>}
+                {driving && latched > 0 && (
+                  <div className="drv-warn blink">
+                    🚨 被扒车 ×{latched}！开到 {view.escapeSpeed}km/h 才能甩掉
+                  </div>
+                )}
                 {driving && latched === 0 && hunting > 0 && <div className="drv-warn amber">⚠ 它们冲过来了 ×{hunting}！</div>}
                 {driving && view.iDowned && <div className="drv-warn">🕸 你被拖出了车外 —— 下一个路牌会把你捡回来</div>}
                 {driving && !view.iDowned && winWarn && <div className="drv-warn amber">⚠ 有东西在抓{sideOf(view)}车窗 —— 准备关窗！</div>}
@@ -851,13 +855,15 @@ export function DriveTable({ view }: { view: DriveView }) {
             <div className="tac-help-body">
               <p>
                 <b>别停</b>：车速低于 30km/h 就在喂养车后的「猎影」，后视镜里的红眼越来越近就是它——追上即撞损车尾。车一<b>停稳</b>
-                ，附近的夜行者会被惊动冲过来扒车撕扯，唯一的解法是开起来（到 25km/h 全部甩飞）。加油站必须停车才加得到油，所以每次加油都是一次赌博。
+                ，附近的夜行者会被惊动冲过来扒车撕扯，唯一的解法是开起来——它跑得比慢车还快（起步约 32km/h，过的路牌越多越快），车得开得比它更快才甩得掉。
+                加油站必须停车才加得到油，所以每次加油都是一次赌博。
               </p>
               <p>
                 <b>真弯道</b>：按住 A/← D/→ 转车头，松手车头慢慢回正；弯道会把车往外甩，越快甩得越狠——不打方向就冲出路面，撞护栏扣耐久。
               </p>
               <p>
-                <b>驾驶 / 导航</b>：驾驶员只有挡风玻璃，弯后被树林和黑暗挡住；副驾驶看地图（弯道、路障、夜行者、猎影都在上面），用 1-9 喊话和点地图放标记告诉驾驶员。Tab 切换岗位。
+                <b>驾驶 / 导航</b>：车灯只照清车头前三四十米，再往前是雾，弯后还有树林挡着——驾驶员看不清路，只管开车；副驾驶看地图（弯道、路障、夜行者、猎影都在上面），用
+                1-9 喊话和点地图放标记提前告诉驾驶员。黑暗里只剩反光的眼睛：看得见「有东西」，看不清在哪条道。Tab 切换岗位。
               </p>
               <p>
                 <b>窗户</b>：路肩补给要同侧外侧车道 + 该侧窗开着 + 低于 50km/h 驶过才收得到；但窗爬者会爬开着的窗（灯亮来得更勤），抓挠声是唯一预警。
